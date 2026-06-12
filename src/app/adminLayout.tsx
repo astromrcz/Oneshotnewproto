@@ -14,13 +14,13 @@ const navItems = [
   { to: '/admin/tako',          icon: Bot,             label: 'Tako Bot',            activeColor: 'text-purple-400' },
   { to: '/admin/users',         icon: Users,           label: 'User Management' },
   { to: '/admin/tables',        icon: Table2,          label: 'Table Management' },
-  { to: '/admin/promo-codes',   icon: Tag,             label: 'Promo Codes' },
+  { to: '/admin/events',        icon: CalendarX2,      label: 'Events & Promo Mgr' },
   { to: '/admin/rates',         icon: DollarSign,      label: 'Rates Editor' },
   { to: '/admin/reservation-terms', icon: FileText,    label: 'Reservation Terms' },
   { to: '/admin/announcements', icon: Megaphone,       label: 'Announcements' },
   { to: '/admin/calendar',      icon: CalendarX2,      label: 'Closing Calendar' },
-  { to: '/admin/events',        icon: CalendarX2,      label: 'Events Manager' },
   { to: '/admin/analytics',     icon: BarChart3,       label: 'Analytics' },
+  { to: '/admin/feedback',      icon: Tag,             label: 'Feedback' },
 ];
 
 const pageTitles: Record<string, string> = {
@@ -28,13 +28,13 @@ const pageTitles: Record<string, string> = {
   '/admin/tako': 'Tako Bot',
   '/admin/users': 'User Management',
   '/admin/tables': 'Table Management',
-  '/admin/promo-codes': 'Promo Codes',
+  '/admin/events': 'Events & Promo Manager',
   '/admin/rates': 'Rates Editor',
   '/admin/reservation-terms': 'Reservation Terms',
   '/admin/announcements': 'Announcements',
   '/admin/calendar': 'Closing Calendar',
-  '/admin/events': 'Events Manager',
   '/admin/analytics': 'Analytics',
+  '/admin/feedback': 'Feedback',
 };
 
 export function AdminLayout() {

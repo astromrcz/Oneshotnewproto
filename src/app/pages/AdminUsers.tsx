@@ -1,22 +1,20 @@
 import { useState } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
-import { Plus, X, User, Mail, Phone, ToggleLeft, ToggleRight, RefreshCw, Pencil, CheckCircle, Eye, EyeOff, ShieldCheck, Palette, BadgeDollarSign } from 'lucide-react';
+import { Plus, X, User, Mail, Phone, RefreshCw, Pencil, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
-  { value: 'manager',       label: 'Manager',       color: 'bg-amber-500/10 text-amber-400 border-amber-500/20',   icon: <User size={11} /> },
-  { value: 'tattoo-artist', label: 'Tattoo Artist', color: 'bg-pink-500/10 text-pink-400 border-pink-500/20',     icon: <Palette size={11} /> },
-  { value: 'cashier',       label: 'Cashier',       color: 'bg-violet-500/10 text-violet-400 border-violet-500/20', icon: <BadgeDollarSign size={11} /> },
+  { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
 ];
 
 type FormState = {
   username: string; password: string; fullName: string;
-  email: string; role: StaffUser['role']; isAdmin: boolean; artistId: string; phone: string; isActive: boolean;
+  email: string; role: StaffUser['role']; phone: string; isAdmin: boolean;
 };
-const blankForm: FormState = { username: '', password: '', fullName: '', email: '', role: 'manager', isAdmin: false, artistId: '', phone: '', isActive: true };
+const blankForm: FormState = { username: '', password: '', fullName: '', email: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
-  const { staffUsers, tattooArtists, addStaffUser, updateStaffUser, toggleStaffUserActive, resetStaffUserPassword } = useAppContext();
+  const { staffUsers, addStaffUser, updateStaffUser, resetStaffUserPassword } = useAppContext();
   const [showForm, setShowForm]     = useState(false);
   const [editingId, setEditingId]   = useState<string | null>(null);
   const [form, setForm]             = useState<FormState>(blankForm);
@@ -27,7 +25,7 @@ export function AdminUsers() {
   const openAdd = () => { setEditingId(null); setForm(blankForm); setShowPw(false); setShowForm(true); };
   const openEdit = (u: StaffUser) => {
     setEditingId(u.id);
-    setForm({ username: u.username, password: u.password, fullName: u.fullName, email: u.email, role: u.role, isAdmin: u.isAdmin, artistId: u.artistId ?? '', phone: u.phone, isActive: u.isActive });
+    setForm({ username: u.username, password: u.password, fullName: u.fullName, email: u.email, role: u.role, phone: u.phone, isAdmin: u.isAdmin });
     setShowPw(false); setShowForm(true);
   };
 
@@ -36,7 +34,7 @@ export function AdminUsers() {
     if (!form.username || !form.fullName || !form.email) return;
     const payload: Omit<StaffUser, 'id' | 'createdAt'> = {
       ...form,
-      artistId: form.role === 'tattoo-artist' && form.artistId ? form.artistId : undefined,
+      isActive: true,
     };
     if (editingId) updateStaffUser(editingId, payload);
     else addStaffUser(payload);
@@ -56,12 +54,10 @@ export function AdminUsers() {
   return (
     <div className="space-y-5">
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-2 gap-3">
         {[
-          { label: 'Total Users',     value: staffUsers.length,                                      color: 'text-white' },
-          { label: 'Active',          value: staffUsers.filter(u => u.isActive).length,               color: 'text-emerald-400' },
-          { label: 'Tattoo Artists',  value: staffUsers.filter(u => u.role === 'tattoo-artist').length, color: 'text-pink-400' },
-          { label: 'Admins',          value: staffUsers.filter(u => u.isAdmin).length,                color: 'text-amber-400' },
+          { label: 'Total Users',     value: staffUsers.length,                                    color: 'text-white' },
+          { label: 'Managers',        value: staffUsers.filter(u => u.role === 'manager').length, color: 'text-amber-400' },
         ].map(s => (
           <div key={s.label} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
             <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">{s.label}</p>
@@ -101,11 +97,10 @@ export function AdminUsers() {
           </div>
         ) : filtered.map(u => {
           const rc = roleConfig(u.role);
-          const linkedArtist = u.artistId ? tattooArtists.find(a => a.id === u.artistId) : null;
           return (
-            <div key={u.id} className={`bg-neutral-950 border rounded-xl p-5 transition-colors ${u.isActive ? 'border-neutral-800' : 'border-neutral-800/50 opacity-60'}`}>
+            <div key={u.id} className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 transition-colors hover:border-neutral-700">
               <div className="flex items-start gap-4">
-                <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-base font-black flex-shrink-0 border ${u.isAdmin ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : u.role === 'tattoo-artist' ? 'bg-pink-500/10 border-pink-500/20 text-pink-400' : 'bg-neutral-800 border-neutral-700 text-neutral-300'}`}>
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-base font-black flex-shrink-0 border bg-neutral-800 border-neutral-700 text-neutral-300`}>
                   {u.fullName.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -113,31 +108,22 @@ export function AdminUsers() {
                     <p className="text-sm font-bold text-neutral-100">{u.fullName}</p>
                     {u.isAdmin && (
                       <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        <ShieldCheck size={9} /> Admin
+                        Admin
                       </span>
                     )}
                     <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${rc.color}`}>
                       {rc.icon} {rc.label}
                     </span>
-                    {!u.isActive && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-500 border border-neutral-700">Inactive</span>}
                   </div>
                   <div className="flex items-center gap-4 text-xs text-neutral-500 flex-wrap">
                     <span className="flex items-center gap-1"><User size={10} /> @{u.username}</span>
                     <span className="flex items-center gap-1"><Mail size={10} /> {u.email}</span>
                     {u.phone && <span className="flex items-center gap-1"><Phone size={10} /> {u.phone}</span>}
                   </div>
-                  {linkedArtist && (
-                    <p className="text-[10px] text-pink-400/70 mt-0.5 flex items-center gap-1">
-                      <Palette size={9} /> Linked: {linkedArtist.name} ({linkedArtist.specialty})
-                    </p>
-                  )}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button onClick={() => openEdit(u)} className="p-2 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"><Pencil size={14} /></button>
                   <button onClick={() => handleReset(u.id, u.fullName)} className="p-2 rounded-lg text-neutral-500 hover:text-amber-400 hover:bg-amber-950/20 transition-colors"><RefreshCw size={14} /></button>
-                  <button onClick={() => toggleStaffUserActive(u.id)} className="p-2 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors">
-                    {u.isActive ? <ToggleRight size={18} className="text-emerald-400" /> : <ToggleLeft size={18} />}
-                  </button>
                 </div>
               </div>
             </div>
@@ -197,57 +183,39 @@ export function AdminUsers() {
               {/* Role selector */}
               <div>
                 <label className="text-xs text-neutral-400 mb-2 block font-medium">Role *</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {ROLES.map(r => (
-                    <button key={r.value} type="button" onClick={() => setForm(f => ({ ...f, role: r.value }))}
-                      className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${form.role === r.value ? r.color : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}>
-                      {r.icon}
-                      {r.label}
-                    </button>
-                  ))}
+                <div className="flex flex-col gap-2">
+                  {ROLES.map(r => {
+                    const isSelected = form.role === r.value;
+                    return (
+                      <button
+                        key={r.value}
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, role: r.value }))}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-semibold transition-all duration-200 ${
+                          isSelected
+                            ? `${r.color} ring-1 ring-amber-500/50 shadow-sm`
+                            : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
+                        }`}
+                      >
+                        <div className={`flex items-center justify-center w-8 h-8 rounded-lg ${
+                          isSelected ? 'bg-amber-500/20 text-amber-400' : 'bg-neutral-800 text-neutral-400'
+                        }`}>
+                          {r.icon}
+                        </div>
+                        <span className="flex-1 text-left">{r.label}</span>
+                        {isSelected && <CheckCircle size={16} />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Artist linkage (visible only for tattoo-artist role) */}
-              {form.role === 'tattoo-artist' && (
-                <div className="bg-pink-950/20 border border-pink-900/30 rounded-xl p-3">
-                  <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Link to Artist Profile</label>
-                  <select value={form.artistId} onChange={e => setForm(f => ({ ...f, artistId: e.target.value }))}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-300 focus:outline-none focus:border-pink-600/50 appearance-none">
-                    <option value="">— No link —</option>
-                    {tattooArtists.filter(a => a.isActive).map(a => (
-                      <option key={a.id} value={a.id}>{a.name} ({a.specialty})</option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] text-neutral-600 mt-1.5">This artist will log in at /artist/login</p>
-                </div>
-              )}
-
-              {/* Admin toggle */}
-              <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div className="flex items-center gap-2.5">
-                    <ShieldCheck size={16} className={form.isAdmin ? 'text-amber-400' : 'text-neutral-600'} />
-                    <div>
-                      <p className="text-sm font-semibold text-neutral-200">Admin Access</p>
-                      <p className="text-[11px] text-neutral-500">Can access the Admin Portal</p>
-                    </div>
-                  </div>
-                  <div className={`w-11 h-6 rounded-full relative transition-colors flex-shrink-0 ${form.isAdmin ? 'bg-amber-600' : 'bg-neutral-700'}`}
-                    onClick={() => setForm(f => ({ ...f, isAdmin: !f.isAdmin }))}>
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.isAdmin ? 'translate-x-5' : 'translate-x-1'}`} />
-                  </div>
-                </label>
+              {/* Admin privileges */}
+              <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl p-3">
+                <input type="checkbox" id="adminCheckbox" checked={form.isAdmin} onChange={e => setForm(f => ({ ...f, isAdmin: e.target.checked }))}
+                  className="w-4 h-4 rounded border-neutral-700 bg-neutral-900 cursor-pointer" />
+                <label htmlFor="adminCheckbox" className="text-xs text-neutral-300 font-medium cursor-pointer flex-1">Grant Admin Privileges</label>
               </div>
-
-              {/* Active toggle */}
-              <label className="flex items-center gap-3 cursor-pointer">
-                <div className={`w-10 h-5 rounded-full transition-colors relative ${form.isActive ? 'bg-emerald-600' : 'bg-neutral-700'}`}
-                  onClick={() => setForm(f => ({ ...f, isActive: !f.isActive }))}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${form.isActive ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                </div>
-                <span className="text-xs text-neutral-400">Account Active</span>
-              </label>
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)}

@@ -10,21 +10,19 @@ import { Tables } from './pages/Tables';
 import { Reservations } from './pages/Reservations';
 import { Queue } from './pages/Queue';
 import { ActivityLog } from './pages/ActivityLog';
-import { FeedbackPage } from './pages/Feedback';
 import { PromoCodesPage } from './pages/PromoCodes';
 import { SettingsPage } from './pages/Settings';
-import { ShiftSummary } from './pages/ShiftSummary';
 // Admin pages
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminUsers } from './pages/AdminUsers';
 import { AdminTableManagement } from './pages/AdminTableManagement';
-import { AdminPromoCodes } from './pages/AdminPromoCodes';
 import { AdminRates } from './pages/AdminRates';
 import { AdminReservationTerms } from './pages/AdminReservationTerms';
 import { AdminAnnouncements } from './pages/AdminAnnouncements';
 import { AdminCalendar } from './pages/AdminCalendar';
 import { AdminEvents } from './pages/AdminEvents';
 import { Analytics } from './pages/Analytics';
+import { FeedbackPage } from './pages/Feedback';
 import { TakoBot } from './pages/TakoBot';
 import { NotFound } from './pages/NotFound';
 
@@ -44,8 +42,6 @@ export const router = createBrowserRouter([
           { path: 'reservations',         Component: Reservations },
           { path: 'queue',                Component: Queue },
           { path: 'activity',             Component: ActivityLog },
-          { path: 'shift-summary',        Component: ShiftSummary },
-          { path: 'feedback',             Component: FeedbackPage },
           { path: 'promo-codes',          Component: PromoCodesPage },
           { path: 'settings',             Component: SettingsPage },
         ],
@@ -58,13 +54,13 @@ export const router = createBrowserRouter([
           { index: true,                    Component: AdminDashboard },
           { path: 'users',                  Component: AdminUsers },
           { path: 'tables',                 Component: AdminTableManagement },
-          { path: 'promo-codes',            Component: AdminPromoCodes },
           { path: 'rates',                  Component: AdminRates },
           { path: 'reservation-terms',      Component: AdminReservationTerms },
           { path: 'announcements',          Component: AdminAnnouncements },
           { path: 'calendar',               Component: AdminCalendar },
           { path: 'events',                 Component: AdminEvents },
           { path: 'analytics',              Component: Analytics },
+          { path: 'feedback',               Component: FeedbackPage },
           { path: 'tako',                   Component: TakoBot },
         ],
       },

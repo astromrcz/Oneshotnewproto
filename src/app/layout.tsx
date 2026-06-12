@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   CheckCircle, Clock, Calendar, UserPlus,
-  Star, Tag, Shield, Palette,
+  Tag, Shield, Palette,
   Menu, X, Bell, ChevronRight,
   Circle, LogOut, Settings,
-  Monitor, ShieldCheck, TrendingUp
+  Monitor, ShieldCheck
 } from 'lucide-react';
 import { useAppContext } from './context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
@@ -17,8 +17,6 @@ const navItems = [
   { to: '/staff/queue',               icon: UserPlus,    label: 'Queue' },
   { to: '/staff/promo-codes',         icon: Tag,         label: 'Promo Codes' },
   { to: '/staff/activity',            icon: Shield,      label: 'Activity Log' },
-  { to: '/staff/shift-summary',      icon: TrendingUp,  label: 'Shift Summary' },
-  { to: '/staff/feedback',            icon: Star,        label: 'Feedback' },
   { to: '/staff/settings',            icon: Settings,    label: 'Settings' },
 ];
 
@@ -29,8 +27,6 @@ const pageTitles: Record<string, string> = {
   '/staff/queue': 'Queue Management',
   '/staff/promo-codes': 'Promo Codes',
   '/staff/activity': 'Activity Log',
-  '/staff/shift-summary': 'Shift Summary',
-  '/staff/feedback': 'Customer Feedback',
   '/staff/settings': 'Settings',
 };
 

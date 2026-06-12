@@ -1275,28 +1275,6 @@ export function HomePage() {
                 </div>
               </div>
 
-              {/* Facilities */}
-              <div className="mb-12">
-                <h3 className="text-center text-xl font-bold text-white mb-6">Our Facilities</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {[
-                    { icon: '🎱', title: '10 Tables', desc: 'Tournament-grade billiard tables' },
-                    { icon: '🍺', title: 'Bar Counter', desc: 'Drinks & light snacks available' },
-                    { icon: '📡', title: 'Free WiFi', desc: 'High-speed internet connection' },
-                    { icon: '🎵', title: 'Music System', desc: 'Great ambiance & sound system' },
-                    { icon: '📷', title: 'CCTV', desc: '24/7 security surveillance' },
-                    { icon: '🚗', title: 'Parking', desc: 'Limited parking available' },
-                    { icon: '🏆', title: 'Tournament', desc: 'Monthly pool tournaments' },
-                    { icon: '👟', title: 'Lounge Area', desc: 'Comfortable waiting & spectator zone' },
-                  ].map(({ icon, title, desc }) => (
-                    <div key={title} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 text-center hover:border-neutral-700 transition-colors">
-                      <div className="text-2xl mb-2">{icon}</div>
-                      <p className="text-white text-xs font-semibold mb-1">{title}</p>
-                      <p className="text-neutral-600 text-[10px] leading-tight">{desc}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
               {/* ── Contact & Socials ── */}
               <div className="border-t border-neutral-800 pt-10">

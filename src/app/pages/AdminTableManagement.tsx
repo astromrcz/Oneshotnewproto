@@ -18,6 +18,7 @@ export function AdminTableManagement() {
   const { tables, addTable, updateTable, toggleTableActive, setTableMaintenance, freeTable } = useAppContext();
 
   const [newName, setNewName]         = useState('');
+  const [newDescription, setNewDescription] = useState('');
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [editName, setEditName]       = useState('');
   const [toast, setToast]             = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -41,11 +42,15 @@ export function AdminTableManagement() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const [showAddForm, setShowAddForm] = useState(false);
+
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
-    addTable(newName.trim());
+    addTable(newName.trim(), newDescription.trim());
     setNewName('');
+    setNewDescription('');
+    setShowAddForm(false);
     flash(`Table "${newName.trim()}" added!`);
   };
 
@@ -135,22 +140,62 @@ export function AdminTableManagement() {
       </div>
 
       {/* Add Table */}
-      <div className="bg-neutral-950 border border-amber-900/30 rounded-xl p-5">
-        <h3 className="text-sm font-bold text-neutral-200 mb-4 flex items-center gap-2">
-          <Plus size={15} className="text-amber-400" /> Add New Table
-        </h3>
-        <form onSubmit={handleAdd} className="flex gap-3">
-          <input
-            type="text" value={newName}
-            onChange={e => setNewName(e.target.value)}
-            placeholder="e.g. Table 11 or VIP Table A"
-            className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
-          />
-          <button type="submit" disabled={!newName.trim()}
-            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all">
-            <Plus size={14} /> Add
+      <div className="bg-neutral-950 border border-amber-900/30 rounded-xl overflow-hidden">
+        {!showAddForm ? (
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="w-full px-5 py-4 flex items-center gap-2 text-amber-400 hover:text-amber-300 hover:bg-amber-950/20 transition-colors font-semibold text-sm"
+          >
+            <Plus size={16} /> Add New Table
           </button>
-        </form>
+        ) : (
+          <div className="p-5">
+            <h3 className="text-sm font-bold text-neutral-200 mb-4">New Table</h3>
+            <form onSubmit={handleAdd} className="space-y-4">
+              <div>
+                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Table Name *</label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  placeholder="e.g. Table 11, VIP Table A"
+                  autoFocus
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Description</label>
+                <input
+                  type="text"
+                  value={newDescription}
+                  onChange={e => setNewDescription(e.target.value)}
+                  placeholder="e.g. Corner table, High-top, VIP section"
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setNewName('');
+                    setNewDescription('');
+                  }}
+                  className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-sm font-semibold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newName.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                >
+                  <Plus size={14} /> Add Table
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
 
       {/* Table List */}

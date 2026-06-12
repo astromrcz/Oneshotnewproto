@@ -14,17 +14,22 @@ export function AdminRates() {
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const NumField = ({ label, field, unit, min, max, step, hint }: {
-    label: string; field: keyof typeof form; unit?: string; min: number; max: number; step?: number; hint?: string;
+  const NumField = ({ label, field, unit, hint }: {
+    label: string; field: keyof typeof form; unit?: string; hint?: string;
   }) => (
     <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
       <label className="block text-xs text-neutral-400 font-medium uppercase tracking-wider mb-3">{label}</label>
       <div className="flex items-center gap-3">
         {unit && <span className="text-neutral-500 text-sm font-semibold">{unit}</span>}
         <input
-          type="number" value={form[field] as number}
-          onChange={e => setForm(f => ({ ...f, [field]: parseFloat(e.target.value) || 0 }))}
-          min={min} max={max} step={step || 1}
+          type="text"
+          inputMode="numeric"
+          value={form[field] === 0 ? '' : form[field] as number}
+          onChange={e => {
+            const val = e.target.value.replace(/[^0-9]/g, '');
+            setForm(f => ({ ...f, [field]: val ? parseInt(val, 10) : 0 }));
+          }}
+          placeholder="0"
           className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
         />
       </div>
@@ -72,9 +77,9 @@ export function AdminRates() {
             <DollarSign size={12} className="text-amber-500" /> Table Rental Rates
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <NumField label="Standard Hourly Rate" field="hourlyRate" unit="₱" min={50} max={2000} step={25} hint="Applied to all regular table sessions" />
-            <NumField label="Happy Hour Rate" field="happyHourRate" unit="₱" min={50} max={2000} step={25} hint="Applied during happy hour window (walk-in only)" />
-            <NumField label="Overtime Rate" field="overtimeRate" unit="₱" min={50} max={2000} step={25} hint="Charged per hour beyond booked duration" />
+            <NumField label="Standard Hourly Rate" field="hourlyRate" unit="₱" hint="Applied to all regular table sessions" />
+            <NumField label="Happy Hour Rate" field="happyHourRate" unit="₱" hint="Applied during happy hour window (walk-in only)" />
+            <NumField label="Overtime Rate" field="overtimeRate" unit="₱" hint="Charged per hour beyond booked duration" />
           </div>
         </div>
 
@@ -97,7 +102,7 @@ export function AdminRates() {
         <div>
           <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Bookings & Deposits</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <NumField label="Reservation Down Payment %" field="downPaymentPercent" min={10} max={100} step={5} hint="Percentage of total reservation amount required upfront" />
+            <NumField label="Reservation Down Payment %" field="downPaymentPercent" hint="Percentage of total reservation amount required upfront" />
           </div>
         </div>
 

@@ -40,6 +40,23 @@ export function Queue() {
     setShowAddForm(false);
   };
 
+  const handleCallCustomer = (customerId: string, customerName: string) => {
+    callQueueItem(customerId);
+    
+    // Voice generation using Web Speech API
+    if ('speechSynthesis' in window) {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(`${customerName}, your table is ready. Please proceed to the counter.`);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header Actions */}
@@ -253,7 +270,7 @@ export function Queue() {
                   {/* Actions */}
                   <div className="flex items-center gap-2 flex-none">
                     <button
-                      onClick={() => callQueueItem(item.id)}
+                      onClick={() => handleCallCustomer(item.id, item.customerName)}
                       title="Call customer"
                       className="p-2 bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 rounded-lg transition-colors border border-amber-700/30"
                     >

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus } from '../context/AppContext';
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
-  XCircle, Search, Filter, DollarSign, AlertTriangle, Download
+  XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast } from 'date-fns';
 
@@ -348,6 +348,27 @@ export function Reservations() {
                       </button>
                     </div>
                   </div>
+                  
+                  {/* GCash Reference & Receipt Display */}
+                  {(selected as any).paymentRef && (
+                    <div className="flex justify-between items-center text-sm border-t border-neutral-800 pt-2 mt-2">
+                      <span className="text-neutral-400">GCash Ref No.</span>
+                      <span className="text-neutral-200 font-mono text-xs">{String((selected as any).paymentRef)}</span>
+                    </div>
+                  )}
+                  {(selected as any).receiptImg && (
+                    <div className="mt-2 pt-2 border-t border-neutral-800">
+                      <a 
+                        href={String((selected as any).receiptImg)} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="flex items-center justify-center gap-2 text-xs bg-neutral-800 hover:bg-neutral-700 text-blue-400 py-2.5 rounded-lg transition-colors border border-neutral-700"
+                      >
+                        <ImageIcon size={14} /> View Uploaded GCash Receipt
+                      </a>
+                    </div>
+                  )}
+
                   <div className="flex justify-between items-center text-sm border-t border-neutral-800 pt-2">
                     <span className="text-neutral-400">Balance</span>
                     <div className="flex items-center gap-2">

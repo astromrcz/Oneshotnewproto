@@ -6,7 +6,8 @@ import {
   ChevronLeft, ChevronRight, X, Star, Phone, MapPin,
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown, ChevronUp,
-  Megaphone, Info, Shield, Award, Mail, Tag, BookOpen
+  Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
+  MessageSquare, X as CloseIcon, Bot, Upload
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, generateReferralCode } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -67,8 +68,6 @@ const QR_GCASH = [
   [0,0,0,0,1,0,0,1,0,0,1,0,0,1,0,1,0],
   [1,0,1,1,0,1,1,0,1,0,0,1,0,0,1,0,1],
 ];
-
-
 
 function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
   return (
@@ -226,7 +225,8 @@ export function HomePage() {
   // Hero slideshow
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
-
+  const [isOpenTakoBot, setIsOpenTakoBot] = useState(false);
+  
   // Live clock for table timers
   const [now, setNow] = useState(new Date());
 
@@ -254,8 +254,14 @@ export function HomePage() {
   const [resForm, setResForm] = useState({
     name: '', email: '', phone: '', pax: 2, timeSlot: '18:00', duration: 2,
   });
+  
   const [paymentMethod, setPaymentMethod] = useState<'gcash'>('gcash');
   const [confirmingPayment, setConfirmingPayment] = useState(false);
+  
+  // GCash Receipt State
+  const [paymentRef, setPaymentRef] = useState('');
+  const [receiptImg, setReceiptImg] = useState<string | null>(null);
+
   // Promo code state
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPercent: number } | null>(null);
@@ -382,7 +388,9 @@ export function HomePage() {
         balancePaid: false,
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
-      });
+        paymentRef: paymentRef,
+        receiptImg: receiptImg,
+      } as any);
 
       setConfirmingPayment(false);
       setReservationStep(3);
@@ -397,6 +405,8 @@ export function HomePage() {
     setPromoCodeInput('');
     setAppliedPromo(null);
     setPromoError('');
+    setPaymentRef('');
+    setReceiptImg(null);
   };
 
   const handleFeedbackSubmit = () => {
@@ -1275,7 +1285,6 @@ export function HomePage() {
                 </div>
               </div>
 
-
               {/* ── Contact & Socials ── */}
               <div className="border-t border-neutral-800 pt-10">
                 <div className="text-center mb-8">
@@ -1328,7 +1337,6 @@ export function HomePage() {
               </div>
             </motion.div>
           )}
-
 
           {/* ════ FEEDBACK / REVIEWS SECTION ════ */}
           {activeSection === 'reviews' && (
@@ -1999,7 +2007,7 @@ export function HomePage() {
                   <span className="text-sm font-semibold text-blue-300">GCash Down Payment</span>
                 </div>
 
-                {/* QR Code */}
+                {/* QR Code & Upload */}
                 <div className="flex flex-col items-center gap-4">
                   <div className="flex flex-col items-center gap-2">
                     <QRDisplay
@@ -2017,12 +2025,51 @@ export function HomePage() {
                     <p className="text-xs text-neutral-500">Scan the QR code using your GCash app</p>
                     <p className="text-xs text-neutral-600 mt-0.5">Send exactly <span className="text-amber-400 font-semibold">₱{downPayment}.00</span></p>
                   </div>
+
+                  {/* Upload Receipt & Ref No */}
+                  <div className="w-full space-y-3 mt-2 text-left">
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1.5">GCash Reference Number <span className="text-rose-500">*</span></label>
+                      <input 
+                        type="text" 
+                        value={paymentRef}
+                        onChange={e => setPaymentRef(e.target.value.replace(/\D/g, '').slice(0, 13))}
+                        placeholder="13-digit reference no."
+                        className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1.5">Upload Receipt Screenshot <span className="text-rose-500">*</span></label>
+                      <div className="flex items-center gap-3">
+                        <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 hover:border-blue-500 rounded-lg px-3 py-3 text-center transition-colors flex flex-col items-center justify-center gap-1">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file) setReceiptImg(URL.createObjectURL(file));
+                            }} 
+                          />
+                          <Upload size={14} className="text-neutral-500" />
+                          <span className="text-[10px] text-neutral-400">
+                            {receiptImg ? 'Change Image' : 'Tap to upload'}
+                          </span>
+                        </label>
+                        {receiptImg && (
+                          <div className="w-14 h-14 rounded-lg border border-neutral-700 overflow-hidden flex-shrink-0 bg-neutral-900">
+                            <img src={receiptImg} alt="Receipt" className="w-full h-full object-cover" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <button
                   onClick={handlePaymentConfirm}
-                  disabled={confirmingPayment}
-                  className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                  disabled={confirmingPayment || !paymentRef || paymentRef.length < 13 || !receiptImg}
+                  className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
                 >
                   {confirmingPayment ? (
                     <>
@@ -2212,6 +2259,60 @@ export function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ════ TAKO BOT FRONT-END WIDGET ════ */}
+      <div className="fixed bottom-6 left-6 z-[100] flex flex-col items-start">
+        <AnimatePresence>
+          {/* The Chat Window */}
+          {isOpenTakoBot && (
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.9 }}
+              className="mb-4 bg-neutral-950 border border-emerald-900/50 rounded-2xl w-72 h-80 shadow-2xl shadow-emerald-900/20 flex flex-col overflow-hidden"
+            >
+              <div className="bg-emerald-800 p-3 flex justify-between items-center">
+                <div className="flex items-center gap-2 text-white">
+                  <Bot size={18} />
+                  <span className="font-bold text-sm">Tako bot Support</span>
+                </div>
+                <button onClick={() => setIsOpenTakoBot(false)} className="text-emerald-200 hover:text-white">
+                  <CloseIcon size={16} />
+                </button>
+              </div>
+              
+              <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-neutral-900 text-xs">
+                <div className="bg-neutral-800 text-neutral-200 p-3 rounded-xl rounded-tl-none border border-neutral-700">
+                  Hi! I'm Tako bot. I can help you with operating hours, rates, and basic reservations. What do you need?
+                </div>
+                {/* Example user message for prototype */}
+                <div className="flex justify-end">
+                  <div className="bg-emerald-600 text-white p-3 rounded-xl rounded-tr-none">
+                    How much are VIP tables?
+                  </div>
+                </div>
+                {/* Example AI response */}
+                <div className="bg-neutral-800 text-neutral-200 p-3 rounded-xl rounded-tl-none border border-neutral-700">
+                  VIP tables are ₱200/hour. If you are a recognized regular customer, the management discounts it to ₱150/hour!
+                </div>
+              </div>
+              
+              <div className="p-2 border-t border-neutral-800 bg-neutral-950">
+                <input type="text" placeholder="Type a message..." className="w-full bg-neutral-900 text-white text-xs px-3 py-2 rounded-lg border border-neutral-700 focus:outline-none focus:border-emerald-500" />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* The Floating Bubble Button */}
+        <button
+          onClick={() => setIsOpenTakoBot(p => !p)}
+          className="w-12 h-12 bg-emerald-600 rounded-full flex items-center justify-center text-white shadow-lg shadow-emerald-900/50 hover:bg-emerald-500 transition-colors"
+        >
+          {isOpenTakoBot ? <CloseIcon size={20} /> : <MessageSquare size={20} />}
+        </button>
+      </div>
+            
     </div>
   );
 }

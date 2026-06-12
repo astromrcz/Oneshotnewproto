@@ -354,52 +354,9 @@ export function SettingsPage() {
             </div>
           </div>
 
-          {/* Session Actions */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
-            <h3 className="text-sm font-bold text-neutral-100 mb-4">Session</h3>
-            <div className="bg-rose-950/20 border border-rose-800/30 rounded-xl p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-neutral-200">Sign Out</p>
-                  <p className="text-xs text-neutral-500 mt-0.5">Logs you out of the staff portal and returns to the login page.</p>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-2 px-4 py-2 bg-rose-800/30 hover:bg-rose-700/40 border border-rose-700/40 text-rose-400 text-sm font-semibold rounded-xl transition-colors flex-shrink-0"
-                >
-                  <LogOut size={14} />
-                  Log Out
-                </button>
-              </div>
-            </div>
-          </div>
+          
 
-          {/* System Info */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
-            <h3 className="text-sm font-bold text-neutral-100 mb-4">System Info</h3>
-            <div className="space-y-2 text-xs text-neutral-500">
-              <div className="flex justify-between">
-                <span>System</span>
-                <span className="text-neutral-400">One Shot Bar & Billiards Management System</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Version</span>
-                <span className="text-neutral-400">1.0.0</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Base Rate</span>
-                <span className="text-neutral-400">₱250/hr</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Location</span>
-                <span className="text-neutral-400">Autobase OAX, San Juan, Cainta, Rizal</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Hours</span>
-                <span className="text-neutral-400">Mon–Sat 12PM–3AM · Sun 5PM–3AM</span>
-              </div>
-            </div>
-          </div>
+          
         </div>
       )}
     </div>

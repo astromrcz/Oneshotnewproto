@@ -50,28 +50,46 @@ export function AdminReservationTerms() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               {[
-                { label: 'Minimum Hours', field: 'minHours' as const, min: 1, max: 12 },
-                { label: 'Maximum Hours', field: 'maxHours' as const, min: 1, max: 24 },
-                { label: 'Min Party Size', field: 'minPartySize' as const, min: 1, max: 10 },
-                { label: 'Max Party Size', field: 'maxPartySize' as const, min: 1, max: 50 },
+                { label: 'Minimum Hours', field: 'minHours' as const },
+                { label: 'Maximum Hours', field: 'maxHours' as const },
+                { label: 'Min Party Size', field: 'minPartySize' as const },
+                { label: 'Max Party Size', field: 'maxPartySize' as const },
               ].map(f => (
                 <div key={f.field} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
                   <label className="text-xs text-neutral-400 uppercase tracking-wider font-medium block mb-2">{f.label}</label>
-                  <input type="number" value={form[f.field]} min={f.min} max={f.max}
-                    onChange={e => setForm(prev => ({ ...prev, [f.field]: parseInt(e.target.value) || f.min }))}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" />
-                  <p className="text-lg font-black text-amber-400 mt-2">{form[f.field]}</p>
+                  <input 
+                    type="text" 
+                    inputMode="numeric"
+                    value={form[f.field] === 0 ? '' : form[f.field]}
+                    onChange={e => {
+                      const val = e.target.value.replace(/[^0-9]/g, '');
+                      setForm(prev => ({ ...prev, [f.field]: val ? parseInt(val, 10) : 0 }));
+                    }}
+                    placeholder="0"
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" 
+                  />
                 </div>
               ))}
             </div>
+            
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
               <label className="text-xs text-neutral-400 uppercase tracking-wider font-medium block mb-2">
-                Cancellation Notice (hours)
+                Cancellation Refund Validity (hours)
               </label>
-              <input type="number" value={form.cancellationHours} min={1} max={168}
-                onChange={e => setForm(prev => ({ ...prev, cancellationHours: parseInt(e.target.value) || 1 }))}
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" />
-              <p className="text-[11px] text-neutral-600 mt-2">Customers must cancel at least {form.cancellationHours} hours before their reservation.</p>
+              <input 
+                type="text" 
+                inputMode="numeric"
+                value={form.cancellationHours === 0 ? '' : form.cancellationHours}
+                onChange={e => {
+                  const val = e.target.value.replace(/[^0-9]/g, '');
+                  setForm(prev => ({ ...prev, cancellationHours: val ? parseInt(val, 10) : 0 }));
+                }}
+                placeholder="0"
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" 
+              />
+              <p className="text-[11px] text-neutral-600 mt-2">
+                Customers can cancel their reservation at any time, but down payments are only refundable if canceled at least <strong>{form.cancellationHours} hours</strong> before the scheduled time.
+              </p>
             </div>
 
             {/* Preview */}
@@ -88,7 +106,7 @@ export function AdminReservationTerms() {
                 </div>
                 <div className="bg-neutral-900 rounded-lg p-2 text-center">
                   <p className="text-amber-400 font-black">{form.cancellationHours}hrs</p>
-                  <p className="text-neutral-600">Cancel window</p>
+                  <p className="text-neutral-600">Refund window</p>
                 </div>
               </div>
             </div>
@@ -99,7 +117,7 @@ export function AdminReservationTerms() {
         {activeTab === 'policy' && (
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
             <label className="text-xs text-neutral-400 uppercase tracking-wider font-medium block mb-3">
-              Cancellation Policy Text
+              Cancellation & Refund Policy Text
             </label>
             <textarea
               value={form.cancellationPolicy}
@@ -108,7 +126,7 @@ export function AdminReservationTerms() {
               className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors resize-none"
               placeholder="Describe the cancellation policy..."
             />
-            <p className="text-[10px] text-neutral-600 mt-2">This text is shown in the reservation summary and confirmation emails.</p>
+            <p className="text-[10px] text-neutral-600 mt-2">This text is shown in the reservation summary and confirmation emails to explain the refund forfeiture rules.</p>
           </div>
         )}
 

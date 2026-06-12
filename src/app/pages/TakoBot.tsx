@@ -1,13 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bot, Send, Lightbulb, CalendarDays, TrendingUp, Sparkles } from 'lucide-react';
-
+import { Bot, Send, Lightbulb, CalendarDays, TrendingUp, Sparkles, Megaphone, CheckCircle } from 'lucide-react';
+import { useAppContext } from '../context/AppContext'; // Import context!
+const { activeAnnouncement, updateActiveAnnouncement } = useAppContext();
 export function TakoBot() {
+  const { activeAnnouncement, updateAnnouncement } = useAppContext();
+  
   const [messages, setMessages] = useState([
-    { role: 'ai', text: "Hello Boss! I'm Tako bot, your AI Manager. I've analyzed this week's data. Tuesdays are looking a bit slow. How can I help you today?" }
+    { role: 'ai', text: "Hello Boss! I'm Tako bot. I'm monitoring the queue and tables. How can I help you today?" }
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Broadcast State
+  const [draftMsg, setDraftMsg] = useState('');
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [broadcastSuccess, setBroadcastSuccess] = useState(false);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -18,20 +26,28 @@ export function TakoBot() {
     e.preventDefault();
     if (!input.trim()) return;
 
-    // Add user message
     setMessages(prev => [...prev, { role: 'user', text: input }]);
     setInput('');
     setIsTyping(true);
 
-    // Mock AI Response delay for prototype
     setTimeout(() => {
       setIsTyping(false);
       setMessages(prev => [...prev, { 
         role: 'ai', 
-        text: "Based on our history, running a 'Buy 2 Hours, Get 1 Free' promo specifically for university students on Tuesdays increases revenue by 18%. Would you like me to generate a promo code for this?" 
+        text: "Based on our history, running a 'Buy 2 Hours, Get 1 Free' promo specifically for university students on Tuesdays increases revenue by 18%. Would you like me to draft an announcement for this?" 
       }]);
     }, 1500);
   };
+
+  // AI Broadcast Function
+  const handleSmartBroadcast = () => {
+    if (!draftMsg.trim()) return;
+    setIsBroadcasting(true);
+
+    // Simulate AI "Enhancing" the basic text into a catchy announcement
+    setTimeout(() => {
+      const aiEnhancedMessage = `✨ ${draftMsg} Come join the fun at One Shot! 🎱🍻`;
+      updateActiveAnnouncement(aiEnhancedMessage); // <--- Make sure this matches!
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -43,14 +59,53 @@ export function TakoBot() {
         </div>
         <div>
           <h2 className="text-2xl font-black text-white">Tako bot Assistant</h2>
-          <p className="text-sm text-neutral-400">Your AI-Powered Decision Support System</p>
+          <p className="text-sm text-neutral-400">Your AI-Powered Manager & Broadcaster</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* LEFT COLUMN: AI Suggestions */}
+        {/* LEFT COLUMN: AI Suggestions & Broadcast */}
         <div className="space-y-4">
+          
+          {/* 🔴 NEW: AI Broadcast Manager */}
+          <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-2xl p-5 mb-6 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10" />
+            <div className="relative z-10">
+              <div className="flex items-center gap-2 mb-3">
+                <Megaphone size={16} className="text-emerald-400" />
+                <h4 className="text-white font-bold text-sm">Smart Broadcast</h4>
+              </div>
+              
+              <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 mb-3">
+                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-1">Live on Website Now:</p>
+                <p className="text-xs text-emerald-300 leading-relaxed">"{activeAnnouncement}"</p>
+              </div>
+
+              <textarea 
+                value={draftMsg}
+                onChange={e => setDraftMsg(e.target.value)}
+                placeholder="Type a basic message (e.g., 'happy hour tonight'). Tako will enhance it..."
+                rows={2}
+                className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none mb-2"
+              />
+              
+              <button 
+                onClick={handleSmartBroadcast}
+                disabled={!draftMsg.trim() || isBroadcasting}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-2"
+              >
+                {isBroadcasting ? (
+                  <><Sparkles size={12} className="animate-pulse" /> Enhancing & Publishing...</>
+                ) : broadcastSuccess ? (
+                  <><CheckCircle size={12} /> Published!</>
+                ) : (
+                  <><Sparkles size={12} /> AI Enhance & Publish</>
+                )}
+              </button>
+            </div>
+          </div>
+
           <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-2">Automated Insights</h3>
           
           {/* Card 1: Marketing */}
@@ -62,26 +117,9 @@ export function TakoBot() {
             <p className="text-xs text-neutral-400 leading-relaxed">
               Launch a "Spooky Shots" Halloween tournament. Est. revenue impact: <span className="text-emerald-400 font-semibold">+₱15,000</span>.
             </p>
-            <button className="mt-3 text-[10px] bg-neutral-900 text-neutral-300 px-3 py-1.5 rounded-lg group-hover:bg-amber-500/20 group-hover:text-amber-400 transition-colors">
-              Discuss this with Tako
-            </button>
           </div>
 
-          {/* Card 2: Promos/Calendar */}
-          <div className="bg-neutral-950 border border-neutral-800 hover:border-sky-500/30 transition-colors rounded-xl p-5 group cursor-pointer">
-            <div className="flex items-center gap-3 mb-3">
-              <CalendarDays size={18} className="text-sky-400" />
-              <h4 className="text-white font-bold text-sm">Calendar & Promos</h4>
-            </div>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Next month is the establishment's anniversary. Consider a week-long 20% discount on VIP tables.
-            </p>
-            <button className="mt-3 text-[10px] bg-neutral-900 text-neutral-300 px-3 py-1.5 rounded-lg group-hover:bg-sky-500/20 group-hover:text-sky-400 transition-colors">
-              Draft calendar schedule
-            </button>
-          </div>
-
-          {/* Card 3: Earnings */}
+          {/* Card 2: Earnings */}
           <div className="bg-neutral-950 border border-neutral-800 hover:border-emerald-500/30 transition-colors rounded-xl p-5 group cursor-pointer">
             <div className="flex items-center gap-3 mb-3">
               <TrendingUp size={18} className="text-emerald-400" />
@@ -90,15 +128,11 @@ export function TakoBot() {
             <p className="text-xs text-neutral-400 leading-relaxed">
               Weekend walk-ins are up 12%, but weekday online reservations dropped 5%.
             </p>
-            <button className="mt-3 text-[10px] bg-neutral-900 text-neutral-300 px-3 py-1.5 rounded-lg group-hover:bg-emerald-500/20 group-hover:text-emerald-400 transition-colors">
-              Analyze weak points
-            </button>
           </div>
         </div>
 
         {/* RIGHT COLUMN: Chat Interface */}
         <div className="lg:col-span-2 bg-neutral-950 border border-neutral-800 rounded-2xl flex flex-col overflow-hidden h-[600px]">
-          
           {/* Chat header */}
           <div className="border-b border-neutral-800 bg-neutral-900/50 p-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -155,9 +189,7 @@ export function TakoBot() {
                 <Send size={14} />
               </button>
             </form>
-            <p className="text-center text-[9px] text-neutral-600 mt-2">Tako bot can make mistakes. Always verify important decisions.</p>
           </div>
-
         </div>
       </div>
     </div>

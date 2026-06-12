@@ -233,7 +233,10 @@ type AppContextType = {
   reservationTerms: ReservationTerms;
   announcements: Announcement[];
   closedDates: ClosedDate[];
-  
+
+  activeAnnouncement: string;
+  updateActiveAnnouncement: (msg: string) => void;
+
   staffLoggedIn: boolean;
   adminLoggedIn: boolean;
   staffProfile: StaffProfile;
@@ -313,7 +316,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 1, maxHours: 8, minPartySize: 1, maxPartySize: 10, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.' });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
-  
+
+  const [activeAnnouncement, setActiveAnnouncement] = useState(
+    "Don't forget! Happy Hour is 6PM - 8PM today. Get ₱50 off walk-in rates! 🎱"
+  );
+  const updateActiveAnnouncement = (msg: string) => {
+    setActiveAnnouncement(msg);
+    // Optional: Log it as an activity for the Admin
+    addActivity('tako_action', `Tako bot broadcasted: "${msg}"`);
+  };
   const [staffLoggedIn, setStaffLoggedIn] = useState(false);
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [staffProfile, setStaffProfile] = useState<StaffProfile>({ username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15' });
@@ -328,6 +339,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [adminLoggedIn, staffLoggedIn]);
 
+  
   // Push Changes - Only on major events
   const syncToSupabase = useCallback((action: string, payload: any) => {
     console.log(`📤 PUSH CHANGE [${action}]: Sending only major event back to Supabase to save egress:`, payload);
@@ -420,6 +432,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       tables, queue, reservations, feedback, activities, promoCodes, staffUsers, rates, reservationTerms, announcements, closedDates,
+      activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
       assignTable, freeTable, reserveTable, extendSession, setTableMaintenance, addTable, updateTable, toggleTableActive, deleteTable,

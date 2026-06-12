@@ -216,7 +216,7 @@ function MiniCalendar({
 // ─── Main HomePage ────────────────────────────────────────────
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, addReservation, feedback, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext();
+  const { tables, queue, reservations, activeAnnouncement, addReservation, feedback, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext();
 
   // Announcement rotator
   const [announcementIdx, setAnnouncementIdx] = useState(0);
@@ -893,74 +893,76 @@ export function HomePage() {
                         <div>
                           <label className="block text-xs text-neutral-400 mb-2">Preferred Table <span className="text-neutral-600">(optional)</span></label>
                           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-                            {/* Legend */}
-                            <div className="flex items-center gap-3 mb-3">
-                              {[{ c: 'bg-emerald-500', l: 'Available' }, { c: 'bg-amber-500', l: 'Reserved' }, { c: 'bg-rose-500', l: 'Occupied' }].map(s => (
-                                <span key={s.l} className="flex items-center gap-1 text-[10px] text-neutral-500">
-                                  <span className={`w-2 h-2 rounded-full ${s.c}`} />{s.l}
-                                </span>
-                              ))}
-                            </div>
-
+                            
                             {/* Any Available option */}
                             <button
                               type="button"
                               onClick={() => setSelectedTableId(null)}
-                              className={`w-full mb-3 py-2 rounded-lg text-xs font-semibold border transition-all flex items-center justify-center gap-2 ${
+                              className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${
                                 !selectedTableId
                                   ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30'
                                   : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'
                               }`}
                             >
-                              <CheckCircle size={12} />
-                              Any Available Table <span className="opacity-60 font-normal">(Recommended — staff will assign on arrival)</span>
+                              <CheckCircle size={16} />
+                              Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
                             </button>
 
-                            {/* Table grid map */}
-                            <div className="grid grid-cols-5 gap-2">
+                            {/* Table grid map - Simpler & Detailed */}
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                               {tables.map(table => {
                                 const isAvail = table.status === 'available';
                                 const isRes = table.status === 'reserved';
                                 const isOcc = table.status === 'occupied';
                                 const isSel = selectedTableId === table.id;
-                                const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
                                 const disabled = isOcc || isRes;
+
+                                // Explicit text logic instead of just colors
+                                const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
+                                const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
+                                const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
+                                
                                 return (
                                   <button
                                     key={table.id}
                                     type="button"
                                     disabled={disabled}
                                     onClick={() => setSelectedTableId(isSel ? null : table.id)}
-                                    className={`relative flex flex-col items-center gap-1.5 py-3 rounded-lg border text-[10px] font-semibold transition-all ${
+                                    className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${
                                       isSel
-                                        ? 'bg-emerald-600 border-emerald-500 text-white shadow-md shadow-emerald-900/40'
+                                        ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20'
                                         : disabled
-                                        ? 'bg-neutral-900/40 border-neutral-800 text-neutral-600 cursor-not-allowed'
-                                        : 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:border-emerald-600/50 hover:bg-neutral-800'
+                                        ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60'
+                                        : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'
                                     }`}
                                   >
-                                    {/* Billiard table icon */}
-                                    <div className={`w-7 h-4 rounded-sm border ${isSel ? 'border-emerald-300 bg-emerald-500/30' : disabled ? 'border-neutral-700 bg-neutral-800' : 'border-neutral-600 bg-neutral-800'}`}>
-                                      <div className={`w-full h-full flex items-center justify-center`}>
-                                        <div className={`w-4 h-1.5 rounded-sm ${isSel ? 'bg-emerald-300' : disabled ? 'bg-neutral-600' : 'bg-neutral-500'}`} />
-                                      </div>
+                                    <div className="flex items-center justify-between w-full mb-1">
+                                      <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>
+                                        {table.name}
+                                      </span>
+                                      {isSel && <CheckCircle size={14} className="text-emerald-400" />}
                                     </div>
-                                    <span className={`w-1.5 h-1.5 rounded-full ${isSel ? 'bg-white' : dotColor}`} />
-                                    <span className="truncate px-1">{table.name.replace('Table ', 'T')}</span>
+                                    
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
+                                      <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>
+                                        {statusText}
+                                      </span>
+                                    </div>
                                   </button>
                                 );
                               })}
                             </div>
 
                             {selectedTableId && (
-                              <div className="mt-3 flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/20 rounded-lg px-3 py-2">
-                                <CheckCircle size={12} className="text-emerald-400 flex-shrink-0" />
-                                <span className="text-[11px] text-emerald-300">
+                              <div className="mt-4 flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/20 rounded-lg px-3 py-2.5">
+                                <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                                <span className="text-xs text-emerald-300 leading-relaxed">
                                   Preferred: <strong>{tables.find(t => t.id === selectedTableId)?.name}</strong> — staff will confirm availability upon arrival.
                                 </span>
                               </div>
                             )}
-                            <p className="text-[10px] text-neutral-600 mt-2">Your table preference is a request, not a guarantee. Staff will do their best to honor it.</p>
+                            <p className="text-[10px] text-neutral-600 mt-3">Your table preference is a request, not a guarantee. Staff will do their best to honor it.</p>
                           </div>
                         </div>
 
@@ -1065,7 +1067,7 @@ export function HomePage() {
                     name: 'Standard Play',
                     rate: '₱250',
                     unit: '/ hour',
-                    desc: 'Walk-in regular play on any available table.',
+                    desc: 'Walk-in regular play on any available table Upon.',
                     features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'],
                     badge: null,
                     color: 'neutral',
@@ -2304,12 +2306,31 @@ export function HomePage() {
           )}
         </AnimatePresence>
 
+        {/* The "Whisper" Announcement Bubble */}
+        {!isOpenTakoBot && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ delay: 1.5, duration: 0.4 }}
+            className="absolute bottom-16 left-0 mb-2 w-48 bg-white text-neutral-900 text-[11px] font-medium p-3 rounded-2xl rounded-bl-sm shadow-xl shadow-black/50 border border-neutral-200 cursor-pointer"
+            onClick={() => setIsOpenTakoBot(true)}
+          >
+            <p className="leading-relaxed">
+              {activeAnnouncement}
+            </p>
+          </motion.div>
+        )}
+
         {/* The Floating Bubble Button */}
         <button
           onClick={() => setIsOpenTakoBot(p => !p)}
-          className="w-12 h-12 bg-emerald-600 rounded-full flex items-center justify-center text-white shadow-lg shadow-emerald-900/50 hover:bg-emerald-500 transition-colors"
+          className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg transition-all ${
+            isOpenTakoBot 
+              ? 'bg-neutral-800 hover:bg-neutral-700 shadow-black/50' 
+              : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/50 hover:scale-105'
+          }`}
         >
-          {isOpenTakoBot ? <CloseIcon size={20} /> : <MessageSquare size={20} />}
+          {isOpenTakoBot ? <CloseIcon size={20} /> : <Bot size={22} />}
         </button>
       </div>
             

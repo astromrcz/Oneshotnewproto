@@ -7,7 +7,7 @@ import {
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown, ChevronUp,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  MessageSquare, X as CloseIcon, Bot, Upload
+  Sparkles, Upload
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, generateReferralCode } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -225,7 +225,7 @@ export function HomePage() {
   // Hero slideshow
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
-  const [isOpenTakoBot, setIsOpenTakoBot] = useState(false);
+  
   
   // Live clock for table timers
   const [now, setNow] = useState(new Date());
@@ -431,6 +431,31 @@ export function HomePage() {
 
   const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + HERO_SLIDES.length) % HERO_SLIDES.length); };
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % HERO_SLIDES.length); };
+
+  // --- AI WAIT-TIME ESTIMATOR (PROTOTYPE LOGIC) ---
+  const calculateAIWaitTime = () => {
+    const waitingCustomers = queue.filter(q => q.status === 'waiting').length;
+    if (waitingCustomers === 0) return "No wait";
+
+    // Get all occupied tables and find how many minutes they have left
+    const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
+    if (activeTables.length === 0) return "Available immediately";
+
+    const remainingTimes = activeTables.map(t => {
+      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
+    }).sort((a, b) => a - b); // Sort from ending soonest to longest
+
+    // Prototype "AI" Math: Grab the table ending soonest, add 2 mins for cleaning, 
+    // and add 15 mins penalty for every person ahead in the queue.
+    const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
+    const estimatedMinutes = baseWait + 2 + (waitingCustomers * 15);
+
+    if (estimatedMinutes < 60) return `~${estimatedMinutes} mins`;
+    const hrs = Math.floor(estimatedMinutes / 60);
+    const mins = estimatedMinutes % 60;
+    return `~${hrs}h ${mins}m`;
+  };
 
   // Table timer helper
   const getTableTimerInfo = (tableId: string) => {
@@ -2175,6 +2200,16 @@ export function HomePage() {
                       {queue.filter(q => q.status === 'waiting').length} waiting
                     </span>
                   </div>
+                  
+                  {/* 🔴 NEW AI WAIT TIME CARD */}
+                  <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={14} className="text-emerald-400" />
+                      <span className="text-xs text-emerald-300 font-semibold">AI Est. Wait Time</span>
+                    </div>
+                    <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
+                  </div>
+
                   <p className="text-[9px] text-amber-500/80 font-semibold mb-2 flex items-center gap-1">
                     <Info size={9} /> Reservations skip this queue
                   </p>
@@ -2262,78 +2297,8 @@ export function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* ════ TAKO BOT FRONT-END WIDGET ════ */}
-      <div className="fixed bottom-6 left-6 z-[100] flex flex-col items-start">
-        <AnimatePresence>
-          {/* The Chat Window */}
-          {isOpenTakoBot && (
-            <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.9 }}
-              className="mb-4 bg-neutral-950 border border-emerald-900/50 rounded-2xl w-72 h-80 shadow-2xl shadow-emerald-900/20 flex flex-col overflow-hidden"
-            >
-              <div className="bg-emerald-800 p-3 flex justify-between items-center">
-                <div className="flex items-center gap-2 text-white">
-                  <Bot size={18} />
-                  <span className="font-bold text-sm">Tako bot Support</span>
-                </div>
-                <button onClick={() => setIsOpenTakoBot(false)} className="text-emerald-200 hover:text-white">
-                  <CloseIcon size={16} />
-                </button>
-              </div>
-              
-              <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-neutral-900 text-xs">
-                <div className="bg-neutral-800 text-neutral-200 p-3 rounded-xl rounded-tl-none border border-neutral-700">
-                  Hi! I'm Tako bot. I can help you with operating hours, rates, and basic reservations. What do you need?
-                </div>
-                {/* Example user message for prototype */}
-                <div className="flex justify-end">
-                  <div className="bg-emerald-600 text-white p-3 rounded-xl rounded-tr-none">
-                    How much are VIP tables?
-                  </div>
-                </div>
-                {/* Example AI response */}
-                <div className="bg-neutral-800 text-neutral-200 p-3 rounded-xl rounded-tl-none border border-neutral-700">
-                  VIP tables are ₱200/hour. If you are a recognized regular customer, the management discounts it to ₱150/hour!
-                </div>
-              </div>
-              
-              <div className="p-2 border-t border-neutral-800 bg-neutral-950">
-                <input type="text" placeholder="Type a message..." className="w-full bg-neutral-900 text-white text-xs px-3 py-2 rounded-lg border border-neutral-700 focus:outline-none focus:border-emerald-500" />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* The "Whisper" Announcement Bubble */}
-        {!isOpenTakoBot && (
-          <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ delay: 1.5, duration: 0.4 }}
-            className="absolute bottom-16 left-0 mb-2 w-48 bg-white text-neutral-900 text-[11px] font-medium p-3 rounded-2xl rounded-bl-sm shadow-xl shadow-black/50 border border-neutral-200 cursor-pointer"
-            onClick={() => setIsOpenTakoBot(true)}
-          >
-            <p className="leading-relaxed">
-              {activeAnnouncement}
-            </p>
-          </motion.div>
-        )}
-
-        {/* The Floating Bubble Button */}
-        <button
-          onClick={() => setIsOpenTakoBot(p => !p)}
-          className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg transition-all ${
-            isOpenTakoBot 
-              ? 'bg-neutral-800 hover:bg-neutral-700 shadow-black/50' 
-              : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/50 hover:scale-105'
-          }`}
-        >
-          {isOpenTakoBot ? <CloseIcon size={20} /> : <Bot size={22} />}
-        </button>
+      
       </div>
-            
-    </div>
+        
   );
 }

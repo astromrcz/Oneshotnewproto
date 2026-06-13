@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, Calendar as CalendarIcon, AlertCircle, Star } from 'lucide-react';
-import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes } from 'date-fns';
+import { 
+  UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, 
+  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Info 
+} from 'lucide-react';
+import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, addMinutes, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
 
 export function Queue() {
@@ -17,11 +20,43 @@ export function Queue() {
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
 
+  // Live clock for AI calculation
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Priority queue: checked-in reservation customers jump ahead
   const checkedInReservations = reservations.filter((r: any) => r.status === 'checked-in');
   const waiting = queue.filter((q: any) => q.status === 'waiting');
   const called = queue.filter((q: any) => q.status === 'called');
   const availableTables = tables.filter((t: any) => t.status === 'available');
+
+  // --- AI WAIT-TIME ESTIMATOR (PROTOTYPE LOGIC) ---
+  const calculateAIWaitTime = () => {
+    if (waiting.length === 0) return "No wait";
+
+    // Get all occupied tables and find how many minutes they have left
+    const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
+    if (activeTables.length === 0) return "Available immediately";
+
+    const remainingTimes = activeTables.map((t: any) => {
+      const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
+      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
+    }).sort((a: number, b: number) => a - b); // Sort from ending soonest to longest
+
+    // Prototype "AI" Math: Grab the table ending soonest, add 2 mins for cleaning, 
+    // and add 15 mins penalty for every person ahead in the queue.
+    const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
+    const estimatedMinutes = baseWait + 2 + (waiting.length * 15);
+
+    if (estimatedMinutes < 60) return `~${estimatedMinutes} mins`;
+    const hrs = Math.floor(estimatedMinutes / 60);
+    const mins = estimatedMinutes % 60;
+    return `~${hrs}h ${mins}m`;
+  };
 
   // Get upcoming reservations (today and future)
   const upcomingReservations = reservations
@@ -206,9 +241,20 @@ export function Queue() {
             </div>
           )}
 
-          <h2 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400" /> Walk-in Queue ({waiting.length})
-          </h2>
+          <div className="flex items-center justify-between mb-2 mt-4">
+            <h2 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400" /> Walk-in Queue ({waiting.length})
+            </h2>
+          </div>
+
+          {/* AI WAIT TIME CARD */}
+          <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles size={14} className="text-emerald-400" />
+              <span className="text-xs text-emerald-300 font-semibold">AI Est. Wait Time</span>
+            </div>
+            <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
+          </div>
 
           {waiting.length === 0 ? (
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 text-center">

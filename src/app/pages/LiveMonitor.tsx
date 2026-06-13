@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Table, QueueItem } from '../context/AppContext';
-import { Clock, Users, X, Maximize2 } from 'lucide-react';
+import { Clock, Users, X, Maximize2, Sparkles } from 'lucide-react';
+import { addMinutes, differenceInSeconds } from 'date-fns';
 
 // ── Helpers ────────────────────────────────────────────────────
 function getSessionTimer(table: Table): {
@@ -19,15 +20,6 @@ function getSessionTimer(table: Table): {
   const percentLeft = Math.max(0, Math.min(100, (remaining / totalMs) * 100));
   const label = isOvertime ? `+${mm}:${ss} Overtime` : `${mm}:${ss} remaining`;
   return { mm, ss, isOvertime, percentLeft, label };
-}
-
-function formatWaitTime(arrivalTime: Date, position: number): string {
-  const avgMinutesPerTable = 60;
-  const waitMinutes = position * avgMinutesPerTable;
-  if (waitMinutes < 60) return `~${waitMinutes} min`;
-  const h = Math.floor(waitMinutes / 60);
-  const m = waitMinutes % 60;
-  return m > 0 ? `~${h}h ${m}m` : `~${h}h`;
 }
 
 // ── Single Table Card ──────────────────────────────────────────
@@ -133,7 +125,7 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
 }
 
 // ── Queue Row ──────────────────────────────────────────────────
-function QueueRow({ item, position }: { item: QueueItem; position: number }) {
+function QueueRow({ item, position, estWait }: { item: QueueItem; position: number; estWait: string }) {
   return (
     <div className={`flex items-center gap-4 px-4 py-3 rounded-xl border ${
       item.status === 'called'
@@ -161,11 +153,12 @@ function QueueRow({ item, position }: { item: QueueItem; position: number }) {
           <span className="text-xs text-emerald-400 font-semibold">Proceed to Table</span>
         </div>
       ) : (
-        <div className="text-right flex-shrink-0">
-          <p className="text-xs font-semibold text-neutral-400">
-            {formatWaitTime(item.arrivalTime, position)}
-          </p>
-          <p className="text-[10px] text-neutral-600">est. wait</p>
+        <div className="text-right flex-shrink-0 flex flex-col items-end">
+          <div className="flex items-center gap-1 text-emerald-400 font-semibold text-xs">
+            <Sparkles size={10} />
+            <span>{estWait}</span>
+          </div>
+          <p className="text-[9px] text-neutral-600 uppercase tracking-wider font-semibold">AI Estimate</p>
         </div>
       )}
     </div>
@@ -187,6 +180,26 @@ export function LiveMonitor() {
     return () => clearInterval(id);
   }, []);
 
+  // --- GLOBAL AI WAIT-TIME ESTIMATOR ---
+  const calculateAIWaitTime = (position: number) => {
+    const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
+    if (activeTables.length === 0) return "0 mins";
+
+    const remainingTimes = activeTables.map(t => {
+      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
+    }).sort((a, b) => a - b);
+
+    // AI Pattern: Soonest table free + 2 mins turnaround + 15 mins step penalty per position ahead
+    const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
+    const estimatedMinutes = baseWait + 2 + ((position - 1) * 15);
+
+    if (estimatedMinutes < 60) return `${estimatedMinutes} mins`;
+    const h = Math.floor(estimatedMinutes / 60);
+    const m = estimatedMinutes % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  };
+
   const availableCount = tables.filter(t => t.status === 'available').length;
   const occupiedCount = tables.filter(t => t.status === 'occupied').length;
   const reservedCount = tables.filter(t => t.status === 'reserved').length;
@@ -196,8 +209,8 @@ export function LiveMonitor() {
   const dateStr = now.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="min-h-screen bg-neutral-950 flex flex-col overflow-auto">
-      {/* ── Header Bar ── */}
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col overflow-auto">
+      {/* Header Bar */}
       <header className="flex-none bg-black/60 border-b border-neutral-800/80 px-6 py-4 flex items-center justify-between backdrop-blur-sm">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-950">
@@ -216,7 +229,7 @@ export function LiveMonitor() {
         </div>
       </header>
 
-      {/* ── Status Summary Bar ── */}
+      {/* Status Summary Bar */}
       <div className="flex-none bg-neutral-900/50 border-b border-neutral-800/50 px-6 py-3 flex items-center gap-6">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)]" />
@@ -236,7 +249,7 @@ export function LiveMonitor() {
         </div>
       </div>
 
-      {/* ── Main Body ── */}
+      {/* Main Body */}
       <div className="flex-1 flex flex-col lg:flex-row gap-0 overflow-hidden">
 
         {/* Tables Section */}
@@ -267,7 +280,9 @@ export function LiveMonitor() {
               <div className="w-1 h-5 bg-amber-500 rounded-full" />
               <h2 className="text-sm font-bold text-neutral-300 uppercase tracking-widest">Walk-in Queue</h2>
             </div>
-            <p className="text-[11px] text-neutral-600 pl-3.5">First Come, First Served</p>
+            <p className="text-[11px] text-neutral-600 pl-3.5 flex items-center gap-1">
+              <Sparkles size={11} className="text-emerald-400" /> Powered by Predictive AI
+            </p>
           </div>
 
           <div className="flex-1 overflow-auto p-4">
@@ -284,7 +299,7 @@ export function LiveMonitor() {
             ) : (
               <div className="space-y-2">
                 {waitingQueue.map((item, i) => (
-                  <QueueRow key={item.id} item={item} position={i + 1} />
+                  <QueueRow key={item.id} item={item} position={i + 1} estWait={calculateAIWaitTime(i + 1)} />
                 ))}
               </div>
             )}
@@ -313,7 +328,7 @@ export function LiveMonitor() {
         </div>
       </div>
 
-      {/* ── Footer ── */}
+      {/* Footer */}
       <footer className="flex-none bg-black/40 border-t border-neutral-800/50 px-6 py-2 flex items-center justify-between">
         <p className="text-[11px] text-neutral-700">Autobase OAX, San Juan, Cainta, Rizal · Mon–Sat 12PM–3AM · Sun 5PM–3AM</p>
         <a

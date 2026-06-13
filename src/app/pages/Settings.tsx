@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
-  User, Lock, Mail, Phone, Shield, Eye, EyeOff,
+  User, Lock, Mail, Phone, Eye, EyeOff,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
-  AlertTriangle, LogOut
+  AlertTriangle, UploadCloud
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
-type Section = 'profile' | 'security' | 'account';
+// Removed 'account' from Sections
+type Section = 'profile' | 'security';
 
 export function SettingsPage() {
   const { staffProfile, updateStaffProfile, staffLogout } = useAppContext();
@@ -16,6 +17,9 @@ export function SettingsPage() {
 
   const [activeSection, setActiveSection] = useState<Section>('profile');
   const [saved, setSaved] = useState<string | null>(null);
+  
+  // Profile Picture State
+  const [avatarImg, setAvatarImg] = useState<string | null>(null);
 
   // ── Profile Form ────────────────────────────────────────────
   const [profileEdit, setProfileEdit] = useState(false);
@@ -48,7 +52,7 @@ export function SettingsPage() {
       fullName: profileForm.fullName,
       email:    profileForm.email,
       phone:    profileForm.phone,
-      role:     profileForm.role,
+      // Note: Role is explicitly NOT updated here to ensure only admin changes it
     });
     setProfileEdit(false);
     flashSaved('profile');
@@ -74,21 +78,39 @@ export function SettingsPage() {
     navigate('/staff/login');
   };
 
+  // Removed the Account tab from the array
   const tabs: { id: Section; label: string; icon: React.ElementType }[] = [
     { id: 'profile',  label: 'Profile',  icon: User },
     { id: 'security', label: 'Security', icon: Lock },
-    { id: 'account',  label: 'Account',  icon: Shield },
   ];
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* ── Header card ── */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex items-center gap-5">
-        <img
-          src={logoImg}
-          alt="One Shot Bar & Billiards"
-          className="w-16 h-16 object-contain rounded-2xl flex-shrink-0"
-        />
+        
+        {/* Profile Picture Changer */}
+        <div className="relative group w-16 h-16 rounded-2xl flex-shrink-0 overflow-hidden border border-neutral-800 bg-neutral-900">
+          <img
+            src={avatarImg || logoImg}
+            alt="Profile Avatar"
+            className="w-full h-full object-cover"
+          />
+          <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity">
+            <input 
+              type="file" 
+              accept="image/*" 
+              className="hidden" 
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) setAvatarImg(URL.createObjectURL(file));
+              }}
+            />
+            <UploadCloud size={14} className="text-white mb-0.5" />
+            <span className="text-[9px] text-white font-semibold">Change</span>
+          </label>
+        </div>
+
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-black text-neutral-100">{staffProfile.fullName}</h2>
           <p className="text-sm text-neutral-400">{staffProfile.role} · @{staffProfile.username}</p>
@@ -165,18 +187,10 @@ export function SettingsPage() {
                 className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50 focus:ring-1 focus:ring-emerald-600/20 transition-colors" />}
             />
 
-            {/* Role */}
+            {/* Role - Made strictly unchangeable (editing forced to false) */}
             <FieldRow icon={Tag} label="Role / Position" value={staffProfile.role}
-              editing={profileEdit}
-              input={
-                <select value={profileForm.role} onChange={e => setProfileForm(f => ({ ...f, role: e.target.value }))}
-                  className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50 focus:ring-1 focus:ring-emerald-600/20 transition-colors">
-                  <option value="Manager">Manager</option>
-                  <option value="Supervisor">Supervisor</option>
-                  <option value="Staff">Staff</option>
-                  <option value="Cashier">Cashier</option>
-                </select>
-              }
+              editing={false}
+              input={null}
             />
 
             {/* Joined */}
@@ -186,7 +200,8 @@ export function SettingsPage() {
             />
 
             {profileEdit && (
-              <div className="pt-2">
+              <div className="pt-2 flex items-center justify-between">
+                <p className="text-[10px] text-amber-500/80 italic">* Role updates must be requested from the Administrator.</p>
                 <button onClick={handleSaveProfile}
                   className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30">
                   <Save size={14} /> Save Changes
@@ -269,6 +284,15 @@ export function SettingsPage() {
                       {showPw.current ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
                   </div>
+                  <div className="flex justify-end mt-1.5">
+                    <button 
+                      type="button" 
+                      onClick={() => alert("Please contact the Administrator to reset your password.")}
+                      className="text-[10px] text-emerald-500 hover:text-emerald-400 font-semibold transition-colors"
+                    >
+                      Forgot current password?
+                    </button>
+                  </div>
                 </div>
 
                 {/* New password */}
@@ -325,38 +349,6 @@ export function SettingsPage() {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════════════════════
-          ACCOUNT TAB
-      ════════════════════════════════════════════════════════ */}
-      {activeSection === 'account' && (
-        <div className="space-y-4">
-          {/* Account Overview */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4">
-            <h3 className="text-sm font-bold text-neutral-100">Account Overview</h3>
-
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { label: 'Username',   value: `@${staffProfile.username}`,    color: 'text-emerald-400' },
-                { label: 'Role',       value: staffProfile.role,              color: 'text-blue-400' },
-                { label: 'Email',      value: staffProfile.email,             color: 'text-neutral-300' },
-                { label: 'Phone',      value: staffProfile.phone,             color: 'text-neutral-300' },
-                { label: 'Full Name',  value: staffProfile.fullName,          color: 'text-neutral-300' },
-                { label: 'Joined',     value: new Date(staffProfile.joinedDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }), color: 'text-neutral-400' },
-              ].map(item => (
-                <div key={item.label} className="bg-neutral-900 border border-neutral-800 rounded-xl p-3">
-                  <p className="text-[10px] text-neutral-600 uppercase tracking-wider font-semibold mb-1">{item.label}</p>
-                  <p className={`text-sm font-semibold truncate ${item.color}`}>{item.value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          
-
-          
         </div>
       )}
     </div>

@@ -3,6 +3,13 @@ import { createContext, useContext, useState, useEffect, ReactNode, useCallback 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
 
+export type SessionOrder = {
+  id: string;
+  name: string;
+  price: number;
+  qty: number;
+};
+
 export type Session = {
   customerName: string;
   startTime: Date;
@@ -10,6 +17,7 @@ export type Session = {
   isPaid: boolean;
   hourlyRate: number;
   amountPaid: number;
+  orders?: SessionOrder[];
 };
 
 export type Table = {
@@ -19,6 +27,15 @@ export type Table = {
   session?: Session;
   isActive: boolean;
   maintenanceReason?: string;
+};
+
+export type InventoryItem = {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  stock: number;
+  isActive: boolean;
 };
 
 export type QueueItem = {
@@ -73,7 +90,7 @@ export type ActivityType =
   | 'queue_added' | 'queue_removed' | 'queue_called'
   | 'reservation_created' | 'reservation_updated' | 'payment_received' | 'reservation_cancelled'
   | 'feedback_received' | 'promo_created'
-  | 'admin_action' | 'tako_action';
+  | 'admin_action' | 'tako_action' | 'pos_order';
 
 export type Activity = {
   id: string;
@@ -171,7 +188,6 @@ export type ClosedDate = {
 };
 
 // ── Default Data ───────────────────────────────────────────────
-// ── Utility Exports ──────────────────────────────────────────
 export const HOURLY_RATE = 250;
 export const DOWN_PAYMENT_RATE = 0.25;
 
@@ -190,17 +206,11 @@ export const generateReferralCode = (name?: string) => {
 
 const now = new Date();
 const makeTime = (minsAgo: number) => new Date(now.getTime() - minsAgo * 60 * 1000);
-const makeDate = (daysOffset: number, hour: number, minute: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() + daysOffset);
-  d.setHours(hour, minute, 0, 0);
-  return d;
-};
 
 const defaultTables: Table[] = [
-  { id: 't1', name: 'Table 1', status: 'occupied', session: { customerName: 'Juan dela Cruz', startTime: makeTime(45), durationMinutes: 120, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 500 }, isActive: true },
-  { id: 't2', name: 'Table 2', status: 'occupied', session: { customerName: 'Maria Santos', startTime: makeTime(70), durationMinutes: 60, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 250 }, isActive: true },
-  { id: 't3', name: 'Table 3', status: 'occupied', session: { customerName: 'Carlo Reyes', startTime: makeTime(20), durationMinutes: 180, isPaid: false, hourlyRate: HOURLY_RATE, amountPaid: 0 }, isActive: true },
+  { id: 't1', name: 'Table 1', status: 'occupied', session: { customerName: 'Juan dela Cruz', startTime: makeTime(45), durationMinutes: 120, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 500, orders: [] }, isActive: true },
+  { id: 't2', name: 'Table 2', status: 'occupied', session: { customerName: 'Maria Santos', startTime: makeTime(70), durationMinutes: 60, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 250, orders: [] }, isActive: true },
+  { id: 't3', name: 'Table 3', status: 'occupied', session: { customerName: 'Carlo Reyes', startTime: makeTime(20), durationMinutes: 180, isPaid: false, hourlyRate: HOURLY_RATE, amountPaid: 0, orders: [] }, isActive: true },
   { id: 't4', name: 'Table 4', status: 'reserved', isActive: true },
   { id: 't5', name: 'Table 5', status: 'available', isActive: true },
   { id: 't6', name: 'Table 6', status: 'available', isActive: true },
@@ -208,6 +218,14 @@ const defaultTables: Table[] = [
   { id: 't8', name: 'Table 8', status: 'available', isActive: true },
   { id: 't9', name: 'Table 9', status: 'available', isActive: true },
   { id: 't10', name: 'Table 10', status: 'available', isActive: true },
+];
+
+const defaultInventory: InventoryItem[] = [
+  { id: 'i1', name: 'San Mig Light', category: 'Drinks', price: 75, stock: 48, isActive: true },
+  { id: 'i2', name: 'Red Horse (500ml)', category: 'Drinks', price: 85, stock: 24, isActive: true },
+  { id: 'i3', name: 'Pork Sisig', category: 'Food', price: 250, stock: 15, isActive: true },
+  { id: 'i4', name: 'French Fries', category: 'Food', price: 150, stock: 20, isActive: true },
+  { id: 'i5', name: 'Extra Cue Stick', category: 'Extras', price: 50, stock: 10, isActive: true },
 ];
 
 const defaultQueue: QueueItem[] = [
@@ -229,6 +247,7 @@ type AppContextType = {
   activities: Activity[];
   promoCodes: PromoCode[];
   staffUsers: StaffUser[];
+  inventory: InventoryItem[];
   rates: RatesConfig;
   reservationTerms: ReservationTerms;
   announcements: Announcement[];
@@ -256,6 +275,13 @@ type AppContextType = {
   updateTable: (id: string, n: string) => void;
   toggleTableActive: (id: string) => void;
   deleteTable: (id: string) => void;
+
+  // Inventory & POS functions
+  addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void;
+  updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void;
+  deleteInventoryItem: (id: string) => void;
+  submitTableOrders: (tableId: string, cart: SessionOrder[]) => void;
+  voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void;
   removeFromQueue: (id: string) => void;
@@ -306,41 +332,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
-  const [events, setEvents] = useState<Event[]>([
-    { id: '1', title: 'Spooky Shots Halloween Tournament', date: '2026-10-31', type: 'Tournament', description: 'Annual 8-ball tournament. 500 PHP entry.', maxParticipants: 32, slotsFull: false },
-    { id: '2', title: 'Student Billiards League', date: '2026-06-15', type: 'League', description: 'Local universities face off. 10% off for students.', maxParticipants: 20, slotsFull: false },
-    { id: '3', title: 'Payday Friday Promo', date: '2026-06-30', type: 'Promo', description: '15% off reservations made today.' },
-  ]);
+  const [inventory, setInventory] = useState<InventoryItem[]>(defaultInventory);
+  const [events, setEvents] = useState<Event[]>([]);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>(defaultStaffUsers);
   const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 250, happyHourRate: 200, happyHourStart: '18:00', happyHourEnd: '19:00', overtimeRate: 250, downPaymentPercent: 25 });
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 1, maxHours: 8, minPartySize: 1, maxPartySize: 10, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.' });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
 
-  const [activeAnnouncement, setActiveAnnouncement] = useState(
-    "Don't forget! Happy Hour is 6PM - 8PM today. Get ₱50 off walk-in rates! 🎱"
-  );
+  const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => {
     setActiveAnnouncement(msg);
-    // Optional: Log it as an activity for the Admin
-    addActivity('tako_action', `Tako bot broadcasted: "${msg}"`);
   };
   const [staffLoggedIn, setStaffLoggedIn] = useState(false);
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [staffProfile, setStaffProfile] = useState<StaffProfile>({ username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15' });
 
-  // EGRESS OPTIMIZATION: SQLite / Local Sync Strategy Mock
-  // Sync Once on Login
   useEffect(() => {
     if (adminLoggedIn || staffLoggedIn) {
       console.log('🔄 SYNC ONCE: Fetching initial state from Supabase to local "SQLite"...');
-      // In a real scenario, this is where we do ONE supabase fetch query.
-      // After this, timers and queue run fully locally with zero egress.
     }
   }, [adminLoggedIn, staffLoggedIn]);
 
-  
-  // Push Changes - Only on major events
   const syncToSupabase = useCallback((action: string, payload: any) => {
     console.log(`📤 PUSH CHANGE [${action}]: Sending only major event back to Supabase to save egress:`, payload);
   }, []);
@@ -356,7 +369,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateStaffProfile = (p: Partial<StaffProfile>) => setStaffProfile(prev => ({ ...prev, ...p }));
 
   const assignTable = (tableId: string, session: Session) => {
-    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session } : t));
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: { ...session, orders: [] } } : t));
     addActivity('table_assigned', `Table assigned to ${session.customerName}`, { tableId });
     syncToSupabase('TABLE_ASSIGNED', { tableId, session });
   };
@@ -378,6 +391,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateTable = (id: string, name: string) => setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
   const toggleTableActive = (id: string) => setTables(prev => prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t));
   const deleteTable = (id: string) => setTables(prev => prev.filter(t => t.id !== id));
+
+  // --- INVENTORY / POS LOGIC ---
+  const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => setInventory(prev => [...prev, { ...i, id: `inv${Date.now()}` }]);
+  const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+  const deleteInventoryItem = (id: string) => setInventory(prev => prev.filter(i => i.id !== id));
+  
+  const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
+    // Deduct stock from global inventory
+    setInventory(prev => prev.map(inv => {
+      const cartItem = cart.find(c => c.id === inv.id);
+      return cartItem ? { ...inv, stock: inv.stock - cartItem.qty } : inv;
+    }));
+
+    // Add confirmed cart items to table's session orders
+    setTables(prev => prev.map(t => {
+      if (t.id === tableId && t.session) {
+        const newOrders = [...(t.session.orders || [])];
+        cart.forEach(cartItem => {
+          const existing = newOrders.find(o => o.id === cartItem.id);
+          if (existing) existing.qty += cartItem.qty;
+          else newOrders.push({ ...cartItem });
+        });
+        return { ...t, session: { ...t.session, orders: newOrders } };
+      }
+      return t;
+    }));
+    addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
+  };
+
+  const voidTableOrder = (tableId: string, orderIndex: number, order: SessionOrder) => {
+    // Restore the exact quantity back into the global inventory stock
+    setInventory(prev => prev.map(inv => inv.id === order.id ? { ...inv, stock: inv.stock + order.qty } : inv));
+    
+    // Completely remove the voided item from the table's confirmed bill
+    setTables(prev => prev.map(t => {
+      if (t.id === tableId && t.session) {
+        const newOrders = [...(t.session.orders || [])];
+        newOrders.splice(orderIndex, 1);
+        return { ...t, session: { ...t.session, orders: newOrders } };
+      }
+      return t;
+    }));
+    addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
+  };
 
   const addToQueue = (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => {
     setQueue(prev => {
@@ -431,11 +488,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      tables, queue, reservations, feedback, activities, promoCodes, staffUsers, rates, reservationTerms, announcements, closedDates,
+      tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates,
       activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
       assignTable, freeTable, reserveTable, extendSession, setTableMaintenance, addTable, updateTable, toggleTableActive, deleteTable,
+      addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,
       addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance,
       addFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,

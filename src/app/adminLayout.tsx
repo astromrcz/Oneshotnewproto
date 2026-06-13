@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Table2, Tag, BarChart3,
   DollarSign, FileText, Megaphone, CalendarX2,
   Menu, X, LogOut, ChevronRight,
-  ShieldCheck, Circle
+  ShieldCheck, Circle, ShoppingCart
 } from 'lucide-react';
 import { useAppContext } from './context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/admin',                   icon: LayoutDashboard, label: 'Dashboard',           exact: true },
   { to: '/admin/users',             icon: Users,           label: 'User Management' },
   { to: '/admin/tables',            icon: Table2,          label: 'Table Management' },
+  { to: '/admin/inventory', icon: ShoppingCart, label: 'POS Inventory' },
   { to: '/admin/events',            icon: CalendarX2,      label: 'Events & Calendar' }, // Unified Tab
   { to: '/admin/rates',             icon: DollarSign,      label: 'Rates Editor' },
   { to: '/admin/reservation-terms', icon: FileText,        label: 'Reservation Terms' },
@@ -45,9 +46,7 @@ export function AdminLayout() {
 
   if (!adminLoggedIn) return null;
 
-  const activeAnnouncements = announcements.filter(a => a.isActive).length;
-  // We still calculate upcoming closed dates for the quick stats badge
-  const upcomingClosed = closedDates.filter(c => new Date(c.date) >= new Date()).length;  
+
   const pageTitle = pageTitles[location.pathname] || 'Admin';
 
   const handleLogout = () => {
@@ -90,17 +89,7 @@ export function AdminLayout() {
           </div>
         </div>
 
-        {/* Quick stats */}
-        <div className="px-4 pb-2 flex gap-2">
-          <div className="flex-1 bg-neutral-900 rounded-lg p-2 text-center border border-neutral-800">
-            <p className="text-sm font-black text-amber-400">{activeAnnouncements}</p>
-            <p className="text-[9px] text-neutral-500 uppercase tracking-wider">Active Ann.</p>
-          </div>
-          <div className="flex-1 bg-neutral-900 rounded-lg p-2 text-center border border-neutral-800">
-            <p className="text-sm font-black text-rose-400">{upcomingClosed}</p>
-            <p className="text-[9px] text-neutral-500 uppercase tracking-wider">Closed Days</p>
-          </div>
-        </div>
+        
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">

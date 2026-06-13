@@ -23,13 +23,23 @@ import { AdminCalendar } from './pages/AdminCalendar';
 import { AdminEvents } from './pages/AdminEvents';
 import { Analytics } from './pages/Analytics';
 import { FeedbackPage } from './pages/Feedback';
-import { TakoBot } from './pages/TakoBot';
+import { AdminInventory } from './pages/AdminInventory';
+// Offline Login
+import { OfflineLogin } from './pages/OfflineLogin';
 import { NotFound } from './pages/NotFound';
+
+const isDesktop = import.meta.env.VITE_APP_MODE === 'desktop';
 
 export const router = createBrowserRouter([
   {
     Component: RootWrapper,
     children: [
+
+      { 
+        path: '/', 
+        Component: isDesktop ? OfflineLogin : HomePage 
+      },
+
       { path: '/',             Component: HomePage },
       { path: '/monitor',      Component: LiveMonitor },
       // ── Staff Portal ──────────────────────────────────────
@@ -54,6 +64,7 @@ export const router = createBrowserRouter([
           { index: true,                    Component: AdminDashboard },
           { path: 'users',                  Component: AdminUsers },
           { path: 'tables',                 Component: AdminTableManagement },
+          { path: 'inventory', Component: AdminInventory },
           { path: 'rates',                  Component: AdminRates },
           { path: 'reservation-terms',      Component: AdminReservationTerms },
           { path: 'announcements',          Component: AdminAnnouncements },

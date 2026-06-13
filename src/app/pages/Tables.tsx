@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { useAppContext, HOURLY_RATE } from '../context/AppContext';
+import { useAppContext, HOURLY_RATE, SessionOrder } from '../context/AppContext';
 import { TableCard } from '../components/TableCard';
 import {
   Search, Play, Zap, X, UserPlus, Clock,
   Calendar, Users, CheckCircle, ChevronRight,
-  CreditCard, Banknote, AlertTriangle, CircleCheck
+  CreditCard, Banknote, AlertTriangle, CircleCheck,
+  ShoppingCart, Plus, Minus, Trash2, Lock
 } from 'lucide-react';
 import { isToday, differenceInSeconds, addMinutes } from 'date-fns';
 
@@ -19,12 +20,19 @@ type CustomerSource =
   | { kind: 'reservation';  id: string; name: string; partySize: number; contact: string; durationHours: number; timeSlot: string };
 
 export function Tables() {
-  const { tables, queue, reservations, assignTable, extendSession, freeTable } = useAppContext();
+  const { tables, queue, reservations, assignTable, extendSession, freeTable, inventory, submitTableOrders, voidTableOrder } = useAppContext() as any;
+  
   const [filter, setFilter]       = useState<FilterStatus>('all');
   const [search, setSearch]       = useState('');
   const [assigningTableId, setAssigningTableId] = useState<string | null>(null);
   const [extendingTableId, setExtendingTableId] = useState<string | null>(null);
   const [endingTableId,    setEndingTableId]    = useState<string | null>(null);
+  
+  // POS States
+  const [posTableId,       setPosTableId]       = useState<string | null>(null);
+  const [posCart,          setPosCart]          = useState<SessionOrder[]>([]);
+  const [voidItem,         setVoidItem]         = useState<{ index: number, order: SessionOrder } | null>(null);
+  const [voidPassword,     setVoidPassword]     = useState('');
 
   // Near-end banner dismissed set
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
@@ -35,25 +43,31 @@ export function Tables() {
   const [durationMinutes,  setDurationMinutes]   = useState(60);
   const [amountPaid,       setAmountPaid]        = useState('');
 
-  // Extend form + payment state
+  // Extend form state
   const [extendMinutes,       setExtendMinutes]       = useState(60);
   const [extendPayStatus,     setExtendPayStatus]     = useState<PaymentStatus>('paid');
   const [extendPayMethod,     setExtendPayMethod]     = useState<PaymentMethod>('cash');
   const [extendPartialAmount, setExtendPartialAmount] = useState('');
+  const [extendCashTendered,  setExtendCashTendered]  = useState('');
+  const [extendGcashRef,      setExtendGcashRef]      = useState('');
 
   // End session payment state
   const [endPayStatus,     setEndPayStatus]     = useState<PaymentStatus>('paid');
   const [endPayMethod,     setEndPayMethod]     = useState<PaymentMethod>('cash');
   const [endPartialAmount, setEndPartialAmount] = useState('');
+  const [endCashTendered,  setEndCashTendered]  = useState('');
+  const [endGcashRef,      setEndGcashRef]      = useState('');
+  const [debtName,         setDebtName]         = useState('');
+  const [debtContact,      setDebtContact]      = useState('');
 
   // ── Derived ───────────────────────────────────────────────────
-  const activeTables = tables.filter(t => t.isActive);
-  const available    = activeTables.filter(t => t.status === 'available').length;
-  const occupied     = activeTables.filter(t => t.status === 'occupied').length;
-  const reserved     = activeTables.filter(t => t.status === 'reserved').length;
-  const maintenance  = activeTables.filter(t => t.status === 'maintenance').length;
+  const activeTables = tables.filter((t: any) => t.isActive);
+  const available    = activeTables.filter((t: any) => t.status === 'available').length;
+  const occupied     = activeTables.filter((t: any) => t.status === 'occupied').length;
+  const reserved     = activeTables.filter((t: any) => t.status === 'reserved').length;
+  const maintenance  = activeTables.filter((t: any) => t.status === 'maintenance').length;
 
-  const filtered = activeTables.filter(t => {
+  const filtered = activeTables.filter((t: any) => {
     const matchFilter = filter === 'all' || t.status === filter;
     const matchSearch = !search
       || t.name.toLowerCase().includes(search.toLowerCase())
@@ -61,31 +75,29 @@ export function Tables() {
     return matchFilter && matchSearch;
   });
 
-  // ── Near-end sessions (≤10 mins remaining, not overtime) ──────
-  const nearEndTables = activeTables.filter(t => {
+  const nearEndTables = activeTables.filter((t: any) => {
     if (t.status !== 'occupied' || !t.session) return false;
     const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     const secsLeft = differenceInSeconds(endTime, new Date());
     return secsLeft > 0 && secsLeft <= 10 * 60;
   });
 
-  // ── Customer picker data ───────────────────────────────────────
   const waitingCustomers: CustomerSource[] = queue
-    .filter(q => q.status === 'waiting')
-    .map(q => ({ kind: 'queue', id: q.id, name: q.customerName, partySize: q.partySize, contact: q.contactNumber, notes: q.notes }));
+    .filter((q: any) => q.status === 'waiting')
+    .map((q: any) => ({ kind: 'queue', id: q.id, name: q.customerName, partySize: q.partySize, contact: q.contactNumber, notes: q.notes }));
 
   const todayReservations: CustomerSource[] = reservations
-    .filter(r => (r.status === 'confirmed' || r.status === 'pending') && isToday(new Date(r.date)))
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .map(r => ({ kind: 'reservation', id: r.id, name: r.customerName, partySize: r.partySize, contact: r.contactNumber, durationHours: r.durationHours, timeSlot: r.timeSlot }));
+    .filter((r: any) => (r.status === 'confirmed' || r.status === 'pending') && isToday(new Date(r.date)))
+    .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .map((r: any) => ({ kind: 'reservation', id: r.id, name: r.customerName, partySize: r.partySize, contact: r.contactNumber, durationHours: r.durationHours, timeSlot: r.timeSlot }));
 
   const allCustomers: CustomerSource[] = [...waitingCustomers, ...todayReservations];
 
   // ── End session derived values ─────────────────────────────────
-  const endingTable = tables.find(t => t.id === endingTableId);
+  const endingTable = tables.find((t: any) => t.id === endingTableId);
   const getEndSessionInfo = () => {
     if (!endingTable?.session) return null;
-    const { startTime, durationMinutes: bookedMins, amountPaid: alreadyPaid, hourlyRate } = endingTable.session;
+    const { startTime, durationMinutes: bookedMins, amountPaid: alreadyPaid, hourlyRate, orders = [] } = endingTable.session;
     const now = new Date();
     const elapsedSecs = differenceInSeconds(now, new Date(startTime));
     const elapsedMins = Math.ceil(elapsedSecs / 60);
@@ -94,47 +106,50 @@ export function Tables() {
     const overtimeMins = isOvertime ? Math.ceil(differenceInSeconds(now, endTime) / 60) : 0;
     const bookedCharge = (bookedMins / 60) * hourlyRate;
     const overtimeCharge = (overtimeMins / 60) * hourlyRate;
-    const totalDue = bookedCharge + overtimeCharge;
+    
+    const posOrdersTotal = orders.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
+    
+    const totalDue = bookedCharge + overtimeCharge + posOrdersTotal;
     const balance = Math.max(0, totalDue - alreadyPaid);
-    return { elapsedMins, alreadyPaid, bookedCharge, overtimeCharge, totalDue, balance, isOvertime, overtimeMins };
+    
+    return { elapsedMins, alreadyPaid, bookedCharge, overtimeCharge, posOrdersTotal, totalDue, balance, isOvertime, overtimeMins };
   };
   const endInfo = getEndSessionInfo();
 
   // ── Extend derived values ──────────────────────────────────────
-  const extendingTable = tables.find(t => t.id === extendingTableId);
+  const extendingTable = tables.find((t: any) => t.id === extendingTableId);
   const extendCharge = (extendMinutes / 60) * HOURLY_RATE;
+
+  // ── POS derived values ─────────────────────────────────────────
+  const posTable = tables.find((t: any) => t.id === posTableId);
+  const confirmedOrders = posTable?.session?.orders || [];
+  const confirmedTotal = confirmedOrders.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
+  const cartTotal = posCart.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
 
   // ── Handlers ──────────────────────────────────────────────────
   const openAssign = (tableId: string) => {
-    setAssigningTableId(tableId);
-    setSelectedCustomer(null);
-    setCustomerName('');
-    setDurationMinutes(60);
-    setAmountPaid('');
+    setAssigningTableId(tableId); setSelectedCustomer(null); setCustomerName(''); setDurationMinutes(60); setAmountPaid('');
   };
 
   const openEnd = (tableId: string) => {
+    const table = tables.find((t: any) => t.id === tableId);
     setEndingTableId(tableId);
-    setEndPayStatus('paid');
-    setEndPayMethod('cash');
-    setEndPartialAmount('');
+    setEndPayStatus('paid'); setEndPayMethod('cash'); setEndPartialAmount(''); setEndCashTendered(''); setEndGcashRef('');
+    setDebtName(table?.session?.customerName || ''); setDebtContact('');
   };
 
   const openExtend = (tableId: string) => {
+    const table = tables.find((t: any) => t.id === tableId);
     setExtendingTableId(tableId);
-    setExtendMinutes(60);
-    setExtendPayStatus('paid');
-    setExtendPayMethod('cash');
-    setExtendPartialAmount('');
+    setExtendMinutes(60); setExtendPayStatus('paid'); setExtendPayMethod('cash'); setExtendPartialAmount(''); setExtendCashTendered(''); setExtendGcashRef('');
+    setDebtName(table?.session?.customerName || ''); setDebtContact('');
   };
 
   const pickCustomer = (c: CustomerSource) => {
-    setSelectedCustomer(c);
-    setCustomerName(c.name);
+    setSelectedCustomer(c); setCustomerName(c.name);
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
-      setDurationMinutes(mins);
-      setAmountPaid(((mins / 60) * HOURLY_RATE).toFixed(2));
+      setDurationMinutes(mins); setAmountPaid(((mins / 60) * HOURLY_RATE).toFixed(2));
     } else {
       setAmountPaid(((durationMinutes / 60) * HOURLY_RATE).toFixed(2));
     }
@@ -145,18 +160,9 @@ export function Tables() {
     if (!assigningTableId || !customerName) return;
     const autoPayment = (durationMinutes / 60) * HOURLY_RATE;
     assignTable(assigningTableId, {
-      customerName,
-      durationMinutes,
-      startTime: new Date(),
-      isPaid: true,
-      hourlyRate: HOURLY_RATE,
-      amountPaid: parseFloat(amountPaid) || autoPayment,
+      customerName, durationMinutes, startTime: new Date(), isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: parseFloat(amountPaid) || autoPayment, orders: []
     });
-    setAssigningTableId(null);
-    setSelectedCustomer(null);
-    setCustomerName('');
-    setDurationMinutes(60);
-    setAmountPaid('');
+    setAssigningTableId(null); setSelectedCustomer(null); setCustomerName(''); setDurationMinutes(60); setAmountPaid('');
   };
 
   const handleConfirmEnd = () => {
@@ -168,20 +174,63 @@ export function Tables() {
   const handleConfirmExtend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!extendingTableId) return;
-    const charge = extendPayStatus === 'paid'
-      ? extendCharge
-      : extendPayStatus === 'partial'
-        ? parseFloat(extendPartialAmount) || 0
-        : 0;
+    const charge = extendPayStatus === 'paid' ? extendCharge : extendPayStatus === 'partial' ? parseFloat(extendPartialAmount) || 0 : 0;
     extendSession(extendingTableId, extendMinutes, charge);
     setExtendingTableId(null);
   };
 
+  // ── POS Handlers ──────────────────────────────────────────────
+  const handleAddToCart = (item: any) => {
+    const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
+    if (item.stock - inCartQty <= 0) return; // Prevent adding more than stock
+
+    setPosCart(prev => {
+      const existing = prev.find(p => p.id === item.id);
+      if (existing) return prev.map(p => p.id === item.id ? { ...p, qty: p.qty + 1 } : p);
+      return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1 }];
+    });
+  };
+
+  const updateCartQty = (id: string, delta: number) => {
+    setPosCart(prev => prev.map(p => {
+      if (p.id === id) {
+        const itemStock = inventory.find((i: any) => i.id === id)?.stock || 0;
+        const newQty = p.qty + delta;
+        // Don't exceed stock and don't go below 0
+        if (newQty > itemStock || newQty < 0) return p;
+        return { ...p, qty: newQty };
+      }
+      return p;
+    }).filter(p => p.qty > 0)); // Automatically remove if qty hits 0
+  };
+
+  const handleConfirmOrders = () => {
+    if (!posTableId || posCart.length === 0) return;
+    submitTableOrders(posTableId, posCart);
+    setPosCart([]);
+  };
+
+  const handleVoidSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!posTableId || !voidItem) return;
+    
+    if (voidPassword === '123') {
+      voidTableOrder(posTableId, voidItem.index, voidItem.order);
+      setVoidItem(null);
+      setVoidPassword('');
+    } else {
+      alert("Incorrect Admin Password.");
+      setVoidPassword('');
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────
+
   const getNextReservation = (tableId: string) => {
     const now = new Date();
     const upcoming = reservations
-      .filter(r => r.tableId === tableId && (r.status === 'pending' || r.status === 'confirmed') && new Date(r.date) > now)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .filter((r: any) => r.tableId === tableId && (r.status === 'pending' || r.status === 'confirmed') && new Date(r.date) > now)
+      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
     if (!upcoming.length) return null;
     const r = upcoming[0];
     return { date: new Date(r.date), customerName: r.customerName, timeSlot: r.timeSlot };
@@ -198,132 +247,227 @@ export function Tables() {
   const durationOptions = [30, 60, 90, 120, 180, 240];
   const extendOptions   = [30, 60, 90, 120];
 
-  // Payment status / method helpers
   const PayStatusBtn = ({ value, current, label, onChange }: { value: PaymentStatus; current: PaymentStatus; label: string; onChange: (v: PaymentStatus) => void }) => (
-    <button
-      type="button"
-      onClick={() => onChange(value)}
-      className={`flex-1 py-2 rounded-xl border text-xs font-semibold transition-all ${
-        current === value
-          ? value === 'paid'    ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
-          : value === 'partial' ? 'bg-amber-600/15 border-amber-600 text-amber-400'
-          :                       'bg-rose-600/15 border-rose-600 text-rose-400'
-          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-      }`}
-    >
+    <button type="button" onClick={() => onChange(value)} className={`flex-1 py-2 rounded-xl border text-xs font-semibold transition-all ${current === value ? value === 'paid' ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : value === 'partial' ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-rose-600/15 border-rose-600 text-rose-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
       {label}
     </button>
   );
 
   const PayMethodBtn = ({ value, current, icon: Icon, label, onChange }: { value: PaymentMethod; current: PaymentMethod; icon: any; label: string; onChange: (v: PaymentMethod) => void }) => (
-    <button
-      type="button"
-      onClick={() => onChange(value)}
-      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
-        current === value
-          ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
-          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-      }`}
-    >
-      <Icon size={13} />
-      {label}
+    <button type="button" onClick={() => onChange(value)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-semibold transition-all ${current === value ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
+      <Icon size={13} /> {label}
     </button>
   );
 
   return (
-    <div className="space-y-5">
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: 'Available',    value: available,   color: 'text-emerald-400' },
-          { label: 'Occupied',     value: occupied,    color: 'text-rose-400' },
-          { label: 'Reserved',     value: reserved,    color: 'text-amber-400' },
-          { label: 'Maintenance',  value: maintenance, color: 'text-orange-400' },
-        ].map(s => (
-          <div key={s.label} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center">
-            <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mt-1">{s.label}</p>
+    <div className="space-y-5 flex h-[calc(100vh-140px)] relative overflow-hidden">
+      
+      {/* MAIN CONTENT AREA */}
+      <div className={`flex-1 space-y-5 overflow-y-auto pr-2 transition-all duration-300 ${posTableId ? 'mr-[380px]' : ''}`}>
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: 'Available',   value: available,   color: 'text-emerald-400' },
+            { label: 'Occupied',    value: occupied,    color: 'text-rose-400' },
+            { label: 'Reserved',    value: reserved,    color: 'text-amber-400' },
+            { label: 'Maintenance', value: maintenance, color: 'text-orange-400' },
+          ].map(s => (
+            <div key={s.label} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center">
+              <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
+              <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mt-1">{s.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Near-End Session Warning Banner */}
+        {nearEndTables.filter((t: any) => !dismissedNearEnd.has(t.id)).length > 0 && (
+          <div className="space-y-2">
+            {nearEndTables.filter((t: any) => !dismissedNearEnd.has(t.id)).map((t: any) => {
+              const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+              const minsLeft = Math.ceil(differenceInSeconds(endTime, new Date()) / 60);
+              return (
+                <div key={t.id} className="flex items-center gap-3 bg-amber-950/40 border border-amber-700/50 rounded-xl px-4 py-3">
+                  <AlertTriangle size={15} className="text-amber-400 flex-shrink-0" />
+                  <p className="flex-1 text-xs text-amber-300">
+                    <strong>{t.name}</strong> — session ends in <strong>{minsLeft} minute{minsLeft !== 1 ? 's' : ''}</strong>.{' '}
+                    <span className="text-amber-400/70">{t.session!.customerName} · Consider extending.</span>
+                  </p>
+                  <button onClick={() => setDismissedNearEnd(prev => new Set([...prev, t.id]))} className="p-1 text-amber-600 hover:text-amber-300 transition-colors flex-shrink-0">
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
-        ))}
-      </div>
+        )}
 
-      {/* Near-End Session Warning Banner */}
-      {nearEndTables.filter(t => !dismissedNearEnd.has(t.id)).length > 0 && (
-        <div className="space-y-2">
-          {nearEndTables.filter(t => !dismissedNearEnd.has(t.id)).map(t => {
-            const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
-            const minsLeft = Math.ceil(differenceInSeconds(endTime, new Date()) / 60);
-            return (
-              <div key={t.id} className="flex items-center gap-3 bg-amber-950/40 border border-amber-700/50 rounded-xl px-4 py-3">
-                <AlertTriangle size={15} className="text-amber-400 flex-shrink-0" />
-                <p className="flex-1 text-xs text-amber-300">
-                  <strong>{t.name}</strong> — session ends in <strong>{minsLeft} minute{minsLeft !== 1 ? 's' : ''}</strong>.{' '}
-                  <span className="text-amber-400/70">{t.session!.customerName} · Consider extending.</span>
-                </p>
-                <button
-                  onClick={() => setDismissedNearEnd(prev => new Set([...prev, t.id]))}
-                  className="p-1 text-amber-600 hover:text-amber-300 transition-colors flex-shrink-0"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            );
-          })}
+        {/* Toolbar */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+            <input type="text" placeholder="Search tables or customers..." value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {filterBtns.map(b => (
+              <button key={b.key} onClick={() => setFilter(b.key)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${filter === b.key ? b.color : 'bg-neutral-950 text-neutral-500 border-neutral-800 hover:border-neutral-700'}`}>
+                {b.label} <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${filter === b.key ? '' : 'bg-neutral-800'}`}>{b.count}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      )}
 
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <div className="relative flex-1 w-full">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-          <input
-            type="text"
-            placeholder="Search tables or customers..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-          />
-        </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {filterBtns.map(b => (
-            <button
-              key={b.key}
-              onClick={() => setFilter(b.key)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
-                filter === b.key ? b.color : 'bg-neutral-950 text-neutral-500 border-neutral-800 hover:border-neutral-700'
-              }`}
-            >
-              {b.label}
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${filter === b.key ? '' : 'bg-neutral-800'}`}>{b.count}</span>
-            </button>
+        {/* Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+          {filtered.map((table: any) => (
+            <TableCard
+              key={table.id} table={table}
+              onAssign={() => openAssign(table.id)}
+              onExtend={() => openExtend(table.id)}
+              onEnd={() => openEnd(table.id)}
+              onOrder={() => {
+                setPosTableId(table.id);
+                setPosCart([]);
+                setVoidItem(null);
+                setVoidPassword('');
+              }}
+              nextReservation={table.status === 'reserved' ? getNextReservation(table.id) : null}
+            />
           ))}
         </div>
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-        {filtered.map(table => (
-          <TableCard
-            key={table.id}
-            table={table}
-            onAssign={() => openAssign(table.id)}
-            onExtend={() => openExtend(table.id)}
-            onEnd={() => openEnd(table.id)}
-            nextReservation={table.status === 'reserved' ? getNextReservation(table.id) : null}
-          />
-        ))}
-      </div>
+      {/* ════════════════════════════════════════════════════════
+          SLIDE-OUT POS & INVENTORY SIDEBAR
+      ════════════════════════════════════════════════════════ */}
+      {posTableId && posTable && (
+        <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-40 animate-in slide-in-from-right-10 duration-300">
+          <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+            <div>
+              <h3 className="font-bold text-neutral-100 flex items-center gap-2"><ShoppingCart size={15} className="text-emerald-400"/> POS Order Menu</h3>
+              <p className="text-xs text-neutral-500">{posTable.name} · {posTable.session?.customerName || 'No Session'}</p>
+            </div>
+            <button onClick={() => setPosTableId(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16}/></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-5">
+            
+            {/* 1. CONFIRMED ORDERS */}
+            {confirmedOrders.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-bold flex items-center gap-1"><CheckCircle size={10}/> Confirmed Bill</p>
+                  <span className="text-[10px] text-neutral-500 font-semibold">Total: {formatPHP(confirmedTotal)}</span>
+                </div>
+                <div className="space-y-2">
+                  {confirmedOrders.map((o: any, i: number) => (
+                    <div key={i} className={`flex flex-col text-sm bg-neutral-900/50 border rounded-lg overflow-hidden transition-all ${voidItem?.index === i ? 'border-rose-900/50' : 'border-neutral-800'}`}>
+                      <div className="flex justify-between items-center px-3 py-2">
+                        <div>
+                          <p className="text-neutral-200 font-semibold">{o.name}</p>
+                          <p className="text-[11px] text-neutral-500">{o.qty}x @ {formatPHP(o.price)} = <span className="text-emerald-400 font-bold">{formatPHP(o.qty * o.price)}</span></p>
+                        </div>
+                        <button onClick={() => setVoidItem({ index: i, order: o })} className="text-[10px] bg-rose-950/30 text-rose-400 hover:bg-rose-900/40 border border-rose-800/30 px-2 py-1 rounded transition-colors font-semibold flex items-center gap-1">
+                          <Trash2 size={10} /> Void
+                        </button>
+                      </div>
+                      
+                      {/* Secure Void Confirmation Dialog */}
+                      {voidItem?.index === i && (
+                        <form onSubmit={handleVoidSubmit} className="bg-rose-950/20 px-3 py-2 border-t border-rose-900/30 flex gap-2">
+                          <div className="relative flex-1">
+                            <Lock size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-rose-500/50" />
+                            <input type="password" value={voidPassword} onChange={e => setVoidPassword(e.target.value)} placeholder="Admin Pass..." autoFocus required
+                              className="w-full pl-7 pr-2 py-1.5 text-xs bg-rose-950/40 border border-rose-800/50 rounded-md text-rose-200 placeholder-rose-700/50 outline-none focus:border-rose-500" />
+                          </div>
+                          <button type="submit" className="text-[10px] font-bold bg-rose-600 hover:bg-rose-500 text-white px-3 rounded-md transition-colors">Confirm</button>
+                          <button type="button" onClick={() => { setVoidItem(null); setVoidPassword(''); }} className="text-[10px] text-neutral-400 hover:text-white px-2">Cancel</button>
+                        </form>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 2. PENDING CART */}
+            {posCart.length > 0 && (
+              <div>
+                <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold mb-2 flex items-center gap-1"><ShoppingCart size={10}/> New Order (Pending)</p>
+                <div className="space-y-2">
+                  {posCart.map((cartItem) => (
+                    <div key={cartItem.id} className="flex justify-between items-center text-sm bg-neutral-900 border border-amber-900/30 px-3 py-2 rounded-lg">
+                      <div className="flex-1">
+                        <p className="text-neutral-200 font-semibold">{cartItem.name}</p>
+                        <p className="text-[11px] font-black text-amber-400">{formatPHP(cartItem.qty * cartItem.price)}</p>
+                      </div>
+                      <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-md p-0.5">
+                        <button onClick={() => updateCartQty(cartItem.id, -1)} className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition-colors"><Minus size={12}/></button>
+                        <span className="text-xs font-bold text-white w-4 text-center">{cartItem.qty}</span>
+                        <button onClick={() => updateCartQty(cartItem.id, 1)} className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition-colors"><Plus size={12}/></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 3. MENU / INVENTORY */}
+            <div>
+              <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2">Available Menu</p>
+              <div className="space-y-2">
+                {inventory.filter((i: any) => i.isActive).map((item: any) => {
+                  const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
+                  const stockRemaining = item.stock - inCartQty;
+                  const outOfStock = stockRemaining <= 0;
+                  
+                  return (
+                    <button key={item.id} disabled={outOfStock || !posTable.session} onClick={() => handleAddToCart(item)}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${outOfStock ? 'bg-neutral-900/50 border-neutral-800/50 opacity-60 cursor-not-allowed' : 'bg-neutral-900 border-neutral-800 hover:border-emerald-600/40'}`}>
+                      <div>
+                        <p className={`text-sm font-semibold ${outOfStock ? 'text-neutral-500' : 'text-neutral-200'}`}>{item.name}</p>
+                        <p className="text-[10px] text-neutral-500">{item.category} · Available: {stockRemaining}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm font-black ${outOfStock ? 'text-neutral-500' : 'text-emerald-400'}`}>{formatPHP(item.price)}</p>
+                        {outOfStock && <p className="text-[9px] text-rose-500 font-bold uppercase">Out of stock</p>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 border-t border-neutral-800 bg-neutral-900/50">
+            <div className="flex justify-between items-center mb-3">
+              <span className="text-sm font-bold text-neutral-400">New Amount:</span>
+              <span className="text-lg font-black text-amber-400">{formatPHP(cartTotal)}</span>
+            </div>
+            {posTable.session ? (
+              <button 
+                disabled={posCart.length === 0} 
+                onClick={handleConfirmOrders}
+                className={`w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${posCart.length > 0 ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}>
+                <CheckCircle size={15} /> Confirm Order
+              </button>
+            ) : (
+              <p className="text-xs text-rose-400 text-center italic">Start a table session to add orders.</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════
           START SESSION MODAL
       ════════════════════════════════════════════════════════ */}
       {assigningTableId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[92vh]">
             <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center flex-none">
               <div>
                 <h2 className="text-base font-bold text-neutral-100">Start Session</h2>
-                <p className="text-xs text-neutral-500">{tables.find(t => t.id === assigningTableId)?.name} · ₱{HOURLY_RATE}/hour</p>
+                <p className="text-xs text-neutral-500">{tables.find((t: any) => t.id === assigningTableId)?.name} · ₱{HOURLY_RATE}/hour</p>
               </div>
               <button onClick={() => setAssigningTableId(null)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
                 <X size={16} />
@@ -482,147 +626,106 @@ export function Tables() {
           END SESSION MODAL — Payment Verification
       ════════════════════════════════════════════════════════ */}
       {endingTableId && endingTable?.session && endInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
-            {/* Header */}
             <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center flex-none bg-rose-950/20">
               <div>
-                <h2 className="text-base font-bold text-neutral-100">End Session</h2>
+                <h2 className="text-base font-bold text-neutral-100">End Session & Checkout</h2>
                 <p className="text-xs text-neutral-500">{endingTable.name} · {endingTable.session.customerName}</p>
               </div>
-              <button onClick={() => setEndingTableId(null)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
-                <X size={16} />
-              </button>
+              <button onClick={() => setEndingTableId(null)} className="p-2 text-neutral-500 hover:text-white rounded-lg"><X size={16} /></button>
             </div>
 
             <div className="overflow-y-auto flex-1 p-6 space-y-5">
-              {/* Session Summary */}
-              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-2">
-                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-3">Session Summary</p>
-                <div className="flex justify-between text-sm">
-                  <span className="text-neutral-400">Customer</span>
-                  <span className="text-neutral-200 font-semibold">{endingTable.session.customerName}</span>
+              {/* Billing Breakdown */}
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3">
+                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-1">Billing Breakdown</p>
+                <div className="flex justify-between text-xs">
+                  <span className="text-neutral-400">Table Booked ({endingTable.session.durationMinutes < 60 ? `${endingTable.session.durationMinutes}m` : `${endingTable.session.durationMinutes / 60}h`})</span>
+                  <span className="text-neutral-200">{formatPHP(endInfo.bookedCharge)}</span>
                 </div>
-                {endInfo.isOvertime ? (
-                  /* Overtime billing breakdown */
+                {endInfo.isOvertime && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-amber-400 flex items-center gap-1"><AlertTriangle size={10} /> Overtime ({endInfo.overtimeMins}m)</span>
+                    <span className="text-amber-400 font-semibold">+{formatPHP(endInfo.overtimeCharge)}</span>
+                  </div>
+                )}
+                {endInfo.posOrdersTotal > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-emerald-400 flex items-center gap-1"><ShoppingCart size={10}/> Food & Drinks</span>
+                    <span className="text-emerald-400 font-semibold">+{formatPHP(endInfo.posOrdersTotal)}</span>
+                  </div>
+                )}
+                <div className="border-t border-neutral-700 pt-1.5 flex justify-between text-sm">
+                  <span className="text-neutral-300 font-semibold">Total Due</span>
+                  <span className="text-white font-black">{formatPHP(endInfo.totalDue)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-neutral-400">Already Paid</span>
+                  <span className="text-emerald-400">−{formatPHP(endInfo.alreadyPaid)}</span>
+                </div>
+                <div className={`flex justify-between text-sm pt-1 rounded-lg px-2 py-1.5 ${endInfo.balance > 0 ? 'bg-rose-950/40' : 'bg-emerald-950/20'}`}>
+                  <span className={endInfo.balance > 0 ? 'text-rose-300 font-semibold' : 'text-emerald-400 font-semibold'}>{endInfo.balance > 0 ? 'Balance Due' : 'Settled'}</span>
+                  <span className={`font-black ${endInfo.balance > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{formatPHP(endInfo.balance > 0 ? endInfo.balance : 0)}</span>
+                </div>
+              </div>
+
+              {endInfo.balance > 0 && (
+                <>
                   <div className="space-y-2">
-                    <div className="bg-neutral-800/50 rounded-lg p-3 space-y-1.5">
-                      <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold mb-2">Billing Breakdown</p>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-neutral-400">
-                          Booked: {endingTable.session.durationMinutes < 60 ? `${endingTable.session.durationMinutes}m` : `${endingTable.session.durationMinutes / 60}h`}
-                        </span>
-                        <span className="text-neutral-200">{formatPHP(endInfo.bookedCharge)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-amber-400 flex items-center gap-1">
-                          <AlertTriangle size={10} /> Overtime: {endInfo.overtimeMins}m
-                          <span className="text-neutral-500 font-normal">(billed at regular rate, rounded up)</span>
-                        </span>
-                        <span className="text-amber-400 font-semibold">+{formatPHP(endInfo.overtimeCharge)}</span>
-                      </div>
-                      <div className="border-t border-neutral-700 pt-1.5 flex justify-between text-sm">
-                        <span className="text-neutral-300 font-semibold">Total Due</span>
-                        <span className="text-white font-black">{formatPHP(endInfo.totalDue)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-neutral-400">Already Paid</span>
-                        <span className="text-emerald-400">−{formatPHP(endInfo.alreadyPaid)}</span>
-                      </div>
-                      <div className={`flex justify-between text-sm pt-1 rounded-lg px-2 py-1.5 ${endInfo.balance > 0 ? 'bg-rose-950/40' : 'bg-emerald-950/20'}`}>
-                        <span className={endInfo.balance > 0 ? 'text-rose-300 font-semibold' : 'text-emerald-400 font-semibold'}>
-                          {endInfo.balance > 0 ? 'Balance Due' : 'Settled'}
-                        </span>
-                        <span className={`font-black ${endInfo.balance > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {formatPHP(endInfo.balance > 0 ? endInfo.balance : 0)}
-                        </span>
-                      </div>
+                    <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
+                    <div className="flex gap-2">
+                      <PayStatusBtn value="paid" current={endPayStatus} label="Fully Paid" onChange={setEndPayStatus} />
+                      <PayStatusBtn value="partial" current={endPayStatus} label="Partial" onChange={setEndPayStatus} />
+                      <PayStatusBtn value="unpaid" current={endPayStatus} label="Unpaid" onChange={setEndPayStatus} />
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-neutral-400">Booked Duration</span>
-                      <span className="text-neutral-200">{endingTable.session.durationMinutes < 60 ? `${endingTable.session.durationMinutes}m` : `${endingTable.session.durationMinutes / 60}h`}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-neutral-400">Booked Charge</span>
-                      <span className="text-neutral-200">{formatPHP(endInfo.bookedCharge)}</span>
-                    </div>
-                    <div className="border-t border-neutral-800 pt-2 mt-2 flex justify-between text-sm">
-                      <span className="text-neutral-300 font-semibold">Total Due</span>
-                      <span className="text-white font-black">{formatPHP(endInfo.totalDue)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-neutral-400">Already Paid</span>
-                      <span className="text-emerald-400 font-semibold">−{formatPHP(endInfo.alreadyPaid)}</span>
-                    </div>
-                    <div className={`flex justify-between text-sm pt-1 rounded-lg px-2 py-1.5 ${endInfo.balance > 0 ? 'bg-rose-950/30' : 'bg-emerald-950/20'}`}>
-                      <span className={endInfo.balance > 0 ? 'text-rose-300 font-semibold' : 'text-emerald-400 font-semibold'}>
-                        {endInfo.balance > 0 ? 'Outstanding Balance' : 'Settled ✓'}
-                      </span>
-                      <span className={`font-black ${endInfo.balance > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                        {endInfo.balance > 0 ? formatPHP(endInfo.balance) : formatPHP(0)}
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
 
-              {/* Payment Status */}
-              <div className="space-y-2">
-                <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
-                <div className="flex gap-2">
-                  <PayStatusBtn value="paid"    current={endPayStatus} label="Fully Paid"   onChange={setEndPayStatus} />
-                  <PayStatusBtn value="partial" current={endPayStatus} label="Partial"      onChange={setEndPayStatus} />
-                  <PayStatusBtn value="unpaid"  current={endPayStatus} label="Unpaid"       onChange={setEndPayStatus} />
-                </div>
-                {endPayStatus === 'partial' && (
-                  <div>
-                    <label className="text-xs text-neutral-500 mb-1.5 block">Amount Collected (PHP)</label>
-                    <input
-                      type="number"
-                      value={endPartialAmount}
-                      onChange={e => setEndPartialAmount(e.target.value)}
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
-                      placeholder={formatPHP(endInfo.balance)}
-                      step="0.01"
-                    />
-                  </div>
-                )}
-                {endPayStatus === 'unpaid' && (
-                  <div className="flex items-center gap-2 bg-rose-950/30 border border-rose-800/30 rounded-xl px-4 py-3 text-xs text-rose-400">
-                    <AlertTriangle size={13} className="flex-shrink-0" />
-                    <span>Mark session as ended with outstanding balance of {formatPHP(endInfo.balance)}.</span>
-                  </div>
-                )}
-              </div>
+                  {endPayStatus !== 'unpaid' && (
+                    <div className="space-y-3">
+                      <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold block">Payment Method</label>
+                      <div className="flex gap-2 mb-3">
+                        <PayMethodBtn value="cash" current={endPayMethod} icon={Banknote} label="Cash" onChange={setEndPayMethod} />
+                        <PayMethodBtn value="gcash" current={endPayMethod} icon={CreditCard} label="GCash" onChange={setEndPayMethod} />
+                      </div>
+                      
+                      {endPayMethod === 'gcash' ? (
+                        <div>
+                          <label className="text-xs text-neutral-400 mb-1.5 block">GCash Reference Number *</label>
+                          <input type="text" value={endGcashRef} onChange={e => setEndGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit ref no." className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 font-mono" />
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="text-xs text-neutral-400 mb-1.5 block">Cash Tendered *</label>
+                          <input type="number" value={endCashTendered} onChange={e => setEndCashTendered(e.target.value)} placeholder={`e.g. ${endInfo.balance + 100}`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
+                          {parseFloat(endCashTendered) > (endPayStatus === 'partial' ? (parseFloat(endPartialAmount) || 0) : endInfo.balance) && (
+                            <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(endCashTendered) - (endPayStatus === 'partial' ? (parseFloat(endPartialAmount) || 0) : endInfo.balance))}</p>
+                          )}
+                        </div>
+                      )}
+                      
+                      {endPayStatus === 'partial' && (
+                        <div className="pt-2 border-t border-neutral-800">
+                          <label className="text-xs text-neutral-400 mb-1.5 block">Amount Collected Today (PHP) *</label>
+                          <input type="number" value={endPartialAmount} onChange={e => setEndPartialAmount(e.target.value)} placeholder={`Amount collected`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40" />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-              {/* Payment Method */}
-              <div className="space-y-2">
-                <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Method</label>
-                <div className="flex gap-2">
-                  <PayMethodBtn value="cash"  current={endPayMethod} icon={Banknote}    label="Cash"  onChange={setEndPayMethod} />
-                  <PayMethodBtn value="gcash" current={endPayMethod} icon={CreditCard}  label="GCash" onChange={setEndPayMethod} />
-                </div>
-              </div>
+                  {(endPayStatus === 'partial' || endPayStatus === 'unpaid') && (
+                    <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4 space-y-3">
+                      <p className="text-[10px] text-amber-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><AlertTriangle size={11}/> Debt Tracking Required</p>
+                      <input type="text" value={debtName} onChange={e=>setDebtName(e.target.value)} placeholder="Customer Name" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200" />
+                      <input type="text" value={debtContact} onChange={e=>setDebtContact(e.target.value)} placeholder="Contact Number / ID Info" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200" />
+                    </div>
+                  )}
+                </>
+              )}
 
-              {/* Actions */}
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setEndingTableId(null)}
-                  className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmEnd}
-                  className="flex-1 px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white text-sm rounded-xl shadow-lg shadow-rose-900/30 transition-all flex items-center justify-center gap-2 font-semibold"
-                >
-                  <CircleCheck size={15} /> Confirm End
-                </button>
+              <div className="flex gap-3 pt-2 border-t border-neutral-800">
+                <button type="button" onClick={() => setEndingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
+                <button type="button" onClick={handleConfirmEnd} className="flex-1 px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white text-sm rounded-xl shadow-lg shadow-rose-900/30 transition-all flex items-center justify-center gap-2 font-semibold"><CircleCheck size={15} /> Finish & Close</button>
               </div>
             </div>
           </div>
@@ -630,90 +733,66 @@ export function Tables() {
       )}
 
       {/* ════════════════════════════════════════════════════════
-          EXTEND SESSION MODAL — Payment Verification
+          EXTEND SESSION MODAL
       ════════════════════════════════════════════════════════ */}
       {extendingTableId && extendingTable?.session && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
             <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center flex-none bg-amber-950/20">
-              <div>
-                <h2 className="text-base font-bold text-neutral-100">Extend Session</h2>
-                <p className="text-xs text-neutral-500">{extendingTable.name} · {extendingTable.session.customerName}</p>
-              </div>
-              <button onClick={() => setExtendingTableId(null)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
-                <X size={16} />
-              </button>
+              <div><h2 className="text-base font-bold text-neutral-100">Extend Session</h2><p className="text-xs text-neutral-500">{extendingTable.name} · {extendingTable.session.customerName}</p></div>
+              <button onClick={() => setExtendingTableId(null)} className="p-2 text-neutral-500 hover:text-white rounded-lg"><X size={16} /></button>
             </div>
 
             <form onSubmit={handleConfirmExtend} className="overflow-y-auto flex-1 p-6 space-y-4">
-              {/* Extra Time */}
               <div className="space-y-1.5">
                 <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Extra Time</label>
                 <div className="grid grid-cols-2 gap-2">
                   {extendOptions.map(d => (
-                    <button key={d} type="button" onClick={() => setExtendMinutes(d)}
-                      className={`py-2.5 rounded-lg border text-xs font-semibold transition-all ${
-                        extendMinutes === d ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                      }`}
-                    >
-                      +{d < 60 ? `${d}min` : `${d / 60}hr`}
-                      <br />
-                      <span className="text-[10px] font-normal opacity-70">+{formatPHP((d / 60) * HOURLY_RATE)}</span>
+                    <button key={d} type="button" onClick={() => setExtendMinutes(d)} className={`py-2.5 rounded-lg border text-xs font-semibold transition-all ${extendMinutes === d ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
+                      +{d < 60 ? `${d}min` : `${d / 60}hr`}<br /><span className="text-[10px] font-normal opacity-70">+{formatPHP((d / 60) * HOURLY_RATE)}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Charge Summary */}
-              <div className="bg-neutral-900 rounded-xl p-3 text-xs border border-neutral-800">
-                <div className="flex justify-between text-neutral-400">
-                  <span>Extension charge</span>
-                  <span className="font-semibold text-amber-400">{formatPHP(extendCharge)}</span>
-                </div>
-                <div className="flex justify-between text-neutral-500 mt-1">
-                  <span>Rate</span>
-                  <span>₱{HOURLY_RATE}/hr</span>
+              <div className="bg-neutral-900 rounded-xl p-3 text-xs border border-neutral-800 flex justify-between">
+                <span className="text-neutral-400">Extension charge</span><span className="font-semibold text-amber-400">{formatPHP(extendCharge)}</span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
+                <div className="flex gap-2">
+                  <PayStatusBtn value="paid" current={extendPayStatus} label="Paid Now" onChange={setExtendPayStatus} />
+                  <PayStatusBtn value="partial" current={extendPayStatus} label="Partial" onChange={setExtendPayStatus} />
+                  <PayStatusBtn value="unpaid" current={extendPayStatus} label="Defer to End" onChange={setExtendPayStatus} />
                 </div>
               </div>
 
-              {/* Payment Status */}
-              <div className="space-y-2">
-                <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Extension Payment</label>
-                <div className="flex gap-2">
-                  <PayStatusBtn value="paid"    current={extendPayStatus} label="Paid Now"  onChange={setExtendPayStatus} />
-                  <PayStatusBtn value="partial" current={extendPayStatus} label="Partial"   onChange={setExtendPayStatus} />
-                  <PayStatusBtn value="unpaid"  current={extendPayStatus} label="Defer"     onChange={setExtendPayStatus} />
+              {extendPayStatus !== 'unpaid' && (
+                <div className="space-y-3">
+                  <div className="flex gap-2 mb-2">
+                    <PayMethodBtn value="cash" current={extendPayMethod} icon={Banknote} label="Cash" onChange={setExtendPayMethod} />
+                    <PayMethodBtn value="gcash" current={extendPayMethod} icon={CreditCard} label="GCash" onChange={setExtendPayMethod} />
+                  </div>
+                  {extendPayMethod === 'gcash' ? (
+                    <input type="text" value={extendGcashRef} onChange={e => setExtendGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit GCash Ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-blue-500/40" />
+                  ) : (
+                    <div>
+                      <input type="number" value={extendCashTendered} onChange={e => setExtendCashTendered(e.target.value)} placeholder="Amount Tendered" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-emerald-500/40" />
+                      {parseFloat(extendCashTendered) > (extendPayStatus === 'partial' ? parseFloat(extendPartialAmount)||0 : extendCharge) && (
+                        <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(extendCashTendered) - (extendPayStatus === 'partial' ? parseFloat(extendPartialAmount)||0 : extendCharge))}</p>
+                      )}
+                    </div>
+                  )}
+                  {extendPayStatus === 'partial' && (
+                    <input type="number" value={extendPartialAmount} onChange={e => setExtendPartialAmount(e.target.value)} placeholder={`Amount collected today`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-amber-500/40" />
+                  )}
                 </div>
-                {extendPayStatus === 'partial' && (
-                  <input
-                    type="number"
-                    value={extendPartialAmount}
-                    onChange={e => setExtendPartialAmount(e.target.value)}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
-                    placeholder={`Amount collected (of ${formatPHP(extendCharge)})`}
-                    step="0.01"
-                  />
-                )}
-              </div>
-
-              {/* Payment Method */}
-              <div className="space-y-2">
-                <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Method</label>
-                <div className="flex gap-2">
-                  <PayMethodBtn value="cash"  current={extendPayMethod} icon={Banknote}   label="Cash"  onChange={setExtendPayMethod} />
-                  <PayMethodBtn value="gcash" current={extendPayMethod} icon={CreditCard} label="GCash" onChange={setExtendPayMethod} />
-                </div>
-              </div>
+              )}
 
               <div className="flex gap-3">
-                <button type="button" onClick={() => setExtendingTableId(null)}
-                  className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
-                  Cancel
-                </button>
-                <button type="submit"
-                  className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-xl shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2 font-semibold">
-                  <Zap size={15} /> Confirm
-                </button>
+                <button type="button" onClick={() => setExtendingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 text-neutral-300 text-sm rounded-xl">Cancel</button>
+                <button type="submit" className="flex-1 px-4 py-2.5 bg-amber-600 text-white text-sm rounded-xl font-semibold shadow-lg"><Zap size={15} className="inline mr-1" /> Confirm</button>
               </div>
             </form>
           </div>

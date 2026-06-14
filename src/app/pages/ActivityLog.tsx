@@ -1,5 +1,9 @@
 import { useAppContext } from '../context/AppContext';
-import { Clock, Filter, Search, CheckCircle, XCircle, Bell, Users, Calendar, DollarSign, TableProperties, TrendingUp } from 'lucide-react';
+import { 
+  Clock, Filter, Search, CheckCircle, XCircle, Bell, Users, Calendar, 
+  DollarSign, TableProperties, TrendingUp, MessageSquare, Tag, Settings, 
+  Bot, ShoppingCart 
+} from 'lucide-react';
 import { formatDistanceToNow, format, isToday, isYesterday } from 'date-fns';
 import { useState } from 'react';
 import type { ActivityType } from '../context/AppContext';
@@ -16,6 +20,31 @@ const activityIcons: Record<ActivityType, { icon: any; color: string; bgColor: s
   reservation_updated: { icon: TrendingUp, color: 'text-blue-400', bgColor: 'bg-blue-500/15' },
   payment_received: { icon: DollarSign, color: 'text-emerald-400', bgColor: 'bg-emerald-500/15' },
   reservation_cancelled: { icon: XCircle, color: 'text-rose-400', bgColor: 'bg-rose-500/15' },
+  feedback_received: { icon: MessageSquare, color: 'text-sky-400', bgColor: 'bg-sky-500/15' },
+  promo_created: { icon: Tag, color: 'text-violet-400', bgColor: 'bg-violet-500/15' },
+  admin_action: { icon: Settings, color: 'text-rose-400', bgColor: 'bg-rose-500/15' },
+  tako_action: { icon: Bot, color: 'text-indigo-400', bgColor: 'bg-indigo-500/15' },
+  pos_order: { icon: ShoppingCart, color: 'text-emerald-400', bgColor: 'bg-emerald-500/15' },
+};
+
+const typeLabels: Record<ActivityType | 'all', string> = {
+  all: 'All',
+  table_assigned: 'Table Assigned',
+  table_freed: 'Table Freed',
+  table_reserved: 'Table Reserved',
+  session_extended: 'Session Extended',
+  queue_added: 'Queue Added',
+  queue_removed: 'Queue Removed',
+  queue_called: 'Queue Called',
+  reservation_created: 'Reservation Created',
+  reservation_updated: 'Reservation Updated',
+  payment_received: 'Payment',
+  reservation_cancelled: 'Cancelled',
+  feedback_received: 'Feedback Received',
+  promo_created: 'Promo Created',
+  admin_action: 'Admin Action',
+  tako_action: 'Tako Bot',
+  pos_order: 'POS Order',
 };
 
 const formatTimestamp = (date: Date) => {
@@ -35,25 +64,7 @@ export function ActivityLog() {
     return matchSearch && matchType;
   });
 
-  const activityTypes: Array<ActivityType | 'all'> = [
-    'all', 'table_assigned', 'table_freed', 'reservation_created', 'reservation_updated',
-    'payment_received', 'queue_added', 'reservation_cancelled'
-  ];
-
-  const typeLabels: Record<ActivityType | 'all', string> = {
-    all: 'All',
-    table_assigned: 'Table Assigned',
-    table_freed: 'Table Freed',
-    table_reserved: 'Table Reserved',
-    session_extended: 'Session Extended',
-    queue_added: 'Queue Added',
-    queue_removed: 'Queue Removed',
-    queue_called: 'Queue Called',
-    reservation_created: 'Reservation Created',
-    reservation_updated: 'Reservation Updated',
-    payment_received: 'Payment',
-    reservation_cancelled: 'Cancelled',
-  };
+  const activityTypes = Object.keys(typeLabels) as Array<ActivityType | 'all'>;
 
   return (
     <div className="space-y-5">
@@ -107,9 +118,11 @@ export function ActivityLog() {
           </div>
         ) : (
           <div className="divide-y divide-neutral-800/50">
-            {filtered.map((activity, index) => {
-              const config = activityIcons[activity.type];
+            {filtered.map((activity) => {
+              // Safety Fallback: If an unknown activity type is recorded, use a default icon instead of crashing
+              const config = activityIcons[activity.type] || { icon: Bell, color: 'text-neutral-500', bgColor: 'bg-neutral-800' };
               const Icon = config.icon;
+              const label = typeLabels[activity.type] || activity.type.replace('_', ' ');
               
               return (
                 <div key={activity.id} className="px-5 py-4 hover:bg-neutral-900/40 transition-colors">
@@ -136,7 +149,7 @@ export function ActivityLog() {
 
                     {/* Type badge */}
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-500 uppercase tracking-wider font-semibold flex-none">
-                      {typeLabels[activity.type]}
+                      {label}
                     </span>
                   </div>
                 </div>

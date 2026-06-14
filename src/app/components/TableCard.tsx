@@ -41,13 +41,27 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
 
   const timer = getTimerInfo();
 
+  // Smart click handler for the whole card
+  const handleCardClick = () => {
+    if (table.status === 'available' || table.status === 'reserved') {
+      onAssign();
+    } else if (table.status === 'occupied') {
+      onOrder();
+    }
+    // If maintenance, do nothing.
+  };
+
   return (
-    <div className={`relative flex flex-col bg-neutral-900 border-2 rounded-2xl overflow-hidden transition-all ${
-      table.status === 'available' ? 'border-emerald-900/50 hover:border-emerald-700/50' :
-      table.status === 'reserved' ? 'border-blue-900/50' :
-      table.status === 'maintenance' ? 'border-orange-900/50 opacity-80' :
-      timer?.isOvertime ? 'border-rose-600/60 shadow-[0_0_15px_rgba(225,29,72,0.15)]' : 'border-neutral-800'
-    }`}>
+    <div 
+      onClick={handleCardClick}
+      className={`relative flex flex-col bg-neutral-900 border-2 rounded-2xl overflow-hidden transition-all duration-200 
+      ${table.status !== 'maintenance' ? 'cursor-pointer hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50' : 'opacity-80'}
+      ${table.status === 'available' ? 'border-emerald-900/50 hover:border-emerald-500/50' :
+        table.status === 'reserved' ? 'border-blue-900/50 hover:border-blue-500/50' :
+        table.status === 'maintenance' ? 'border-orange-900/50' :
+        timer?.isOvertime ? 'border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:border-rose-400' : 'border-neutral-800 hover:border-neutral-600'
+      }`}
+    >
       
       {/* Overtime Pulse Background */}
       {timer?.isOvertime && <div className="absolute inset-0 bg-rose-500/5 animate-pulse pointer-events-none" />}
@@ -86,9 +100,12 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
                 <p className="text-xs text-neutral-500">{nextReservation.timeSlot}</p>
               </div>
             ) : (
-              <p className="text-xs text-neutral-500">Ready for walk-in or reservation.</p>
+              <p className="text-xs text-neutral-500 pointer-events-none">Ready for walk-in or reservation.</p>
             )}
-            <button onClick={onAssign} className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-xl text-sm font-semibold transition-colors">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onAssign(); }} 
+              className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-xl text-sm font-semibold transition-colors"
+            >
               <Play size={14} /> Start Session
             </button>
           </div>
@@ -107,7 +124,10 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
         {table.status === 'reserved' && (
           <div className="text-center space-y-4 my-2">
             <p className="text-xs text-blue-400">Reserved table. Awaiting customer arrival.</p>
-            <button onClick={onAssign} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-600/30 text-blue-400 rounded-xl text-sm font-semibold transition-colors">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onAssign(); }} 
+              className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-600/30 text-blue-400 rounded-xl text-sm font-semibold transition-colors"
+            >
               <Play size={14} /> Check-in Customer
             </button>
           </div>
@@ -135,7 +155,7 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
               </div>
             </div>
 
-            {/* F&B Total Indicator (Optional visual feedback that orders exist) */}
+            {/* F&B Total Indicator */}
             {table.session.orders && table.session.orders.length > 0 && (
               <div className="flex justify-between items-center px-3 py-2 bg-neutral-950 rounded-lg border border-neutral-800">
                 <span className="text-[10px] text-neutral-500 flex items-center gap-1"><ShoppingCart size={10}/> Orders</span>
@@ -147,15 +167,23 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
 
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-neutral-800/60">
-              {/* NEW POS ORDER BUTTON */}
-              <button onClick={onOrder} className="col-span-2 flex items-center justify-center gap-2 py-2 bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/30 text-emerald-400 rounded-lg text-xs font-semibold transition-colors">
-                <Plus size={13} /> Add To Order
+              <button 
+                onClick={(e) => { e.stopPropagation(); onOrder(); }} 
+                className="col-span-2 flex items-center justify-center gap-2 py-2 bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/30 text-emerald-400 rounded-lg text-xs font-semibold transition-colors"
+              >
+                <Plus size={13} /> Add F&B Orders
               </button>
               
-              <button onClick={onExtend} className="flex items-center justify-center gap-1.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-semibold transition-colors">
+              <button 
+                onClick={(e) => { e.stopPropagation(); onExtend(); }} 
+                className="flex items-center justify-center gap-1.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-semibold transition-colors"
+              >
                 <Clock size={13} /> Extend
               </button>
-              <button onClick={onEnd} className="flex items-center justify-center gap-1.5 py-2.5 bg-rose-950/30 hover:bg-rose-900/40 border border-rose-800/30 text-rose-400 rounded-lg text-xs font-semibold transition-colors">
+              <button 
+                onClick={(e) => { e.stopPropagation(); onEnd(); }} 
+                className="flex items-center justify-center gap-1.5 py-2.5 bg-rose-950/30 hover:bg-rose-900/40 border border-rose-800/30 text-rose-400 rounded-lg text-xs font-semibold transition-colors"
+              >
                 <XSquare size={13} /> End
               </button>
             </div>

@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus } from '../context/AppContext';
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
-  XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon
+  XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
+  CalendarX2, List as ListIcon, ChevronLeft, ChevronRight, Send
 } from 'lucide-react';
-import { format, isToday, isTomorrow, isPast } from 'date-fns';
+import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
 
 const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
@@ -22,9 +23,17 @@ const formatDate = (d: Date) => {
   return format(d, 'MMM d, h:mm a');
 };
 
+const todayStart = startOfDay(new Date());
+
 export function Reservations() {
-  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables } = useAppContext();
+  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates } = useAppContext();
+  
   const [showForm, setShowForm] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [viewMonth, setViewMonth] = useState(new Date());
+  const [dayViewDate, setDayViewDate] = useState<Date | null>(null);
+  const [emailToast, setEmailToast] = useState<string | null>(null);
+
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | ReservationStatus>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -41,6 +50,44 @@ export function Reservations() {
   const totalAmount = (form.durationHours * HOURLY_RATE);
   const downPayment = totalAmount * DOWN_PAYMENT_RATE;
 
+  // ─── Data Mappers for Calendar ───────────────────────────────────────
+  const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
+  
+  const closedMap = new Map(closedDates.map(c => [c.date, c]));
+  
+  const resMap = reservations.reduce((acc, r) => {
+    const d = dateKey(new Date(r.date));
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(r);
+    return acc;
+  }, {} as Record<string, typeof reservations[0]>);
+
+  const eventsMap = events.reduce((acc, e) => {
+    if (!e.date) return acc;
+    const datesArray = e.date.split(',');
+    datesArray.forEach(d => {
+      const key = d.trim();
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(e);
+    });
+    return acc;
+  }, {} as Record<string, typeof events[0]>);
+  
+  const promosMap = promoCodes.reduce((acc, p) => {
+    if(p.expiresAt) {
+      const d = format(new Date(p.expiresAt), 'yyyy-MM-dd');
+      if (!acc[d]) acc[d] = [];
+      acc[d].push(p);
+    }
+    return acc;
+  }, {} as Record<string, typeof promoCodes[0]>);
+
+  const handleSendEmail = (resId: string) => {
+    setEmailToast(`Reschedule email sent to Reservation #${resId.toUpperCase()}`);
+    setTimeout(() => setEmailToast(null), 3000);
+  };
+
+  // ─── Handlers ────────────────────────────────────────────────────────
   const handleExportCSV = () => {
     const headers = ['ID', 'Customer Name', 'Contact', 'Email', 'Date', 'Time', 'Duration (hrs)', 'Party Size', 'Table', 'Status', 'Total Amount', 'Down Payment', 'Balance Paid', 'Promo Code'];
     const rows = reservations.map(r => [
@@ -98,7 +145,7 @@ export function Reservations() {
 
   const filtered = reservations
     .filter(r => {
-      const matchSearch = !search || r.customerName.toLowerCase().includes(search.toLowerCase()) || r.contactNumber.includes(search);
+      const matchSearch = !search || r.customerName.toLowerCase().includes(search.toLowerCase()) || r.contactNumber.includes(search) || r.id.toLowerCase().includes(search.toLowerCase());
       const matchStatus = filterStatus === 'all' || r.status === filterStatus;
       return matchSearch && matchStatus;
     })
@@ -117,6 +164,80 @@ export function Reservations() {
     return s;
   }, 0);
 
+  // ─── Render Calendar ─────────────────────────────────────────────────
+  const renderCalendar = () => {
+    const monthStart = startOfMonth(viewMonth);
+    const monthEnd   = endOfMonth(viewMonth);
+    const days       = eachDayOfInterval({ start: monthStart, end: monthEnd });
+    const startPad   = monthStart.getDay();
+
+    return (
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800">
+          <button onClick={() => setViewMonth(m => subMonths(m, 1))} className="p-2 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
+            <ChevronLeft size={16} />
+          </button>
+          <h2 className="text-sm font-bold text-neutral-200">{format(viewMonth, 'MMMM yyyy')}</h2>
+          <button onClick={() => setViewMonth(m => addMonths(m, 1))} className="p-2 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        <div className="p-4">
+          <div className="grid grid-cols-7 mb-2">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+              <div key={d} className="text-center text-[10px] text-neutral-500 font-semibold uppercase tracking-wider py-1">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1.5">
+            {Array.from({ length: startPad }).map((_, i) => <div key={`pad-${i}`} />)}
+            {days.map(day => {
+              const key = dateKey(day);
+              const isPastDate = isBefore(day, todayStart);
+              const isTodayDate = isSameDay(day, new Date());
+              
+              const dayCls = closedMap.get(key);
+              const dayEvs = eventsMap[key] || [];
+              const dayPrs = promosMap[key] || [];
+              const dayRes = resMap[key] || [];
+
+              return (
+                <button
+                  key={key}
+                  onClick={() => setDayViewDate(day)}
+                  className={`relative aspect-square rounded-xl p-1.5 flex flex-col items-start transition-all border text-left
+                    ${isPastDate ? 'bg-neutral-900/40 border-neutral-800/40 text-neutral-700 cursor-default' : 'bg-neutral-900 border-neutral-800 hover:border-neutral-600 cursor-pointer'}
+                    ${isTodayDate ? 'ring-1 ring-amber-500/50' : ''}
+                    ${dayCls ? 'bg-rose-950/20 border-rose-900/30' : ''}
+                  `}
+                >
+                  <span className={`font-semibold text-xs ${isTodayDate ? 'text-amber-400' : isPastDate ? 'text-neutral-600' : 'text-neutral-300'}`}>
+                    {format(day, 'd')}
+                  </span>
+                  
+                  <div className="mt-auto w-full space-y-0.5 overflow-hidden">
+                    {dayCls && <div className="w-full text-[8px] bg-rose-500/20 text-rose-400 rounded px-1 truncate font-semibold">Closed</div>}
+                    {!dayCls && dayRes.length > 0 && (
+                      <div className="w-full text-[8px] bg-blue-500/20 text-blue-400 rounded px-1 truncate font-semibold border border-blue-500/30">
+                        {dayRes.length} Rsv
+                      </div>
+                    )}
+                    {!dayCls && dayEvs.map(e => (
+                      <div key={e.id} className="w-full text-[8px] bg-amber-500/20 text-amber-400 rounded px-1 truncate font-semibold">{e.title}</div>
+                    ))}
+                    {!dayCls && dayPrs.map(p => (
+                      <div key={p.id} className="w-full text-[8px] bg-violet-500/20 text-violet-400 rounded px-1 truncate font-semibold">{p.code} exp</div>
+                    ))}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-5">
       {/* Stats */}
@@ -134,13 +255,29 @@ export function Reservations() {
         ))}
       </div>
 
+      {/* Email Toast */}
+      {emailToast && (
+        <div className="flex items-center gap-2 bg-sky-950/40 border border-sky-700/40 text-sky-400 text-sm px-4 py-3 rounded-xl mb-4">
+          <CheckCircle size={14} /> {emailToast}
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex bg-neutral-900 border border-neutral-800 rounded-lg p-1 flex-shrink-0">
+          <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors ${viewMode === 'list' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>
+            <ListIcon size={14} /> List
+          </button>
+          <button onClick={() => setViewMode('calendar')} className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors ${viewMode === 'calendar' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>
+            <CalendarX2 size={14} /> Calendar
+          </button>
+        </div>
+        
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
           <input
             type="text"
-            placeholder="Search by name or contact..."
+            placeholder="Search by ID, name or contact..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
@@ -176,117 +313,209 @@ export function Reservations() {
         </button>
       </div>
 
-      {/* Table */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-neutral-800 bg-neutral-900/50">
-                {['Customer', 'Date & Time', 'Duration', 'Party', 'Table', 'Status', 'Payment', 'Actions'].map(h => (
-                  <th key={h} className="text-left text-[10px] text-neutral-500 uppercase tracking-wider font-semibold px-4 py-3">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-800/50">
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-12">
-                    <Calendar size={28} className="mx-auto text-neutral-700 mb-2" />
-                    <p className="text-sm text-neutral-600">No reservations found</p>
-                  </td>
+      {/* Table View */}
+      {viewMode === 'list' && (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-neutral-800 bg-neutral-900/50">
+                  {['Customer', 'Date & Time', 'Duration', 'Party', 'Table', 'Status', 'Payment', 'Actions'].map(h => (
+                    <th key={h} className="text-left text-[10px] text-neutral-500 uppercase tracking-wider font-semibold px-4 py-3">{h}</th>
+                  ))}
                 </tr>
-              ) : filtered.map(r => {
-                const cfg = statusConfig[r.status];
-                return (
-                  <tr
-                    key={r.id}
-                    onClick={() => setSelectedId(r.id)}
-                    className="hover:bg-neutral-900/60 transition-colors cursor-pointer"
-                  >
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-semibold text-neutral-200">{r.customerName}</p>
-                      <p className="text-xs text-neutral-500">{r.contactNumber}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="text-sm text-neutral-300">{formatDate(r.date)}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-neutral-400">{r.durationHours}h</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-neutral-400">{r.partySize} pax</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-neutral-400">{r.tableId ? tables.find(t => t.id === r.tableId)?.name || r.tableId : '—'}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${cfg.color}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-                        {cfg.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1">
-                          {r.downPaymentPaid
-                            ? <CheckCircle size={11} className="text-emerald-400" />
-                            : <XCircle size={11} className="text-neutral-600" />}
-                          <span className="text-[10px] text-neutral-500">DP {formatPHP(r.downPaymentAmount)}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {r.balancePaid
-                            ? <CheckCircle size={11} className="text-emerald-400" />
-                            : <XCircle size={11} className="text-neutral-600" />}
-                          <span className="text-[10px] text-neutral-500">Bal {formatPHP(r.totalAmount - r.downPaymentAmount)}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                        {r.status === 'pending' && (
-                          <button
-                            onClick={() => updateReservationStatus(r.id, 'confirmed')}
-                            className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 text-[10px] font-bold rounded border border-emerald-700/30 transition-colors"
-                          >
-                            Verify
-                          </button>
-                        )}
-                        {r.status === 'confirmed' && (
-                          <button
-                            onClick={() => updateReservationStatus(r.id, 'checked-in')}
-                            className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold rounded border border-blue-700/30 transition-colors"
-                          >
-                            Check In
-                          </button>
-                        )}
-                        {r.status === 'checked-in' && (
-                          <button
-                            onClick={() => updateReservationStatus(r.id, 'completed')}
-                            className="px-2 py-1 bg-neutral-700/50 hover:bg-neutral-600/50 text-neutral-300 text-[10px] font-bold rounded border border-neutral-700 transition-colors"
-                          >
-                            Complete
-                          </button>
-                        )}
-                        {(r.status !== 'cancelled' && r.status !== 'completed') && (
-                          <button
-                            onClick={() => {
-                              setCancelTarget(r.id);
-                              setShowCancelDialog(true);
-                            }}
-                            className="px-2 py-1 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 text-[10px] font-bold rounded border border-rose-700/30 transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        )}
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-neutral-800/50">
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12">
+                      <Calendar size={28} className="mx-auto text-neutral-700 mb-2" />
+                      <p className="text-sm text-neutral-600">No reservations found</p>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ) : filtered.map(r => {
+                  const cfg = statusConfig[r.status];
+                  return (
+                    <tr
+                      key={r.id}
+                      onClick={() => setSelectedId(r.id)}
+                      className="hover:bg-neutral-900/60 transition-colors cursor-pointer"
+                    >
+                      <td className="px-4 py-3">
+                        <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2">
+                          {r.customerName}
+                          <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>
+                        </p>
+                        <p className="text-xs text-neutral-500">{r.contactNumber}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-sm text-neutral-300">{formatDate(r.date)}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-neutral-400">{r.durationHours}h</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-neutral-400">{r.partySize} pax</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-neutral-400">{r.tableId ? tables.find(t => t.id === r.tableId)?.name || r.tableId : '—'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${cfg.color}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+                          {cfg.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1">
+                            {r.downPaymentPaid
+                              ? <CheckCircle size={11} className="text-emerald-400" />
+                              : <XCircle size={11} className="text-neutral-600" />}
+                            <span className="text-[10px] text-neutral-500">DP {formatPHP(r.downPaymentAmount)}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {r.balancePaid
+                              ? <CheckCircle size={11} className="text-emerald-400" />
+                              : <XCircle size={11} className="text-neutral-600" />}
+                            <span className="text-[10px] text-neutral-500">Bal {formatPHP(r.totalAmount - r.downPaymentAmount)}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                          {r.status === 'pending' && (
+                            <button
+                              onClick={() => updateReservationStatus(r.id, 'confirmed')}
+                              className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 text-[10px] font-bold rounded border border-emerald-700/30 transition-colors"
+                            >
+                              Verify
+                            </button>
+                          )}
+                          {r.status === 'confirmed' && (
+                            <button
+                              onClick={() => updateReservationStatus(r.id, 'checked-in')}
+                              className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold rounded border border-blue-700/30 transition-colors"
+                            >
+                              Check In
+                            </button>
+                          )}
+                          {r.status === 'checked-in' && (
+                            <button
+                              onClick={() => updateReservationStatus(r.id, 'completed')}
+                              className="px-2 py-1 bg-neutral-700/50 hover:bg-neutral-600/50 text-neutral-300 text-[10px] font-bold rounded border border-neutral-700 transition-colors"
+                            >
+                              Complete
+                            </button>
+                          )}
+                          {(r.status !== 'cancelled' && r.status !== 'completed') && (
+                            <button
+                              onClick={() => {
+                                setCancelTarget(r.id);
+                                setShowCancelDialog(true);
+                              }}
+                              className="px-2 py-1 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 text-[10px] font-bold rounded border border-rose-700/30 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Calendar View */}
+      {viewMode === 'calendar' && renderCalendar()}
+
+      {/* Day View Modal (Calendar click) */}
+      {dayViewDate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <h3 className="font-bold text-neutral-200">{format(dayViewDate, 'MMMM d, yyyy')}</h3>
+              <button onClick={() => setDayViewDate(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
+            </div>
+            
+            <div className="p-5 overflow-y-auto space-y-4">
+              {(() => {
+                const key = dateKey(dayViewDate);
+                const dayEvs = eventsMap[key] || [];
+                const dayPrs = promosMap[key] || [];
+                const dayCls = closedMap.get(key);
+                const dayRes = resMap[key] || [];
+
+                return (
+                  <>
+                    {(dayCls || dayEvs.length > 0 || dayPrs.length > 0) && (
+                      <div className="space-y-2 mb-4 bg-neutral-900/50 rounded-lg p-3 border border-neutral-800">
+                        <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">Events & Closures</p>
+                        {dayCls && <div className="text-xs text-rose-400 font-semibold">Closed: {dayCls.reason}</div>}
+                        {dayEvs.map(e => <div key={e.id} className="text-xs text-amber-400 font-semibold">Event: {e.title}</div>)}
+                        {dayPrs.map(p => <div key={p.id} className="text-xs text-violet-400 font-semibold">Promo Expiry: {p.code}</div>)}
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold border-b border-neutral-800 pb-2">
+                        Reservations ({dayRes.length})
+                      </p>
+                      {dayRes.length === 0 ? (
+                        <p className="text-xs text-neutral-600">No reservations for this date.</p>
+                      ) : (
+                        dayRes.map(r => {
+                          const isCancelled = r.status === 'cancelled';
+                          
+                          return (
+                            <div key={r.id} className={`p-3 rounded-lg border flex flex-col gap-2 ${dayCls && !isCancelled ? 'bg-rose-950/20 border-rose-900/30' : 'bg-neutral-900 border-neutral-800'}`}>
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-semibold text-neutral-200">{r.customerName}</p>
+                                    <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>
+                                  </div>
+                                  <p className="text-xs text-neutral-500">{r.timeSlot} · {r.partySize} pax</p>
+                                </div>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${statusConfig[r.status]?.color}`}>
+                                  {r.status}
+                                </span>
+                              </div>
+                              
+                              {/* Affected by Closure Logic */}
+                              {dayCls && (
+                                <div className="mt-2 pt-2 border-t border-neutral-800/60 flex items-center justify-between">
+                                  {isCancelled ? (
+                                    <span className="text-[10px] text-neutral-500 flex items-center gap-1"><CheckCircle size={10} /> Action Taken (Cancelled/Rescheduled)</span>
+                                  ) : (
+                                    <>
+                                      <span className="text-[10px] text-rose-400 flex items-center gap-1 font-semibold"><AlertTriangle size={10} /> Affected: No Action</span>
+                                      <button 
+                                        onClick={() => handleSendEmail(r.id)}
+                                        className="text-[10px] bg-rose-600/20 text-rose-400 hover:bg-rose-600/40 px-2 py-1 rounded flex items-center gap-1 transition-colors"
+                                      >
+                                        <Send size={10} /> Resend Email
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Detail Panel */}
       {selected && (
@@ -295,7 +524,7 @@ export function Reservations() {
             <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center">
               <div>
                 <h2 className="text-base font-bold text-neutral-100">{selected.customerName}</h2>
-                <p className="text-xs text-neutral-500">Reservation #{selected.id.toUpperCase()}</p>
+                <p className="text-xs text-neutral-500 font-mono tracking-wider">Reservation #{selected.id.toUpperCase()}</p>
               </div>
               <button onClick={() => setSelectedId(null)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg">
                 <X size={16} />

@@ -238,6 +238,25 @@ const defaultStaffUsers: StaffUser[] = [
   { id: 'u3', username: 'cashier1', password: 'cash123', fullName: 'Maria Cashier', email: 'cashier1@oneshot.com', role: 'cashier', isAdmin: false, phone: '09391234567', isActive: true, createdAt: new Date('2024-04-15') },
 ];
 
+const defaultReservations: Reservation[] = [
+  {
+    id: 'TEST',
+    customerName: 'Test Guest',
+    contactNumber: '09123456789',
+    email: 'test@example.com',
+    date: new Date(),
+    timeSlot: '18:00',
+    durationHours: 2,
+    partySize: 4,
+    status: 'confirmed',
+    totalAmount: 500,
+    downPaymentAmount: 125,
+    downPaymentPaid: true,
+    balancePaid: false,
+    createdAt: new Date(),
+  }
+];
+
 // ── Context Type ───────────────────────────────────────────────
 type AppContextType = {
   tables: Table[];
@@ -287,7 +306,7 @@ type AppContextType = {
   removeFromQueue: (id: string) => void;
   callQueueItem: (id: string) => void;
   
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => void;
+  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string;
   updateReservationStatus: (id: string, s: ReservationStatus) => void;
   cancelReservation: (id: string, r: string) => void;
   updateDownPayment: (id: string, p: boolean) => void;
@@ -328,7 +347,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [tables, setTables] = useState<Table[]>(defaultTables);
   const [queue, setQueue] = useState<QueueItem[]>(defaultQueue);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>(defaultReservations);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
@@ -445,10 +464,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeFromQueue = (id: string) => setQueue(prev => prev.filter(q => q.id !== id));
   const callQueueItem = (id: string) => setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
 
-  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>) => {
-    const id = `r${Date.now()}`;
+  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
+    // Generates a clean 6-character Reservation ID (e.g. "A1B2C3")
+    const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     setReservations(prev => [...prev, { ...i, id, createdAt: new Date() }]);
     syncToSupabase('RESERVATION_ADDED', { id, ...i });
+    return id;
   };
   const updateReservationStatus = (id: string, status: ReservationStatus) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
   const cancelReservation = (id: string, reason: string) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));

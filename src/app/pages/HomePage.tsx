@@ -5,9 +5,9 @@ import { addMinutes, differenceInSeconds, format, isToday } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Star, Phone, MapPin,
   Clock, LogIn, UserPlus, Eye, EyeOff,
-  Calendar, CheckCircle, ArrowRight, Users, ChevronDown, ChevronUp,
+  Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  Sparkles, Upload
+  Sparkles, Upload, Search, Copy, ExternalLink
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, generateReferralCode } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -46,7 +46,7 @@ const TIME_SLOTS = [
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-type Section = 'home' | 'reservations' | 'rates' | 'events' | 'about' | 'contacts' | 'reviews' | 'feedback' | 'bookings';
+type Section = 'home' | 'reservations' | 'rates' | 'events' | 'about' | 'feedback';
 
 // ─── QR Code Component ────────────────────────────────────────
 const QR_GCASH = [
@@ -216,7 +216,7 @@ function MiniCalendar({
 // ─── Main HomePage ────────────────────────────────────────────
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, activeAnnouncement, addReservation, feedback, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext();
+  const { tables, queue, reservations, events, addReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext();
 
   // Announcement rotator
   const [announcementIdx, setAnnouncementIdx] = useState(0);
@@ -225,7 +225,6 @@ export function HomePage() {
   // Hero slideshow
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
-  
   
   // Live clock for table timers
   const [now, setNow] = useState(new Date());
@@ -246,8 +245,13 @@ export function HomePage() {
   // Register form
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', referralCode: '', showPw: false, error: '' });
 
-  // Reservation flow
+ // Reservation flow
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0); // 0=closed, 1=form, 2=payment, 3=confirmed
+  const [resTab, setResTab] = useState<'new' | 'my-bookings'>('new');
+  const [trackForm, setTrackForm] = useState({ reservationId: '' });
+  const [trackedReservations, setTrackedReservations] = useState<any[] | null>(null);
+  const [generatedResId, setGeneratedResId] = useState('');
+  
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isLiveMonitorOpen, setIsLiveMonitorOpen] = useState(false);
@@ -267,15 +271,9 @@ export function HomePage() {
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPercent: number } | null>(null);
   const [promoError, setPromoError] = useState('');
 
-  // Reviews form (formerly feedback)
-  const [fbForm, setFbForm] = useState({ name: '', rating: 5, comment: '' });
-  const [fbSent, setFbSent] = useState(false);
-  // Reviews tab toggle: 'list' | 'form'
-  const [reviewTab, setReviewTab] = useState<'list' | 'form'>('list');
-
-  // Simple Feedback form
-  const [simpleFeedbackForm, setSimpleFeedbackForm] = useState({ name: '', type: '', contact: '', message: '' });
-  const [simpleFeedbackSent, setSimpleFeedbackSent] = useState(false);
+  // Feedback form state
+  const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', message: '' });
+  const [feedbackSent, setFeedbackSent] = useState(false);
 
   // Rotating announcements
   useEffect(() => {
@@ -372,7 +370,7 @@ export function HomePage() {
       const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
       reservationDate.setHours(hours, minutes, 0, 0);
 
-      addReservation({
+      const newId = (addReservation as any)({
         customerName: resForm.name,
         contactNumber: resForm.phone,
         email: resForm.email,
@@ -390,8 +388,9 @@ export function HomePage() {
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
         paymentRef: paymentRef,
         receiptImg: receiptImg,
-      } as any);
+      });
 
+      setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
       setConfirmingPayment(false);
       setReservationStep(3);
     }, 1500);
@@ -407,25 +406,27 @@ export function HomePage() {
     setPromoError('');
     setPaymentRef('');
     setReceiptImg(null);
+    setGeneratedResId('');
+    if (currentUser) setResTab('my-bookings');
   };
 
-  const handleFeedbackSubmit = () => {
-    if (!fbForm.name || !fbForm.comment) return;
-    addFeedback({ customerName: fbForm.name, rating: fbForm.rating, comment: fbForm.comment, tags: [] });
-    setFbSent(true);
+  const handleFeedbackSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || !feedbackForm.message) return;
+    
+    addFeedback({
+      customerName: feedbackForm.name,
+      contactInfo: feedbackForm.contact,
+      rating: 0, 
+      feedbackType: feedbackForm.type as any,
+      comment: feedbackForm.message,
+      tags: [],
+    });
+    
+    setFeedbackSent(true);
     setTimeout(() => {
-      setFbSent(false);
-      setFbForm({ name: '', rating: 5, comment: '' });
-    }, 3000);
-  };
-
-  const handleSimpleFeedbackSubmit = () => {
-    if (!simpleFeedbackForm.name || !simpleFeedbackForm.type || !simpleFeedbackForm.contact) return;
-    // Mock submission - in real app would send to backend
-    setSimpleFeedbackSent(true);
-    setTimeout(() => {
-      setSimpleFeedbackSent(false);
-      setSimpleFeedbackForm({ name: '', type: '', contact: '', message: '' });
+      setFeedbackSent(false);
+      setFeedbackForm({ name: '', contact: '', type: '', message: '' });
     }, 3000);
   };
 
@@ -457,36 +458,6 @@ export function HomePage() {
     return `~${hrs}h ${mins}m`;
   };
 
-  // Table timer helper
-  const getTableTimerInfo = (tableId: string) => {
-    const t = tables.find(tb => tb.id === tableId);
-    if (!t || t.status !== 'occupied' || !t.session) return null;
-    const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
-    const secsLeft = differenceInSeconds(endTime, now);
-    const isOvertime = secsLeft < 0;
-    const absSecs = Math.abs(secsLeft);
-    const mins = Math.floor(absSecs / 60);
-    const secs = absSecs % 60;
-    return {
-      formatted: `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`,
-      isOvertime,
-      isAlert: !isOvertime && secsLeft <= 900,
-      customerName: t.session.customerName,
-    };
-  };
-
-  // Next reservation for a table (today only)
-  const getNextResForTable = (tableId: string) => {
-    return reservations
-      .filter(r =>
-        r.tableId === tableId &&
-        (r.status === 'pending' || r.status === 'confirmed') &&
-        isToday(new Date(r.date)) &&
-        new Date(r.date) >= now
-      )
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0] || null;
-  };
-
   const reservedDates = reservations
     .filter(r => r.status !== 'cancelled')
     .map(r => new Date(r.date));
@@ -497,8 +468,7 @@ export function HomePage() {
     { id: 'rates', label: 'Rates' },
     { id: 'events', label: 'Events' },
     { id: 'about', label: 'About Us' },
-    { id: 'reviews', label: 'Feedback' },
-    { id: 'bookings', label: 'My Bookings', requiresAuth: true },
+    { id: 'feedback', label: 'Feedback' },
   ];
   const navSections = allNavSections.filter(s => !s.requiresAuth || currentUser !== null);
 
@@ -785,290 +755,427 @@ export function HomePage() {
               transition={{ duration: 0.3 }}
               className="max-w-5xl mx-auto px-6 py-10"
             >
-              <div className="text-center mb-10">
-                <h2 className="text-3xl font-black text-white mb-2">Make a Reservation</h2>
-                <p className="text-neutral-400 text-sm">Select your preferred date on the calendar, fill in your details, and secure your spot with a 25% down payment.</p>
+              <div className="text-center mb-8">
+                <h2 className="text-3xl font-black text-white mb-2">Reservations</h2>
+                <p className="text-neutral-400 text-sm">Secure your spot or view your booking history.</p>
               </div>
 
-              {/* Live Status Overview (Moved to Step 1 & 2) */}
+              {/* Sub-Navigation ALWAYS VISIBLE */}
+              <div className="flex gap-1 bg-neutral-900 border border-neutral-800 rounded-xl p-1 mb-8 max-w-sm mx-auto">
+                <button
+                  onClick={() => setResTab('new')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    resTab === 'new' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'
+                  }`}
+                >
+                  <Calendar size={14} /> New Booking
+                </button>
+                <button
+                  onClick={() => setResTab('my-bookings')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    resTab === 'my-bookings' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'
+                  }`}
+                >
+                  {currentUser ? <BookOpen size={14} /> : <Search size={14} />} 
+                  {currentUser ? 'My Bookings' : 'Track Booking'}
+                </button>
+              </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20">
-                {/* Calendar */}
-                <div>
-                  <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">
-                    Step 1 — Pick a Date
-                  </p>
-                  <MiniCalendar
-                    selectedDate={selectedDate}
-                    onSelect={setSelectedDate}
-                    reservedDates={reservedDates}
-                  />
-                  {selectedDate && (
-                    <div className="mt-3 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
-                      <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
-                      <span className="text-xs text-emerald-300">
-                        Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
-                      </span>
-                    </div>
-                  )}
-                </div>
+              {/* TAB 1: NEW BOOKING FLOW */}
+              {resTab === 'new' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20">
+                  {/* Calendar */}
+                  <div>
+                    <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">
+                      Step 1 — Pick a Date
+                    </p>
+                    <MiniCalendar
+                      selectedDate={selectedDate}
+                      onSelect={setSelectedDate}
+                      reservedDates={reservedDates}
+                    />
+                    {selectedDate && (
+                      <div className="mt-3 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
+                        <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                        <span className="text-xs text-emerald-300">
+                          Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                        </span>
+                      </div>
+                    )}
+                  </div>
 
-                {/* Form */}
-                <div>
-                  {!selectedDate ? (
-                    <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-10 text-center flex flex-col items-center gap-3">
-                      <Calendar size={32} className="text-neutral-600" />
-                      <p className="text-neutral-500 text-sm">Please select a date from the calendar to continue your reservation.</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">
-                        Step 2 — Your Details
-                      </p>
-                      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
-                        {/* Name */}
-                        <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5">Full Name <span className="text-rose-500">*</span></label>
-                          <input
-                            type="text"
-                            value={resForm.name}
-                            onChange={e => setResForm(f => ({ ...f, name: e.target.value }))}
-                            placeholder="e.g. Juan dela Cruz"
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors"
-                          />
-                        </div>
-                        {/* Email */}
-                        <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5">Email Address <span className="text-rose-500">*</span></label>
-                          <input
-                            type="email"
-                            value={resForm.email}
-                            onChange={e => setResForm(f => ({ ...f, email: e.target.value }))}
-                            placeholder="juan@email.com"
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors"
-                          />
-                        </div>
-                        {/* Contact */}
-                        <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
-                          <input
-                            type="tel"
-                            value={resForm.phone}
-                            onChange={e => setResForm(f => ({ ...f, phone: e.target.value }))}
-                            placeholder="09XX-XXX-XXXX"
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors"
-                          />
-                        </div>
-                        {/* Pax & Duration */}
-                        <div className="grid grid-cols-2 gap-4">
+                  {/* Form */}
+                  <div>
+                    {!selectedDate ? (
+                      <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-10 text-center flex flex-col items-center gap-3">
+                        <Calendar size={32} className="text-neutral-600" />
+                        <p className="text-neutral-500 text-sm">Please select a date from the calendar to continue your reservation.</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">
+                          Step 2 — Your Details
+                        </p>
+                        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
+                          {/* Name */}
                           <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">No. of Persons</label>
+                            <label className="block text-xs text-neutral-400 mb-1.5">Full Name <span className="text-rose-500">*</span></label>
                             <input
-                              type="number"
-                              min={1} max={20}
-                              value={resForm.pax}
-                              onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))}
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                              type="text"
+                              value={resForm.name}
+                              onChange={e => setResForm(f => ({ ...f, name: e.target.value }))}
+                              placeholder="e.g. Juan dela Cruz"
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors"
                             />
                           </div>
+                          {/* Email */}
                           <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Duration (hours)</label>
-                            <select
-                              value={resForm.duration}
-                              onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))}
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors"
-                            >
-                              {[1, 2, 3, 4, 5, 6].map(h => (
-                                <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
-                              ))}
-                            </select>
+                            <label className="block text-xs text-neutral-400 mb-1.5">Email Address <span className="text-rose-500">*</span></label>
+                            <input
+                              type="email"
+                              value={resForm.email}
+                              onChange={e => setResForm(f => ({ ...f, email: e.target.value }))}
+                              placeholder="juan@email.com"
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                            />
                           </div>
-                        </div>
-                        {/* Time Slot */}
-                        <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5">Preferred Time</label>
-                          <div className="grid grid-cols-4 gap-1.5">
-                            {TIME_SLOTS.map(t => {
-                              const isHappyHour = t === '18:00' || t === '19:00';
-                              return (
-                                <button
-                                  key={t}
-                                  disabled={isHappyHour}
-                                  onClick={() => setResForm(f => ({ ...f, timeSlot: t }))}
-                                  className={`py-2 rounded-lg text-xs font-semibold transition-all ${
-                                    isHappyHour 
-                                      ? 'bg-neutral-800/50 text-neutral-600 cursor-not-allowed border border-neutral-800' 
-                                      : resForm.timeSlot === t
-                                      ? 'bg-emerald-600 text-white'
-                                      : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200'
-                                  }`}
-                                  title={isHappyHour ? "Happy Hour (Walk-in Only)" : ""}
-                                >
-                                  {t}
-                                </button>
-                              );
-                            })}
+                          {/* Contact */}
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
+                            <input
+                              type="tel"
+                              value={resForm.phone}
+                              onChange={e => setResForm(f => ({ ...f, phone: e.target.value }))}
+                              placeholder="09XX-XXX-XXXX"
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                            />
                           </div>
-                          <p className="text-[10px] text-amber-500 mt-2">
-                            * 18:00 and 19:00 are Happy Hour (Strictly walk-in only). These time slots cannot be booked online.
-                          </p>
-                        </div>
-
-                        {/* Table Selection */}
-                        <div>
-                          <label className="block text-xs text-neutral-400 mb-2">Preferred Table <span className="text-neutral-600">(optional)</span></label>
-                          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-                            
-                            {/* Any Available option */}
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTableId(null)}
-                              className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${
-                                !selectedTableId
-                                  ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30'
-                                  : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'
-                              }`}
-                            >
-                              <CheckCircle size={16} />
-                              Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
-                            </button>
-
-                            {/* Table grid map - Simpler & Detailed */}
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                              {tables.map(table => {
-                                const isAvail = table.status === 'available';
-                                const isRes = table.status === 'reserved';
-                                const isOcc = table.status === 'occupied';
-                                const isSel = selectedTableId === table.id;
-                                const disabled = isOcc || isRes;
-
-                                // Explicit text logic instead of just colors
-                                const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
-                                const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
-                                const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
-                                
+                          {/* Pax & Duration */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs text-neutral-400 mb-1.5">No. of Persons</label>
+                              <input
+                                type="number"
+                                min={1} max={20}
+                                value={resForm.pax}
+                                onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))}
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-neutral-400 mb-1.5">Duration (hours)</label>
+                              <select
+                                value={resForm.duration}
+                                onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))}
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                              >
+                                {[1, 2, 3, 4, 5, 6].map(h => (
+                                  <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          {/* Time Slot */}
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1.5">Preferred Time</label>
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {TIME_SLOTS.map(t => {
+                                const isHappyHour = t === '18:00' || t === '19:00';
                                 return (
                                   <button
-                                    key={table.id}
-                                    type="button"
-                                    disabled={disabled}
-                                    onClick={() => setSelectedTableId(isSel ? null : table.id)}
-                                    className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${
-                                      isSel
-                                        ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20'
-                                        : disabled
-                                        ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60'
-                                        : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'
+                                    key={t}
+                                    disabled={isHappyHour}
+                                    onClick={() => setResForm(f => ({ ...f, timeSlot: t }))}
+                                    className={`py-2 rounded-lg text-xs font-semibold transition-all ${
+                                      isHappyHour 
+                                        ? 'bg-neutral-800/50 text-neutral-600 cursor-not-allowed border border-neutral-800' 
+                                        : resForm.timeSlot === t
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200'
                                     }`}
+                                    title={isHappyHour ? "Happy Hour (Walk-in Only)" : ""}
                                   >
-                                    <div className="flex items-center justify-between w-full mb-1">
-                                      <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>
-                                        {table.name}
-                                      </span>
-                                      {isSel && <CheckCircle size={14} className="text-emerald-400" />}
-                                    </div>
-                                    
-                                    <div className="flex items-center gap-1.5">
-                                      <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
-                                      <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>
-                                        {statusText}
-                                      </span>
-                                    </div>
+                                    {t}
                                   </button>
                                 );
                               })}
                             </div>
+                            <p className="text-[10px] text-amber-500 mt-2">
+                              * 18:00 and 19:00 are Happy Hour (Strictly walk-in only). These time slots cannot be booked online.
+                            </p>
+                          </div>
 
-                            {selectedTableId && (
-                              <div className="mt-4 flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/20 rounded-lg px-3 py-2.5">
-                                <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
-                                <span className="text-xs text-emerald-300 leading-relaxed">
-                                  Preferred: <strong>{tables.find(t => t.id === selectedTableId)?.name}</strong> — staff will confirm availability upon arrival.
-                                </span>
+                          {/* Table Selection */}
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-2">Preferred Table <span className="text-neutral-600">(optional)</span></label>
+                            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedTableId(null)}
+                                className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${
+                                  !selectedTableId
+                                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30'
+                                    : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'
+                                }`}
+                              >
+                                <CheckCircle size={16} />
+                                Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
+                              </button>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                {tables.map(table => {
+                                  const isAvail = table.status === 'available';
+                                  const isRes = table.status === 'reserved';
+                                  const isOcc = table.status === 'occupied';
+                                  const isSel = selectedTableId === table.id;
+                                  const disabled = isOcc || isRes;
+
+                                  const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
+                                  const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
+                                  const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
+                                  
+                                  return (
+                                    <button
+                                      key={table.id}
+                                      type="button"
+                                      disabled={disabled}
+                                      onClick={() => setSelectedTableId(isSel ? null : table.id)}
+                                      className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${
+                                        isSel
+                                          ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20'
+                                          : disabled
+                                          ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60'
+                                          : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between w-full mb-1">
+                                        <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>
+                                          {table.name}
+                                        </span>
+                                        {isSel && <CheckCircle size={14} className="text-emerald-400" />}
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
+                                        <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>
+                                          {statusText}
+                                        </span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {selectedTableId && (
+                                <div className="mt-4 flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/20 rounded-lg px-3 py-2.5">
+                                  <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                                  <span className="text-xs text-emerald-300 leading-relaxed">
+                                    Preferred: <strong>{tables.find(t => t.id === selectedTableId)?.name}</strong> — staff will confirm availability upon arrival.
+                                  </span>
+                                </div>
+                              )}
+                              <p className="text-[10px] text-neutral-600 mt-3">Your table preference is a request, not a guarantee. Staff will do their best to honor it.</p>
+                            </div>
+                          </div>
+
+                          {/* Promo Code */}
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1.5">Promo Code <span className="text-neutral-600">(optional)</span></label>
+                            {appliedPromo ? (
+                              <div className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg px-3 py-2">
+                                <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
+                                <span className="text-xs text-emerald-300 font-semibold flex-1">{appliedPromo.code} — {appliedPromo.discountPercent}% off applied!</span>
+                                <button onClick={handleRemovePromo} className="text-neutral-500 hover:text-rose-400 transition-colors"><X size={13} /></button>
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={promoCodeInput}
+                                    onChange={e => { setPromoCodeInput(e.target.value.toUpperCase()); setPromoError(''); }}
+                                    placeholder="e.g. WELCOME20"
+                                    className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 font-mono"
+                                  />
+                                  <button
+                                    onClick={handleApplyPromo}
+                                    disabled={!promoCodeInput.trim()}
+                                    className="px-4 py-2 bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg text-xs font-semibold hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                                  >
+                                    Apply
+                                  </button>
+                                </div>
+                                {promoError && <p className="text-[11px] text-rose-400">{promoError}</p>}
                               </div>
                             )}
-                            <p className="text-[10px] text-neutral-600 mt-3">Your table preference is a request, not a guarantee. Staff will do their best to honor it.</p>
                           </div>
-                        </div>
 
-                        {/* Promo Code */}
+                          {/* Summary */}
+                          <div className="bg-neutral-800/60 rounded-xl p-4 border border-neutral-700/50">
+                            <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Booking Summary</p>
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex justify-between">
+                                <span className="text-neutral-400">Date</span>
+                                <span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-neutral-400">Time</span>
+                                <span className="text-neutral-200">{resForm.timeSlot}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-neutral-400">Duration</span>
+                                <span className="text-neutral-200">{resForm.duration}h × ₱{HOURLY_RATE}/hr</span>
+                              </div>
+                              {appliedPromo && (
+                                <div className="flex justify-between text-emerald-400">
+                                  <span>Promo ({appliedPromo.code})</span>
+                                  <span>−₱{discountAmount}.00</span>
+                                </div>
+                              )}
+                              <div className="border-t border-neutral-700 pt-1.5 mt-1.5 flex justify-between">
+                                <span className="text-neutral-400">Total Amount</span>
+                                <span className="text-white font-semibold">₱{totalAmount}.00</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-amber-400">Down Payment (25%)</span>
+                                <span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={handleReservationSubmit}
+                            disabled={!resForm.name || !resForm.email || !resForm.phone}
+                            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                          >
+                            Proceed to Payment <ArrowRight size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: MY BOOKINGS LIST / TRACKER */}
+              {resTab === 'my-bookings' && (
+                <div className="max-w-3xl mx-auto">
+                  {!currentUser && !trackedReservations ? (
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 max-w-md mx-auto">
+                      <div className="text-center mb-6">
+                        <Search size={32} className="text-emerald-500 mx-auto mb-3" />
+                        <h3 className="text-lg font-bold text-white mb-1">Track Reservation</h3>
+                        <p className="text-xs text-neutral-400">Enter your details to find your booking, or <button onClick={() => setShowLoginModal(true)} className="text-emerald-400 hover:underline font-semibold">log in</button>.</p>
+                      </div>
+                      <form onSubmit={(e) => {
+                        e.preventDefault();
+                        const found = reservations.filter((r: any) => 
+                          r.id.toUpperCase() === trackForm.reservationId.toUpperCase()
+                        ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        setTrackedReservations(found);
+                      }} className="space-y-4">
                         <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5">Promo Code <span className="text-neutral-600">(optional)</span></label>
-                          {appliedPromo ? (
-                            <div className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg px-3 py-2">
-                              <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
-                              <span className="text-xs text-emerald-300 font-semibold flex-1">{appliedPromo.code} — {appliedPromo.discountPercent}% off applied!</span>
-                              <button onClick={handleRemovePromo} className="text-neutral-500 hover:text-rose-400 transition-colors"><X size={13} /></button>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={promoCodeInput}
-                                  onChange={e => { setPromoCodeInput(e.target.value.toUpperCase()); setPromoError(''); }}
-                                  placeholder="e.g. WELCOME20"
-                                  className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 font-mono"
-                                />
-                                <button
-                                  onClick={handleApplyPromo}
-                                  disabled={!promoCodeInput.trim()}
-                                  className="px-4 py-2 bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg text-xs font-semibold hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                                >
-                                  Apply
-                                </button>
-                              </div>
-                              {promoError && <p className="text-[11px] text-rose-400">{promoError}</p>}
-                            </div>
-                          )}
+                          <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-rose-500">*</span></label>
+                          <input 
+                            type="text" 
+                            required 
+                            value={trackForm.reservationId} 
+                            onChange={e => setTrackForm({ reservationId: e.target.value.toUpperCase() })} 
+                            placeholder="e.g. TEST" 
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors font-mono tracking-widest uppercase" 
+                          />
                         </div>
+                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">
+                          Find Booking
+                        </button>
+                      </form>
+                    </div>
+                  ) : (() => {
+                    const myBookings = currentUser 
+                      ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      : (trackedReservations || []);
 
-                        {/* Summary */}
-                        <div className="bg-neutral-800/60 rounded-xl p-4 border border-neutral-700/50">
-                          <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Booking Summary</p>
-                          <div className="space-y-1.5 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-neutral-400">Date</span>
-                              <span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-neutral-400">Time</span>
-                              <span className="text-neutral-200">{resForm.timeSlot}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-neutral-400">Duration</span>
-                              <span className="text-neutral-200">{resForm.duration}h × ₱{HOURLY_RATE}/hr</span>
-                            </div>
-                            {appliedPromo && (
-                              <div className="flex justify-between text-emerald-400">
-                                <span>Promo ({appliedPromo.code})</span>
-                                <span>−₱{discountAmount}.00</span>
-                              </div>
+                    const statusColors: Record<string, string> = {
+                      pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
+                      confirmed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
+                      'checked-in': 'bg-sky-500/15 text-sky-400 border-sky-500/25',
+                      completed: 'bg-neutral-700/50 text-neutral-400 border-neutral-700',
+                      cancelled: 'bg-rose-500/15 text-rose-400 border-rose-500/25',
+                    };
+
+                    if (myBookings.length === 0) {
+                      return (
+                        <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-12 text-center">
+                          <BookOpen size={36} className="text-neutral-700 mx-auto mb-3" />
+                          <p className="text-neutral-400 font-semibold mb-1">No bookings found</p>
+                          <p className="text-neutral-600 text-sm mb-5">We couldn't find any reservations matching those details.</p>
+                          <div className="flex justify-center gap-3">
+                            {!currentUser && (
+                              <button onClick={() => setTrackedReservations(null)} className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all border border-neutral-700">
+                                Try Again
+                              </button>
                             )}
-                            <div className="border-t border-neutral-700 pt-1.5 mt-1.5 flex justify-between">
-                              <span className="text-neutral-400">Total Amount</span>
-                              <span className="text-white font-semibold">₱{totalAmount}.00</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-amber-400">Down Payment (25%)</span>
-                              <span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
-                            </div>
+                            <button
+                              onClick={() => setResTab('new')}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all inline-flex items-center gap-2"
+                            >
+                              <Calendar size={14} /> Book Now
+                            </button>
                           </div>
                         </div>
+                      );
+                    }
 
+                    return (
+                      <div className="space-y-3">
+                        {!currentUser && trackedReservations && (
+                          <div className="flex justify-between items-center mb-2 px-1">
+                            <p className="text-xs text-neutral-400">Showing results for ID: <strong className="text-neutral-200">{trackForm.reservationId}</strong></p>
+                            <button onClick={() => setTrackedReservations(null)} className="text-xs text-emerald-400 hover:underline">New Search</button>
+                          </div>
+                        )}
+                        {myBookings.map((r: any) => (
+                          <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-wrap items-center gap-4">
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-semibold text-neutral-200">
+                                  {new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </p>
+                                <span className="text-neutral-600">·</span>
+                                <p className="text-sm text-neutral-400">{r.timeSlot}</p>
+                                <span className="text-neutral-600">·</span>
+                                <p className="text-sm text-neutral-400">{r.durationHours}h</p>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-neutral-500 flex-wrap">
+                                <span>{r.partySize} person{r.partySize > 1 ? 's' : ''}</span>
+                                {r.promoCode && (
+                                  <span className="flex items-center gap-1 text-emerald-500">
+                                    <Tag size={9} /> {r.promoCode}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-white">₱{r.totalAmount.toLocaleString()}</p>
+                                <p className="text-[10px] text-neutral-600">Total</p>
+                              </div>
+                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>
+                                {r.status.replace('-', ' ')}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
                         <button
-                          onClick={handleReservationSubmit}
-                          disabled={!resForm.name || !resForm.email || !resForm.phone}
-                          className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                          onClick={() => setResTab('new')}
+                          className="w-full py-2.5 mt-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
                         >
-                          Proceed to Payment <ArrowRight size={14} />
+                          <Calendar size={14} /> Make Another Booking
                         </button>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
-
-              </div>
+              )}
             </motion.div>
           )}
 
@@ -1216,40 +1323,76 @@ export function HomePage() {
                 <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and holiday promos.</p>
               </div>
 
-              <div className="space-y-4">
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl -mr-10 -mt-10 group-hover:bg-amber-500/20 transition-colors" />
-                  <div className="relative z-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-                    <div>
-                      <span className="text-[10px] bg-amber-500/20 text-amber-400 font-bold px-2.5 py-1 rounded-md mb-2 inline-block">Tournament</span>
-                      <h3 className="text-xl font-bold text-neutral-100 mb-1">Spooky Shots Halloween Tournament</h3>
-                      <p className="text-sm text-neutral-400">Annual 8-ball tournament. 500 PHP entry. Prizes up to 10,000 PHP!</p>
-                    </div>
-                    <div className="text-left sm:text-right shrink-0">
-                      <p className="text-sm font-black text-amber-500 mb-1">Oct 31, 2026</p>
-                      <button className="text-xs bg-white text-black font-semibold px-4 py-2 rounded-full hover:bg-neutral-200 transition-colors">
-                        Register Now
-                      </button>
-                    </div>
+              <div className="space-y-6">
+                {events.length === 0 ? (
+                  <div className="text-center py-12 border border-dashed border-neutral-800 rounded-xl">
+                    <p className="text-neutral-500">No upcoming events at the moment. Check back soon!</p>
                   </div>
-                </div>
-
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 group-hover:bg-emerald-500/20 transition-colors" />
-                  <div className="relative z-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-                    <div>
-                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2.5 py-1 rounded-md mb-2 inline-block">League</span>
-                      <h3 className="text-xl font-bold text-neutral-100 mb-1">Student Billiards League</h3>
-                      <p className="text-sm text-neutral-400">Local university competition. Weekly matches.</p>
+                ) : (
+                  events.map(event => (
+                    <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden relative group transition-all hover:border-emerald-600/30 flex flex-col">
+                      
+                      {/* Image Banner (if exists), else fallback gradient blur */}
+                      {event.attachments && event.attachments.length > 0 ? (
+                        <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative flex-shrink-0">
+                          <img 
+                            src={event.attachments[0]} 
+                            alt={event.title} 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 to-transparent" />
+                        </div>
+                      ) : (
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 group-hover:bg-emerald-500/20 transition-colors pointer-events-none" />
+                      )}
+                      
+                      <div className="p-6 relative z-10 flex-1 flex flex-col">
+                        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center mb-4">
+                          <div>
+                            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2.5 py-1 rounded-md mb-2 inline-block">
+                              {event.type}
+                            </span>
+                            <h3 className="text-xl font-bold text-neutral-100 mb-1">{event.title}</h3>
+                          </div>
+                          <div className="text-left sm:text-right shrink-0">
+                            <p className="text-sm font-black text-emerald-500 bg-emerald-950/30 border border-emerald-900/50 px-3 py-1 rounded-lg">
+                              {new Date(event.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <p className="text-sm text-neutral-400 mb-6 leading-relaxed flex-1">
+                          {event.description}
+                        </p>
+                        
+                        <div className="flex items-center justify-between border-t border-neutral-800/60 pt-4 mt-auto">
+                          <div className="text-xs text-neutral-500 font-medium">
+                            {event.maxParticipants ? (
+                              event.slotsFull 
+                                ? <span className="text-rose-400 font-bold bg-rose-950/30 px-2 py-1 rounded">Sold Out</span> 
+                                : <span>Max {event.maxParticipants} participants</span>
+                            ) : <span>Open to all</span>}
+                          </div>
+                          
+                          {event.registrationLink ? (
+                            <a 
+                              href={event.registrationLink} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-xs bg-white text-black font-semibold px-4 py-2.5 rounded-full hover:bg-neutral-200 transition-colors flex items-center gap-1.5 shadow-lg shadow-white/10"
+                            >
+                              Register Now <ExternalLink size={12} strokeWidth={2.5} />
+                            </a>
+                          ) : (
+                            <div className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">
+                              No Registration Required
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-left sm:text-right shrink-0">
-                      <p className="text-sm font-black text-emerald-500 mb-1">Nov 15, 2026</p>
-                      <button className="text-xs bg-white text-black font-semibold px-4 py-2 rounded-full hover:bg-neutral-200 transition-colors">
-                        Learn More
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                  ))
+                )}
               </div>
             </motion.div>
           )}
@@ -1365,10 +1508,10 @@ export function HomePage() {
             </motion.div>
           )}
 
-          {/* ════ FEEDBACK / REVIEWS SECTION ════ */}
-          {activeSection === 'reviews' && (
+          {/* ════ FEEDBACK SECTION ════ */}
+          {activeSection === 'feedback' && (
             <motion.div
-              key="reviews"
+              key="feedback"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
@@ -1376,299 +1519,91 @@ export function HomePage() {
               className="max-w-2xl mx-auto px-6 py-10"
             >
               <div className="text-center mb-8">
-                <h2 className="text-3xl font-black text-white mb-2">Reviews & Feedback</h2>
-                <p className="text-neutral-400 text-sm">See what others are saying and share your experience.</p>
+                <h2 className="text-3xl font-black text-white mb-2">Send us Feedback</h2>
+                <p className="text-neutral-400 text-sm">We value your experience. Let us know how we can improve!</p>
               </div>
 
-              {/* Tab Toggle */}
-              <div className="flex gap-1 bg-neutral-900 border border-neutral-800 rounded-xl p-1 mb-8">
-                <button
-                  onClick={() => setReviewTab('list')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    reviewTab === 'list' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'
-                  }`}
-                >
-                  <Star size={14} /> Reviews
-                </button>
-                <button
-                  onClick={() => setReviewTab('form')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    reviewTab === 'form' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'
-                  }`}
-                >
-                  <Mail size={14} /> Leave Feedback
-                </button>
-              </div>
-
-              {/* Public Reviews List */}
-              {reviewTab === 'list' && (() => {
-                const topReviews = [...feedback]
-                  .filter(f => f.rating > 0)
-                  .sort((a, b) => b.rating - a.rating)
-                  .slice(0, 5);
-                const avgRating = feedback.length > 0
-                  ? (feedback.reduce((s, f) => s + f.rating, 0) / feedback.length).toFixed(1)
-                  : null;
-                return (
-                  <div className="space-y-5">
-                    {/* Aggregate Rating */}
-                    {avgRating ? (
-                      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex items-center gap-4">
-                        <div className="text-center">
-                          <p className="text-4xl font-black text-white">{avgRating}</p>
-                          <div className="flex gap-0.5 mt-1 justify-center">
-                            {[1,2,3,4,5].map(i => (
-                              <Star key={i} size={12} className={parseFloat(avgRating) >= i ? 'text-amber-400 fill-amber-400' : 'text-neutral-600'} />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="border-l border-neutral-800 pl-4">
-                          <p className="text-sm text-neutral-200 font-semibold">Overall Rating</p>
-                          <p className="text-xs text-neutral-500">Based on {feedback.length} review{feedback.length !== 1 ? 's' : ''}</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-10 text-center">
-                        <Star size={32} className="text-neutral-700 mx-auto mb-3" />
-                        <p className="text-neutral-400 font-semibold">Be the first to leave a review!</p>
-                        <button
-                          onClick={() => setReviewTab('form')}
-                          className="mt-3 text-xs text-emerald-400 hover:text-emerald-300 font-semibold"
-                        >
-                          Leave a Review
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Top 5 Reviews */}
-                    {topReviews.length > 0 && (
-                      <div className="space-y-3">
-                        <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Top Reviews</p>
-                        {topReviews.map(f => (
-                          <div key={f.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-full bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center text-xs font-bold text-emerald-400">
-                                  {f.customerName[0]}
-                                </div>
-                                <span className="text-sm font-semibold text-neutral-200">{f.customerName}</span>
-                              </div>
-                              <div className="flex gap-0.5">
-                                {[1,2,3,4,5].map(i => (
-                                  <Star key={i} size={11} className={f.rating >= i ? 'text-amber-400 fill-amber-400' : 'text-neutral-700'} />
-                                ))}
-                              </div>
-                            </div>
-                            {f.comment && (
-                              <p className="text-xs text-neutral-400 leading-relaxed">"{f.comment}"</p>
-                            )}
-                            <p className="text-[10px] text-neutral-600">
-                              {new Date(f.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <button
-                      onClick={() => setReviewTab('form')}
-                      className="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl border border-neutral-700 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Mail size={14} /> Leave Your Own Review
-                    </button>
+              {feedbackSent ? (
+                <div className="bg-sky-600/10 border border-sky-600/30 rounded-2xl p-10 text-center">
+                  <CheckCircle size={40} className="text-sky-400 mx-auto mb-3" />
+                  <p className="text-sky-300 font-semibold text-lg mb-1">Message Sent!</p>
+                  <p className="text-neutral-500 text-sm">Our management team will review your message shortly. Thank you!</p>
+                </div>
+              ) : (
+                <form onSubmit={handleFeedbackSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Mail className="text-sky-400" size={18} />
+                    <p className="text-sm font-semibold text-white">Direct Message to Management</p>
                   </div>
-                );
-              })()}
 
-              {/* Feedback Form */}
-              {reviewTab === 'form' && (
-                simpleFeedbackSent ? (
-                  <div className="bg-sky-600/10 border border-sky-600/30 rounded-2xl p-10 text-center">
-                    <CheckCircle size={40} className="text-sky-400 mx-auto mb-3" />
-                    <p className="text-sky-300 font-semibold text-lg mb-1">Message Sent!</p>
-                    <p className="text-neutral-500 text-sm">Our management team will review your message shortly.</p>
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      value={feedbackForm.name}
+                      onChange={e => setFeedbackForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Juan dela Cruz"
+                      required
+                      className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-sky-500 transition-colors"
+                    />
                   </div>
-                ) : (
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-5">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Mail className="text-sky-400" size={18} />
-                      <p className="text-sm font-semibold text-white">Send a Direct Message</p>
-                    </div>
 
-                    <div>
-                      <label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label>
-                      <input
-                        type="text"
-                        value={simpleFeedbackForm.name}
-                        onChange={e => setSimpleFeedbackForm(f => ({ ...f, name: e.target.value }))}
-                        placeholder="e.g. Juan dela Cruz"
-                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-sky-500 transition-colors"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1.5">Contact Information <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      value={feedbackForm.contact}
+                      onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value }))}
+                      placeholder="Email or Phone Number"
+                      required
+                      className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-sky-500 transition-colors"
+                    />
+                  </div>
 
-                    <div>
-                      <label className="block text-xs text-neutral-400 mb-1.5">Contact Information <span className="text-rose-500">*</span></label>
-                      <input
-                        type="text"
-                        value={simpleFeedbackForm.contact}
-                        onChange={e => setSimpleFeedbackForm(f => ({ ...f, contact: e.target.value }))}
-                        placeholder="Email or Phone Number"
-                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-sky-500 transition-colors"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-neutral-400 mb-1.5">Type of Feedback <span className="text-rose-500">*</span></label>
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1.5">Type of Feedback <span className="text-rose-500">*</span></label>
+                    <div className="relative">
                       <select
-                        value={simpleFeedbackForm.type}
-                        onChange={e => setSimpleFeedbackForm(f => ({ ...f, type: e.target.value }))}
-                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-sky-500 transition-colors appearance-none"
+                        value={feedbackForm.type}
+                        onChange={e => setFeedbackForm(f => ({ ...f, type: e.target.value }))}
+                        required
+                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-sky-500 transition-colors appearance-none pr-9"
                       >
                         <option value="" disabled>Select a category...</option>
+                        <option value="compliment">Compliment</option>
                         <option value="suggestion">Suggestion</option>
                         <option value="complaint">Concern / Complaint</option>
                         <option value="lost_item">Lost Item</option>
                         <option value="other">Other</option>
                       </select>
+                      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                     </div>
-
-                    <div>
-                      <label className="block text-xs text-neutral-400 mb-1.5">Star Rating</label>
-                      <div className="flex gap-1.5">
-                        {[1,2,3,4,5].map(i => (
-                          <button key={i} type="button" onClick={() => setFbForm(f => ({ ...f, rating: i }))}>
-                            <Star size={22} className={fbForm.rating >= i ? 'text-amber-400 fill-amber-400' : 'text-neutral-700 hover:text-amber-600'} />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-neutral-400 mb-1.5">Message</label>
-                      <textarea
-                        value={simpleFeedbackForm.message}
-                        onChange={e => setSimpleFeedbackForm(f => ({ ...f, message: e.target.value }))}
-                        placeholder="Please provide details..."
-                        rows={4}
-                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-sky-500 transition-colors resize-none"
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        // Submit both simple feedback and rating feedback
-                        if (simpleFeedbackForm.name && fbForm.comment !== '' || simpleFeedbackForm.message !== '') {
-                          addFeedback({
-                            customerName: simpleFeedbackForm.name || 'Anonymous',
-                            rating: fbForm.rating,
-                            comment: simpleFeedbackForm.message || fbForm.comment,
-                            tags: [],
-                          });
-                        }
-                        handleSimpleFeedbackSubmit();
-                      }}
-                      disabled={!simpleFeedbackForm.name || !simpleFeedbackForm.contact || !simpleFeedbackForm.type}
-                      className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all"
-                    >
-                      Submit Feedback
-                    </button>
                   </div>
-                )
+
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label>
+                    <textarea
+                      value={feedbackForm.message}
+                      onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))}
+                      placeholder="Please provide details..."
+                      rows={4}
+                      required
+                      className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-sky-500 transition-colors resize-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || !feedbackForm.message}
+                    className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-600 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                  >
+                    Submit Feedback
+                  </button>
+                </form>
               )}
             </motion.div>
           )}
 
-          {/* ════ MY BOOKINGS SECTION ════ */}
-          {activeSection === 'bookings' && currentUser && (
-            <motion.div
-              key="bookings"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="max-w-3xl mx-auto px-6 py-10"
-            >
-              <div className="text-center mb-8">
-                <h2 className="text-3xl font-black text-white mb-2 flex items-center justify-center gap-3">
-                  <BookOpen size={28} className="text-emerald-400" /> My Bookings
-                </h2>
-                <p className="text-neutral-400 text-sm">Your reservation history for {currentUser.email}</p>
-              </div>
-
-              {(() => {
-                const myBookings = reservations
-                  .filter(r => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase())
-                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-                const statusColors: Record<string, string> = {
-                  pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
-                  confirmed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-                  'checked-in': 'bg-sky-500/15 text-sky-400 border-sky-500/25',
-                  completed: 'bg-neutral-700/50 text-neutral-400 border-neutral-700',
-                  cancelled: 'bg-rose-500/15 text-rose-400 border-rose-500/25',
-                };
-
-                if (myBookings.length === 0) {
-                  return (
-                    <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-12 text-center">
-                      <BookOpen size={36} className="text-neutral-700 mx-auto mb-3" />
-                      <p className="text-neutral-400 font-semibold mb-1">No bookings yet</p>
-                      <p className="text-neutral-600 text-sm mb-5">Reserve a table to get started!</p>
-                      <button
-                        onClick={() => setActiveSection('reservations')}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all inline-flex items-center gap-2"
-                      >
-                        <Calendar size={14} /> Book Now
-                      </button>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="space-y-3">
-                    {myBookings.map(r => (
-                      <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-wrap items-center gap-4">
-                        <div className="flex-1 min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-semibold text-neutral-200">
-                              {new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </p>
-                            <span className="text-neutral-600">·</span>
-                            <p className="text-sm text-neutral-400">{r.timeSlot}</p>
-                            <span className="text-neutral-600">·</span>
-                            <p className="text-sm text-neutral-400">{r.durationHours}h</p>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-neutral-500 flex-wrap">
-                            <span>{r.partySize} person{r.partySize > 1 ? 's' : ''}</span>
-                            {r.promoCode && (
-                              <span className="flex items-center gap-1 text-emerald-500">
-                                <Tag size={9} /> {r.promoCode}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <p className="text-sm font-bold text-white">₱{r.totalAmount.toLocaleString()}</p>
-                            <p className="text-[10px] text-neutral-600">Total</p>
-                          </div>
-                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>
-                            {r.status.replace('-', ' ')}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                    <button
-                      onClick={() => setActiveSection('reservations')}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
-                    >
-                      <Calendar size={14} /> Make Another Booking
-                    </button>
-                  </div>
-                );
-              })()}
-            </motion.div>
-          )}
         </AnimatePresence>
 
         {/* ── Footer ── */}
@@ -2277,9 +2212,21 @@ export function HomePage() {
                 <CheckCircle size={32} className="text-emerald-400" />
               </motion.div>
               <h3 className="text-xl font-black text-white mb-2">Reservation Submitted!</h3>
-              <p className="text-neutral-500 text-sm mb-5 leading-relaxed">
+              <p className="text-neutral-500 text-sm mb-4 leading-relaxed">
                 Your reservation for <strong className="text-neutral-200">{selectedDate?.toLocaleDateString('en-PH', { month: 'long', day: 'numeric' })}</strong> at <strong className="text-neutral-200">{resForm.timeSlot}</strong> has been submitted. Our staff will verify your payment and confirm shortly.
               </p>
+
+              <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-4 mb-5 text-center">
+                <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-semibold mb-1">Your Reservation ID</p>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-2xl font-black text-white tracking-[0.2em] font-mono">{generatedResId}</span>
+                  <button onClick={() => navigator.clipboard.writeText(generatedResId)} className="text-emerald-400 hover:text-emerald-300 p-1 bg-emerald-600/20 rounded-md" title="Copy ID">
+                    <Copy size={14} />
+                  </button>
+                </div>
+                <p className="text-[10px] text-neutral-400 mt-1">Please save this ID. You can use it to track your booking status.</p>
+              </div>
+
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-5 text-xs space-y-1.5 text-left">
                 <div className="flex justify-between"><span className="text-neutral-500">Name</span><span className="text-neutral-200">{resForm.name}</span></div>
                 <div className="flex justify-between"><span className="text-neutral-500">Email</span><span className="text-neutral-200">{resForm.email}</span></div>
@@ -2298,7 +2245,7 @@ export function HomePage() {
       </AnimatePresence>
 
       
-      </div>
-        
+    </div>
+      
   );
 }

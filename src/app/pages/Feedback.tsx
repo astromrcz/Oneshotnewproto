@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
-  Plus, X, MessageSquare, ThumbsUp, TrendingUp,
+  Plus, X, MessageSquare, ThumbsUp,
   Tag, Mail, CheckCircle, AlertTriangle, Lightbulb,
   Search, Package, ChevronDown
 } from 'lucide-react';
@@ -41,7 +41,7 @@ export function FeedbackPage() {
     addFeedback({
       customerName: form.customerName,
       contactInfo: form.contactInfo,
-      rating: 0, // No rating in this version
+      rating: 0, // Ratings are disabled for pure feedback collection
       feedbackType: form.feedbackType as FeedbackType,
       comment: form.message,
       reservationId: form.reservationId || undefined,
@@ -74,7 +74,6 @@ export function FeedbackPage() {
   const compliments  = feedback.filter(f => f.feedbackType === 'compliment').length;
   const complaints   = feedback.filter(f => f.feedbackType === 'complaint').length;
   const suggestions  = feedback.filter(f => f.feedbackType === 'suggestion').length;
-  const lostItems    = feedback.filter(f => f.feedbackType === 'lost_item').length;
   const total        = feedback.length;
 
   const topTags = (() => {
@@ -216,7 +215,7 @@ export function FeedbackPage() {
       </div>
 
       {/* ════════════════════════════════════════════════════════
-          ADD FEEDBACK MODAL — HomePage-style form
+          ADD FEEDBACK MODAL
       ════════════════════════════════════════════════════════ */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">

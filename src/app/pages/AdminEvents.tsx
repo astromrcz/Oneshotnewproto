@@ -1,15 +1,15 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
   Calendar as CalendarIcon, Plus, Trash2, Edit2, Tag, Paperclip, X, Link,
   Users, ToggleLeft, ToggleRight, ChevronDown, ChevronUp,
   Wand2, Copy, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight,
-  RefreshCw, CalendarX2, List, Network, Clock
+  RefreshCw, CalendarX2, List, Network, Clock, Mail
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useAppContext, generateRandomPromoCode } from '../context/AppContext';
-import type { Event, PromoCode, ClosedDate } from '../context/AppContext';
+import type { Event, PromoCode, ClosedDate, Reservation } from '../context/AppContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
 
 const EVENT_TYPES = ['Tournament', 'League', 'Other'];
@@ -39,7 +39,8 @@ export function AdminEvents() {
   const { 
     events, addEvent, updateEvent, deleteEvent, 
     promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
-    closedDates, addClosedDate, removeClosedDate, updateClosedDate 
+    closedDates, addClosedDate, removeClosedDate, updateClosedDate,
+    reservations
   } = useAppContext();
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
@@ -78,6 +79,16 @@ export function AdminEvents() {
   
   const closedMap = new Map(closedDates.map(c => [c.date, c]));
   
+  // Map reservations by date
+  const resMap = reservations.reduce((acc, r) => {
+    if (r.status !== 'cancelled') {
+      const d = dateKey(new Date(r.date));
+      if (!acc[d]) acc[d] = [];
+      acc[d].push(r);
+    }
+    return acc;
+  }, {} as Record<string, Reservation[]>);
+
   // Map events that span multiple dates (comma separated)
   const eventsMap = events.reduce((acc, e) => {
     if (!e.date) return acc;
@@ -269,6 +280,7 @@ export function AdminEvents() {
               const dayCls = closedMap.get(key);
               const dayEvs = eventsMap[key] || [];
               const dayPrs = promosMap[key] || [];
+              const dayRes = resMap[key] || [];
 
               return (
                 <button
@@ -287,6 +299,13 @@ export function AdminEvents() {
                   {/* Indicators Container */}
                   <div className="mt-auto w-full space-y-0.5 overflow-hidden">
                     {dayCls && <div className="w-full text-[8px] bg-rose-500/20 text-rose-400 rounded px-1 truncate font-semibold">Closed</div>}
+                    
+                    {!dayCls && dayRes.length > 0 && (
+                      <div className="w-full text-[8px] bg-blue-500/20 text-blue-400 rounded px-1 truncate font-semibold border border-blue-500/30">
+                        {dayRes.length} Rsv
+                      </div>
+                    )}
+                    
                     {!dayCls && dayEvs.map(e => (
                       <div key={e.id} className="w-full text-[8px] bg-amber-500/20 text-amber-400 rounded px-1 truncate font-semibold">{e.title}</div>
                     ))}
@@ -789,6 +808,32 @@ export function AdminEvents() {
               <button onClick={() => setShowClosureModal(false)} className="p-2 text-neutral-500 hover:text-white"><X size={16} /></button>
             </div>
             <form onSubmit={saveClosure} className="p-6 space-y-4">
+              
+              {/* Conflict Warning block */}
+              {(() => {
+                const conflicts = resMap[closureDateStr] || [];
+                if (conflicts.length > 0) {
+                  return (
+                    <div className="bg-rose-950/40 border border-rose-800/50 rounded-xl p-4 space-y-3 mb-2">
+                      <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
+                        <AlertTriangle size={16} />
+                        <span>{conflicts.length} Reservation{conflicts.length > 1 ? 's' : ''} Affected</span>
+                      </div>
+                      <p className="text-xs text-rose-300/80 leading-relaxed">
+                        Closing this date conflicts with active customer reservations. 
+                      </p>
+                      <button 
+                        type="button" 
+                        className="w-full bg-neutral-900 border border-rose-800/40 hover:border-rose-600 hover:bg-neutral-800 text-neutral-200 text-xs py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 font-semibold"
+                      >
+                        <Mail size={13} className="text-rose-400" /> Email Customers to Reschedule
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               <div>
                 <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Reason *</label>
                 <input type="text" value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder="e.g. Holiday, Private Event" />

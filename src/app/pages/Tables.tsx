@@ -126,6 +126,19 @@ export function Tables() {
   const confirmedTotal = confirmedOrders.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
   const cartTotal = posCart.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
 
+  const getPosSessionInfo = () => {
+    if (!posTable?.session) return null;
+    const { startTime, durationMinutes: bookedMins, hourlyRate } = posTable.session;
+    const now = new Date();
+    const endTime = addMinutes(new Date(startTime), bookedMins);
+    const isOvertime = now > endTime;
+    const overtimeMins = isOvertime ? Math.ceil(differenceInSeconds(now, endTime) / 60) : 0;
+    const bookedCharge = (bookedMins / 60) * hourlyRate;
+    const overtimeCharge = (overtimeMins / 60) * hourlyRate;
+    return { bookedCharge, overtimeCharge, isOvertime };
+  };
+  const posInfo = getPosSessionInfo();
+
   // ── Handlers ──────────────────────────────────────────────────
   const openAssign = (tableId: string) => {
     setAssigningTableId(tableId); setSelectedCustomer(null); setCustomerName(''); setDurationMinutes(60); setAmountPaid('');
@@ -342,7 +355,7 @@ export function Tables() {
       ════════════════════════════════════════════════════════ */}
       {posTableId && posTable && (
         <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-40 animate-in slide-in-from-right-10 duration-300">
-          <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+          <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 flex-none">
             <div>
               <h3 className="font-bold text-neutral-100 flex items-center gap-2"><ShoppingCart size={15} className="text-emerald-400"/> POS Order Menu</h3>
               <p className="text-xs text-neutral-500">{posTable.name} · {posTable.session?.customerName || 'No Session'}</p>
@@ -352,12 +365,38 @@ export function Tables() {
 
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
             
+            {/* 0. LIVE BILL SUMMARY */}
+            {posTable.session && posInfo && (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-2">
+                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2">Live Bill Summary</p>
+                <div className="flex justify-between text-xs">
+                  <span className="text-neutral-400">Table Booked ({posTable.session.durationMinutes < 60 ? `${posTable.session.durationMinutes}m` : `${posTable.session.durationMinutes / 60}h`})</span>
+                  <span className="text-neutral-200">{formatPHP(posInfo.bookedCharge)}</span>
+                </div>
+                {posInfo.isOvertime && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-amber-400 flex items-center gap-1"><AlertTriangle size={10} /> Overtime</span>
+                    <span className="text-amber-400">+{formatPHP(posInfo.overtimeCharge)}</span>
+                  </div>
+                )}
+                {confirmedTotal > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-emerald-400 flex items-center gap-1"><ShoppingCart size={10} /> F&B Orders</span>
+                    <span className="text-emerald-400">+{formatPHP(confirmedTotal)}</span>
+                  </div>
+                )}
+                <div className="border-t border-neutral-800 pt-1.5 flex justify-between text-sm">
+                  <span className="text-neutral-300 font-bold">Current Total</span>
+                  <span className="text-white font-black">{formatPHP(posInfo.bookedCharge + posInfo.overtimeCharge + confirmedTotal)}</span>
+                </div>
+              </div>
+            )}
+
             {/* 1. CONFIRMED ORDERS */}
             {confirmedOrders.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-bold flex items-center gap-1"><CheckCircle size={10}/> Confirmed Bill</p>
-                  <span className="text-[10px] text-neutral-500 font-semibold">Total: {formatPHP(confirmedTotal)}</span>
+                  <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-bold flex items-center gap-1"><CheckCircle size={10}/> Confirmed F&B Items</p>
                 </div>
                 <div className="space-y-2">
                   {confirmedOrders.map((o: any, i: number) => (
@@ -439,9 +478,9 @@ export function Tables() {
             </div>
           </div>
 
-          <div className="p-4 border-t border-neutral-800 bg-neutral-900/50">
+          <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex-none">
             <div className="flex justify-between items-center mb-3">
-              <span className="text-sm font-bold text-neutral-400">New Amount:</span>
+              <span className="text-sm font-bold text-neutral-400">Add to Bill:</span>
               <span className="text-lg font-black text-amber-400">{formatPHP(cartTotal)}</span>
             </div>
             {posTable.session ? (

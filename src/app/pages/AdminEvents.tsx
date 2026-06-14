@@ -618,6 +618,7 @@ export function AdminEvents() {
       {/* ════ MODALS ════ */}
 
       {/* 1. Day Action Modal (Clicking on Calendar) */}
+     
       {dayActionDate && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl w-full max-w-sm overflow-hidden shadow-2xl">
@@ -633,34 +634,71 @@ export function AdminEvents() {
                 const dayEvs = eventsMap[key] || [];
                 const dayPrs = promosMap[key] || [];
                 const dayCls = closedMap.get(key);
+                const dayRes = resMap[key] || []; // Grab reservations for this day
                 const hasItems = dayEvs.length || dayPrs.length || dayCls;
 
-                return hasItems ? (
-                  <div className="space-y-2 mb-4 bg-neutral-900/50 rounded-lg p-3 border border-neutral-800">
-                    <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">Existing Agenda</p>
-                    {dayCls && (
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-rose-400 font-semibold truncate pr-2">Closed: {dayCls.reason}</span>
-                        <button onClick={() => openClosureEdit(dayCls)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
+                return (
+                  <>
+                    {hasItems ? (
+                      <div className="space-y-2 mb-4 bg-neutral-900/50 rounded-lg p-3 border border-neutral-800">
+                        <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">Existing Agenda</p>
+                        {dayCls && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-rose-400 font-semibold truncate pr-2">Closed: {dayCls.reason}</span>
+                            <button onClick={() => openClosureEdit(dayCls)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
+                          </div>
+                        )}
+                        {dayEvs.map(e => (
+                          <div key={e.id} className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-amber-400 font-semibold truncate pr-2">Event: {e.title}</span>
+                            <button onClick={() => openEventEdit(e)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
+                          </div>
+                        ))}
+                        {dayPrs.map(p => (
+                          <div key={p.id} className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-violet-400 font-semibold truncate pr-2">Promo Expiry: {p.code}</span>
+                            <button onClick={() => openPromoEdit(p)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {/* NEW: Customer Reservations List */}
+                    {dayRes.length > 0 && (
+                      <div className="space-y-2 mb-4 bg-neutral-900/50 rounded-lg p-3 border border-neutral-800">
+                        <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">Customer Reservations ({dayRes.length})</p>
+                        <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                          {dayRes.map(r => (
+                            <div key={r.id} className="bg-neutral-950 border border-neutral-800 rounded-md p-2.5 flex flex-col gap-1.5">
+                              <div className="flex justify-between items-start">
+                                <span className="text-xs font-semibold text-neutral-200 truncate">{r.customerName}</span>
+                                <span className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold whitespace-nowrap ${
+                                  r.status === 'confirmed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
+                                  r.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
+                                  'bg-neutral-800 text-neutral-400 border-neutral-700'
+                                }`}>
+                                  {r.status}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] text-neutral-500">
+                                <span className="flex items-center gap-1"><Clock size={10}/> {r.timeSlot} ({r.durationHours}h)</span>
+                                <span>·</span>
+                                <span>{r.partySize} pax</span>
+                                <span>·</span>
+                                <span className="text-emerald-500/80 font-medium truncate">
+                                  {r.tableId ? `Table ${r.tableId.replace('t', '')}` : 'Any Table'}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
-                    {dayEvs.map(e => (
-                      <div key={e.id} className="flex items-center justify-between text-xs mt-2">
-                        <span className="text-amber-400 font-semibold truncate pr-2">Event: {e.title}</span>
-                        <button onClick={() => openEventEdit(e)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
-                      </div>
-                    ))}
-                    {dayPrs.map(p => (
-                      <div key={p.id} className="flex items-center justify-between text-xs mt-2">
-                        <span className="text-violet-400 font-semibold truncate pr-2">Promo Expiry: {p.code}</span>
-                        <button onClick={() => openPromoEdit(p)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null;
+                  </>
+                );
               })()}
 
-              <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">Add New</p>
+              <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold border-t border-neutral-800 pt-4 mt-2">Add New</p>
               <div className="grid grid-cols-1 gap-2">
                 <button onClick={() => openEventCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-amber-500/10 border border-neutral-800 hover:border-amber-500/30 text-left transition-colors group">
                   <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:bg-amber-500/20"><CalendarIcon size={14}/></div>

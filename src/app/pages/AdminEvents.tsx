@@ -12,7 +12,7 @@ import { useAppContext, generateRandomPromoCode } from '../context/AppContext';
 import type { Event, PromoCode, ClosedDate, Reservation } from '../context/AppContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
 
-const EVENT_TYPES = ['Tournament', 'League', 'Other'];
+const EVENT_TYPES = ['Tournament', 'League', 'Holiday', 'Other'];
 const todayStart = startOfDay(new Date());
 
 // ── Types ────────────────────────────────────────────────────────
@@ -27,12 +27,13 @@ type PromoForm = {
   code: string; discountPercent: number; description: string;
   isLimitedUses: boolean; maxUsage: number; deleteWhenDepleted: boolean;
   isActive: boolean; hasExpiry: boolean; expiresAt: string;
+  hasStart: boolean; startDate: string;
 };
 
 type ClosureForm = { reason: string; isFullDay: boolean; openTime: string; closeTime: string; };
 
 const emptyEventForm: FormState = { title: '', dates: [], type: 'Tournament', description: '', startTime: '18:00', endTime: '22:00', registrationLink: '', bracketLink: '', maxParticipants: '', slotsFull: false, attachments: [] };
-const emptyPromoForm: PromoForm = { code: '', discountPercent: 10, description: '', isLimitedUses: true, maxUsage: 100, deleteWhenDepleted: false, isActive: true, hasExpiry: false, expiresAt: '' };
+const emptyPromoForm: PromoForm = { code: '', discountPercent: 10, description: '', isLimitedUses: true, maxUsage: 100, deleteWhenDepleted: false, isActive: true, hasExpiry: false, expiresAt: '', hasStart: false, startDate: '' };
 const emptyClosureForm: ClosureForm = { reason: '', isFullDay: true, openTime: '12:00', closeTime: '22:00' };
 
 export function AdminEvents() {
@@ -161,7 +162,7 @@ export function AdminEvents() {
 
   const openPromoCreate = (prefillDate?: Date) => {
     setEditingPromoId(null);
-    setPromoForm({ ...emptyPromoForm, hasExpiry: !!prefillDate, expiresAt: prefillDate ? `${dateKey(prefillDate)}T23:59` : '' });
+    setPromoForm({ ...emptyPromoForm, hasStart: !!prefillDate, startDate: prefillDate ? `${dateKey(prefillDate)}T00:00` : '' });
     setDayActionDate(null); setShowPromoModal(true);
   };
   const openPromoEdit = (p: any) => {
@@ -169,10 +170,14 @@ export function AdminEvents() {
     setPromoForm({ 
       code: p.code, discountPercent: p.discountPercent, description: p.description, 
       isLimitedUses: p.isLimitedUses !== false, maxUsage: p.maxUsage, deleteWhenDepleted: p.deleteWhenDepleted || false,
-      isActive: p.isActive, hasExpiry: !!p.expiresAt, expiresAt: p.expiresAt ? format(new Date(p.expiresAt), "yyyy-MM-dd'T'HH:mm") : '' 
+      isActive: p.isActive, 
+      hasExpiry: !!p.expiresAt, expiresAt: p.expiresAt ? format(new Date(p.expiresAt), "yyyy-MM-dd'T'HH:mm") : '',
+      hasStart: !!p.startDate, startDate: p.startDate ? format(new Date(p.startDate), "yyyy-MM-dd'T'HH:mm") : '' 
     });
     setDayActionDate(null); setShowPromoModal(true);
   };
+
+  
 
   // ── Saving Modals ───────────────────────────────────────────────
   const saveEvent = () => {
@@ -180,6 +185,14 @@ export function AdminEvents() {
       alert("Please provide a title and select at least one date.");
       return;
     }
+
+    const isConfirmed = window.confirm(
+      editingEventId 
+        ? `Are you sure you want to update "${eventForm.title}"?` 
+        : `Are you sure you want to create the event "${eventForm.title}"?`
+    );
+    
+    if (!isConfirmed) return;
 
     const payload: any = {
       title: eventForm.title, 
@@ -189,8 +202,8 @@ export function AdminEvents() {
       duration: `${eventForm.startTime} - ${eventForm.endTime}`, // Joins time inputs into duration string
       registrationLink: eventForm.registrationLink || undefined,
       bracketLink: eventForm.bracketLink || undefined,
-      maxParticipants: eventForm.maxParticipants ? parseInt(eventForm.maxParticipants) : undefined,
-      slotsFull: eventForm.slotsFull, 
+      maxParticipants: eventForm.type === 'Holiday' ? undefined : (eventForm.maxParticipants ? parseInt(eventForm.maxParticipants) : undefined),
+      slotsFull: eventForm.type === 'Holiday' ? false : eventForm.slotsFull, 
       attachments: eventForm.attachments.length ? eventForm.attachments : undefined,
     };
     if (editingEventId) updateEvent(editingEventId, payload);
@@ -206,7 +219,7 @@ export function AdminEvents() {
     setShowClosureModal(false); flash('Closure saved successfully!');
   };
 
-  const savePromo = (e: React.FormEvent) => {
+ const savePromo = (e: React.FormEvent) => {
     e.preventDefault();
     if (!promoForm.code || !promoForm.description) return;
     const payload: any = {
@@ -214,13 +227,13 @@ export function AdminEvents() {
       isActive: promoForm.isActive, isLimitedUses: promoForm.isLimitedUses,
       maxUsage: promoForm.isLimitedUses ? promoForm.maxUsage : 999999,
       deleteWhenDepleted: promoForm.isLimitedUses ? promoForm.deleteWhenDepleted : false,
+      startDate: promoForm.hasStart && promoForm.startDate ? new Date(promoForm.startDate) : undefined,
       expiresAt: promoForm.hasExpiry && promoForm.expiresAt ? new Date(promoForm.expiresAt) : undefined,
     };
     if (editingPromoId) updatePromoCode(editingPromoId, payload);
     else addPromoCode(payload);
     setShowPromoModal(false); flash('Promo code saved successfully!');
   };
-
   // ── Utils ────────────────────────────────────────────────────────
   const isImage = (dataUrl: string) => dataUrl.startsWith('data:image/');
   const getFileName = (dataUrl: string, index: number) => {
@@ -307,7 +320,9 @@ export function AdminEvents() {
                     )}
                     
                     {!dayCls && dayEvs.map(e => (
-                      <div key={e.id} className="w-full text-[8px] bg-amber-500/20 text-amber-400 rounded px-1 truncate font-semibold">{e.title}</div>
+                      <div key={e.id} className={`w-full text-[8px] rounded px-1 truncate font-semibold ${e.type === 'Holiday' ? 'bg-sky-500/20 text-sky-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                        {e.title}
+                      </div>
                     ))}
                     {!dayCls && dayPrs.map(p => (
                       <div key={p.id} className="w-full text-[8px] bg-violet-500/20 text-violet-400 rounded px-1 truncate font-semibold">{p.code} exp</div>
@@ -395,11 +410,11 @@ export function AdminEvents() {
               <div className="flex justify-between items-start gap-2">
                 <CardTitle className="text-base text-neutral-200">{ev.title}</CardTitle>
                 <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
-                  <span className="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-1 rounded-full whitespace-nowrap">{ev.type}</span>
+                  <span className={`text-[10px] px-2 py-1 rounded-full whitespace-nowrap ${ev.type === 'Holiday' ? 'bg-sky-900/50 text-sky-400' : 'bg-neutral-800 text-neutral-400'}`}>{ev.type}</span>
                   {ev.slotsFull && <span className="text-[10px] bg-rose-900/50 text-rose-400 border border-rose-800/40 px-2 py-1 rounded-full font-bold whitespace-nowrap">FULL</span>}
                 </div>
               </div>
-              <CardDescription className="text-xs text-amber-500 font-medium flex items-center gap-2">
+              <CardDescription className={`text-xs font-medium flex items-center gap-2 ${ev.type === 'Holiday' ? 'text-sky-400' : 'text-amber-500'}`}>
                 <CalendarIcon size={12}/> {dateDisplay}
                 {ev.duration && <><span className="text-neutral-600">·</span><Clock size={12}/> {ev.duration}</>}
               </CardDescription>
@@ -446,12 +461,20 @@ export function AdminEvents() {
               )}
 
               <div className="flex justify-end gap-2 mt-auto pt-4">
-                <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-blue-400 hover:bg-blue-950/30" onClick={() => openEventEdit(ev)}>
-                  <Edit2 size={14} />
-                </Button>
-                <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30" onClick={() => deleteEvent(ev.id)}>
-                  <Trash2 size={14} />
-                </Button>
+                {(ev.type === 'Holiday' && isBefore(new Date(eventDates[0] || ev.date), todayStart)) ? (
+                  <span className="text-[10px] text-neutral-500 font-semibold px-2 py-1 bg-neutral-900 rounded border border-neutral-800">
+                    Past Holiday (Locked)
+                  </span>
+                ) : (
+                  <>
+                    <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-blue-400 hover:bg-blue-950/30" onClick={() => openEventEdit(ev)}>
+                      <Edit2 size={14} />
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30" onClick={() => deleteEvent(ev.id)}>
+                      <Trash2 size={14} />
+                    </Button>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -581,10 +604,10 @@ export function AdminEvents() {
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {events.filter(e => e.date && !isBefore(new Date(e.date.split(',')[0]), todayStart)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5).map(e => (
                   <div key={e.id} className="flex gap-3">
-                    <div className="w-1 bg-amber-500 rounded-full" />
+                    <div className={`w-1 rounded-full ${e.type === 'Holiday' ? 'bg-sky-500' : 'bg-amber-500'}`} />
                     <div>
                       <p className="text-xs font-semibold text-neutral-200">{format(new Date(e.date.split(',')[0]), 'MMM d, yyyy')}</p>
-                      <p className="text-[11px] text-amber-400 font-medium">{e.title}</p>
+                      <p className={`text-[11px] font-medium ${e.type === 'Holiday' ? 'text-sky-400' : 'text-amber-400'}`}>{e.title}</p>
                     </div>
                   </div>
                 ))}
@@ -612,13 +635,9 @@ export function AdminEvents() {
         </div>
       )}
 
-      {activeTab === 'events' && renderEventsGrid()}
-      {activeTab === 'promos' && renderPromosList()}
-
       {/* ════ MODALS ════ */}
 
       {/* 1. Day Action Modal (Clicking on Calendar) */}
-     
       {dayActionDate && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl w-full max-w-sm overflow-hidden shadow-2xl">
@@ -650,7 +669,9 @@ export function AdminEvents() {
                         )}
                         {dayEvs.map(e => (
                           <div key={e.id} className="flex items-center justify-between text-xs mt-2">
-                            <span className="text-amber-400 font-semibold truncate pr-2">Event: {e.title}</span>
+                            <span className={`font-semibold truncate pr-2 ${e.type === 'Holiday' ? 'text-sky-400' : 'text-amber-400'}`}>
+                              {e.type === 'Holiday' ? '🏛️ Holiday: ' : 'Event: '} {e.title}
+                            </span>
                             <button onClick={() => openEventEdit(e)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
                           </div>
                         ))}
@@ -702,7 +723,7 @@ export function AdminEvents() {
               <div className="grid grid-cols-1 gap-2">
                 <button onClick={() => openEventCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-amber-500/10 border border-neutral-800 hover:border-amber-500/30 text-left transition-colors group">
                   <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:bg-amber-500/20"><CalendarIcon size={14}/></div>
-                  <div><p className="text-xs font-bold text-neutral-200">Event</p><p className="text-[10px] text-neutral-500">Tournament, league, etc.</p></div>
+                  <div><p className="text-xs font-bold text-neutral-200">Event</p><p className="text-[10px] text-neutral-500">Tournament, league, or holiday.</p></div>
                 </button>
                 <button onClick={() => openClosureCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-rose-500/10 border border-neutral-800 hover:border-rose-500/30 text-left transition-colors group">
                   <div className="w-8 h-8 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500 group-hover:bg-rose-500/20"><AlertTriangle size={14}/></div>
@@ -787,18 +808,21 @@ export function AdminEvents() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Users size={11} /> Max Participants</label>
-                      <Input type="number" value={eventForm.maxParticipants} onChange={e => setEventForm({...eventForm, maxParticipants: e.target.value})} placeholder="e.g. 32" min="1" className="bg-neutral-950 border-neutral-800" />
+                  {/* Hide participant tracking if it's just a Holiday marker */}
+                  {eventForm.type !== 'Holiday' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Users size={11} /> Max Participants</label>
+                        <Input type="number" value={eventForm.maxParticipants} onChange={e => setEventForm({...eventForm, maxParticipants: e.target.value})} placeholder="e.g. 32" min="1" className="bg-neutral-950 border-neutral-800" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Slots Status</label>
+                        <button type="button" onClick={() => setEventForm(prev => ({ ...prev, slotsFull: !prev.slotsFull }))} className={`flex items-center gap-2 w-full h-10 px-3 rounded-md border text-sm font-semibold transition-all ${eventForm.slotsFull ? 'bg-rose-950/40 border-rose-700/50 text-rose-400' : 'bg-neutral-950 border-neutral-800 text-neutral-500'}`}>
+                          {eventForm.slotsFull ? <ToggleRight size={18} className="text-rose-400" /> : <ToggleLeft size={18} />} {eventForm.slotsFull ? 'Slots Full' : 'Open'}
+                        </button>
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Slots Status</label>
-                      <button type="button" onClick={() => setEventForm(prev => ({ ...prev, slotsFull: !prev.slotsFull }))} className={`flex items-center gap-2 w-full h-10 px-3 rounded-md border text-sm font-semibold transition-all ${eventForm.slotsFull ? 'bg-rose-950/40 border-rose-700/50 text-rose-400' : 'bg-neutral-950 border-neutral-800 text-neutral-500'}`}>
-                        {eventForm.slotsFull ? <ToggleRight size={18} className="text-rose-400" /> : <ToggleLeft size={18} />} {eventForm.slotsFull ? 'Slots Full' : 'Open'}
-                      </button>
-                    </div>
-                  </div>
+                  )}
 
                   <div>
                     <label className="text-xs font-semibold text-neutral-400 block mb-2 flex items-center gap-1.5">

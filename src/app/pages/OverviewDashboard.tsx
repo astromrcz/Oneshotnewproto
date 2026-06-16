@@ -2,9 +2,9 @@ import { useAppContext, HOURLY_RATE } from '../context/AppContext';
 import { useNavigate } from 'react-router';
 import {
   TableProperties, Users, Calendar, TrendingUp,
-  AlertTriangle, Clock, ChevronRight, Palette, CheckCircle2, Circle
+  AlertTriangle, Clock, ChevronRight, CheckCircle2, CloudRain, Sun, Cloud
 } from 'lucide-react';
-import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isTomorrow, isFuture } from 'date-fns';
+import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isFuture } from 'date-fns';
 
 const formatPHP = (amount: number) =>
   `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
@@ -31,7 +31,7 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
 }
 
 export function OverviewDashboard() {
-  const { tables, queue, reservations } = useAppContext();
+  const { tables, queue, reservations, weather } = useAppContext();
   const navigate = useNavigate();
 
   const available = tables.filter(t => t.isActive && t.status === 'available').length;
@@ -97,6 +97,34 @@ export function OverviewDashboard() {
 
   return (
     <div className="space-y-6">
+      
+      {/* Live Weather Widget for Staff */}
+      {weather && (
+        <div className={`border rounded-xl px-5 py-4 flex items-center justify-between transition-colors ${
+          weather.isRaining ? 'bg-blue-950/20 border-blue-900/40' : 'bg-neutral-950 border-neutral-800'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${weather.isRaining ? 'bg-blue-500/20 text-blue-400' : weather.condition === 'Clear' ? 'bg-amber-500/20 text-amber-400' : 'bg-neutral-800 text-neutral-400'}`}>
+              {weather.isRaining ? <CloudRain size={20} /> : weather.condition === 'Clear' ? <Sun size={20} /> : <Cloud size={20} />}
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white flex items-center gap-2">
+                {Math.round(weather.temp)}°C · {weather.condition}
+              </p>
+              <p className="text-[10px] text-neutral-400 uppercase tracking-widest font-semibold mt-0.5">Live Local Weather</p>
+            </div>
+          </div>
+          {weather.isRaining && (
+            <div className="text-right">
+              <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
+                <AlertTriangle size={12} /> High Traffic Alert
+              </p>
+              <p className="text-[10px] text-neutral-500 mt-0.5">Expect increased walk-ins due to rain.</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Alerts */}
       {(overtimeTables.length > 0 || alertTables.length > 0) && (
         <div className="space-y-2">
@@ -220,53 +248,50 @@ export function OverviewDashboard() {
         </div>
 
         {/* Queue Snapshot */}
-        <div className="space-y-4">
-          {/* Queue */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                <Users size={15} className="text-neutral-500" /> Walk-in Queue
-                {waiting > 0 && <span className="bg-amber-500 text-black text-[10px] font-black rounded-full w-4 h-4 flex items-center justify-center">{waiting}</span>}
-              </h2>
-              <button onClick={() => navigate('/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
-                Manage <ChevronRight size={12} />
-              </button>
-            </div>
-            {waitingQueue.length === 0 ? (
-              <div className="flex items-center gap-2 py-2">
-                <CheckCircle2 size={16} className="text-emerald-500" />
-                <p className="text-sm text-neutral-500">No customers waiting</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {waitingQueue.slice(0, 3).map((q, i) => {
-                  const est = estimateWaitForPosition(i + 1);
-                  const isNow = est === 'Now';
-                  return (
-                    <div key={q.id} className="flex items-center gap-2.5 text-sm">
-                      <span className="w-5 h-5 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-[10px] font-bold text-neutral-400 flex-none">{i + 1}</span>
-                      <span className="text-neutral-300 font-medium flex-1 truncate">{q.customerName}</span>
-                      <span className="text-xs text-neutral-500 flex-none">{q.partySize} pax</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-none ${isNow ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>
-                        {isNow ? '✓ Now' : est}
-                      </span>
-                    </div>
-                  );
-                })}
-                {waitingQueue.length > 3 && (
-                  <p className="text-xs text-neutral-600 pl-7">+{waitingQueue.length - 3} more</p>
-                )}
-                <div className="flex items-center justify-between pt-2 mt-1 border-t border-neutral-800/60">
-                  <span className="text-[10px] text-neutral-600 flex items-center gap-1">
-                    <Clock size={10} /> Est. max wait
-                  </span>
-                  <span className={`text-[10px] font-semibold ${overallWait === 'Now' ? 'text-emerald-400' : overallWait === 'TBD' ? 'text-neutral-500' : 'text-amber-400'}`}>
-                    {overallWait}
-                  </span>
-                </div>
-              </div>
-            )}
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
+              <Users size={15} className="text-neutral-500" /> Walk-in Queue
+              {waiting > 0 && <span className="bg-amber-500 text-black text-[10px] font-black rounded-full w-4 h-4 flex items-center justify-center">{waiting}</span>}
+            </h2>
+            <button onClick={() => navigate('/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
+              Manage <ChevronRight size={12} />
+            </button>
           </div>
+          {waitingQueue.length === 0 ? (
+            <div className="flex items-center gap-2 py-2">
+              <CheckCircle2 size={16} className="text-emerald-500" />
+              <p className="text-sm text-neutral-500">No customers waiting</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {waitingQueue.slice(0, 3).map((q, i) => {
+                const est = estimateWaitForPosition(i + 1);
+                const isNow = est === 'Now';
+                return (
+                  <div key={q.id} className="flex items-center gap-2.5 text-sm">
+                    <span className="w-5 h-5 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-[10px] font-bold text-neutral-400 flex-none">{i + 1}</span>
+                    <span className="text-neutral-300 font-medium flex-1 truncate">{q.customerName}</span>
+                    <span className="text-xs text-neutral-500 flex-none">{q.partySize} pax</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-none ${isNow ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>
+                      {isNow ? '✓ Now' : est}
+                    </span>
+                  </div>
+                );
+              })}
+              {waitingQueue.length > 3 && (
+                <p className="text-xs text-neutral-600 pl-7">+{waitingQueue.length - 3} more</p>
+              )}
+              <div className="flex items-center justify-between pt-2 mt-1 border-t border-neutral-800/60">
+                <span className="text-[10px] text-neutral-600 flex items-center gap-1">
+                  <Clock size={10} /> Est. max wait
+                </span>
+                <span className={`text-[10px] font-semibold ${overallWait === 'Now' ? 'text-emerald-400' : overallWait === 'TBD' ? 'text-neutral-500' : 'text-amber-400'}`}>
+                  {overallWait}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

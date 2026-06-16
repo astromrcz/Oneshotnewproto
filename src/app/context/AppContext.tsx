@@ -71,6 +71,8 @@ export type Reservation = {
   cancellationReason?: string;
   promoCode?: string;
   discountAmount?: number;
+  paymentRef?: string;
+  receiptImg?: string;
 };
 
 export type Feedback = {
@@ -108,6 +110,7 @@ export type PromoCode = {
   isActive: boolean;
   maxUsage: number;
   usageCount: number;
+  startDate?: Date;
   expiresAt?: Date;
   createdAt: Date;
 };
@@ -185,6 +188,14 @@ export type ClosedDate = {
   isFullDay: boolean;
   openTime?: string;
   closeTime?: string;
+};
+
+export type WeatherData = {
+  temp: number;
+  condition: string;
+  isRaining: boolean;
+  code: number;
+  locationName: string;
 };
 
 // ── Default Data ───────────────────────────────────────────────
@@ -271,6 +282,8 @@ type AppContextType = {
   reservationTerms: ReservationTerms;
   announcements: Announcement[];
   closedDates: ClosedDate[];
+  weather: WeatherData | null;
+  updateWeatherLocation: (lat: string, lon: string, name: string) => void;
 
   activeAnnouncement: string;
   updateActiveAnnouncement: (msg: string) => void;
@@ -358,6 +371,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 1, maxHours: 8, minPartySize: 1, maxPartySize: 10, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.' });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
+  
+  // Weather state and configuration
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [weatherConfig, setWeatherConfig] = useState({ lat: '14.5794', lon: '121.1143', name: 'Cainta, Rizal' });
 
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => {
@@ -366,6 +383,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [staffLoggedIn, setStaffLoggedIn] = useState(false);
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [staffProfile, setStaffProfile] = useState<StaffProfile>({ username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15' });
+
+  const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => {
+    setWeatherConfig({ lat, lon, name });
+  }, []);
+
+  // ─── API FETCHERS (WEATHER & HOLIDAYS) ───
+  useEffect(() => {
+    // 1. Fetch Weather (Dynamically updates when weatherConfig changes)
+    const fetchWeather = async () => {
+      try {
+        const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${weatherConfig.lat}&longitude=${weatherConfig.lon}&current=temperature_2m,weather_code&timezone=Asia%2FManila`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const code = data.current.weather_code;
+        const temp = data.current.temperature_2m;
+        const isRaining = code >= 50; 
+        
+        let condition = "Clear";
+        if (code >= 1 && code <= 3) condition = "Cloudy";
+        if (code >= 50 && code <= 69) condition = "Raining";
+        if (code >= 80 && code <= 82) condition = "Heavy Rain";
+        if (code >= 95) condition = "Thunderstorm";
+
+        setWeather({ temp, condition, isRaining, code, locationName: weatherConfig.name });
+      } catch (err) {
+        console.error("Weather API failed:", err);
+      }
+    };
+
+    fetchWeather();
+  }, [weatherConfig]);
+
+  useEffect(() => {
+    // 2. Fetch Philippine Holidays
+    const fetchHolidays = async () => {
+      try {
+        const currentYear = new Date().getFullYear();
+        const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${currentYear}/PH`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const fetchedHolidays: Event[] = data.map((item: any) => ({
+          id: `hol_${item.date}`,
+          title: item.name,
+          date: item.date,
+          type: 'Holiday',
+          description: `Nationwide Public Holiday. ML predicts high walk-in traffic and extended play duration.`,
+        }));
+
+        setEvents(prev => {
+          const existingIds = new Set(prev.map(e => e.id));
+          const newHolidays = fetchedHolidays.filter(h => !existingIds.has(h.id));
+          return [...prev, ...newHolidays];
+        });
+      } catch (err) {
+        console.error("Holiday API failed:", err);
+      }
+    };
+
+    fetchHolidays();
+  }, []);
 
   useEffect(() => {
     if (adminLoggedIn || staffLoggedIn) {
@@ -417,13 +496,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteInventoryItem = (id: string) => setInventory(prev => prev.filter(i => i.id !== id));
   
   const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
-    // Deduct stock from global inventory
     setInventory(prev => prev.map(inv => {
       const cartItem = cart.find(c => c.id === inv.id);
       return cartItem ? { ...inv, stock: inv.stock - cartItem.qty } : inv;
     }));
-
-    // Add confirmed cart items to table's session orders
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const newOrders = [...(t.session.orders || [])];
@@ -440,10 +516,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const voidTableOrder = (tableId: string, orderIndex: number, order: SessionOrder) => {
-    // Restore the exact quantity back into the global inventory stock
     setInventory(prev => prev.map(inv => inv.id === order.id ? { ...inv, stock: inv.stock + order.qty } : inv));
-    
-    // Completely remove the voided item from the table's confirmed bill
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const newOrders = [...(t.session.orders || [])];
@@ -465,7 +538,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const callQueueItem = (id: string) => setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
 
   const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
-    // Generates a clean 6-character Reservation ID (e.g. "A1B2C3")
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     setReservations(prev => [...prev, { ...i, id, createdAt: new Date() }]);
     syncToSupabase('RESERVATION_ADDED', { id, ...i });
@@ -486,7 +558,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
   const togglePromoCode = (id: string) => setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
   const deletePromoCode = (id: string) => setPromoCodes(prev => prev.filter(p => p.id !== id));
-  const applyPromoCode = (code: string) => promoCodes.find(p => p.code.toUpperCase() === code.toUpperCase() && p.isActive) || null;
+  const applyPromoCode = (code: string) => {
+    const now = new Date();
+    return promoCodes.find(p => {
+      if (p.code.toUpperCase() !== code.toUpperCase() || !p.isActive) return false;
+      if (p.startDate && new Date(p.startDate) > now) return false; // Not started yet
+      if (p.expiresAt && new Date(p.expiresAt) < now) return false; // Expired
+      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; // Depleted
+      return true;
+    }) || null;
+  };
 
   const addStaffUser = (u: Omit<StaffUser, 'id'|'createdAt'>) => setStaffUsers(prev => [...prev, { ...u, id: `su${Date.now()}`, createdAt: new Date() }]);
   const updateStaffUser = (id: string, u: Partial<StaffUser>) => setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
@@ -509,7 +590,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates,
+      tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,

@@ -2,17 +2,27 @@
 
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { DayPicker } from "react-day-picker";
+import { DayPicker, DayContent, DayContentProps } from "react-day-picker";
+import { isSameDay } from "date-fns";
 
 import { cn } from "./utils";
 import { buttonVariants } from "./button";
+
+export type CalendarProps = React.ComponentProps<typeof DayPicker> & {
+  holidayDates?: Date[];
+  closedDates?: Date[];
+  eventDates?: Date[];
+};
 
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
+  holidayDates = [],
+  closedDates = [],
+  eventDates = [],
   ...props
-}: React.ComponentProps<typeof DayPicker>) {
+}: CalendarProps) {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
@@ -66,6 +76,28 @@ function Calendar({
         IconRight: ({ className, ...props }) => (
           <ChevronRight className={cn("size-4", className)} {...props} />
         ),
+        // Custom Day Rendering to inject colored dots
+        DayContent: (dayProps: DayContentProps) => {
+          const { date } = dayProps;
+          const isHoliday = holidayDates.some((d) => isSameDay(d, date));
+          const isClosed = closedDates.some((d) => isSameDay(d, date));
+          const isEvent = eventDates.some((d) => isSameDay(d, date));
+
+          return (
+            <div className="relative flex h-full w-full flex-col items-center justify-center">
+              <DayContent {...dayProps} />
+              
+              {/* Dot Indicators */}
+              {(isHoliday || isClosed || isEvent) && (
+                <div className="absolute bottom-1 flex gap-0.5">
+                  {isClosed && <div className="h-1 w-1 rounded-full bg-rose-500" title="Closed" />}
+                  {isHoliday && <div className="h-1 w-1 rounded-full bg-sky-500" title="Holiday" />}
+                  {isEvent && <div className="h-1 w-1 rounded-full bg-amber-500" title="Event" />}
+                </div>
+              )}
+            </div>
+          );
+        },
       }}
       {...props}
     />

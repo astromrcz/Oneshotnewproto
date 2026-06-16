@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { addMinutes, differenceInSeconds, format, isToday } from 'date-fns';
+import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Star, Phone, MapPin,
   Clock, LogIn, UserPlus, Eye, EyeOff,
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, generateReferralCode } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { Calendar as CalendarUI } from '../components/ui/Calendar';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
@@ -39,12 +40,9 @@ const ANNOUNCEMENTS = [
 ];
 
 const TIME_SLOTS = [
-  '10:00', '11:00', '12:00', '13:00', '14:00', '15:00',
-  '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00',
+  '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', 
+  '18:00', '19:00', '20:00', '21:00', '22:00', '23:00', '00:00', '01:00'
 ];
-
-const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 type Section = 'home' | 'reservations' | 'rates' | 'events' | 'about' | 'feedback';
 
@@ -86,137 +84,10 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
   );
 }
 
-// ─── Mini Calendar Component ──────────────────────────────────
-function MiniCalendar({
-  selectedDate, onSelect, reservedDates
-}: {
-  selectedDate: Date | null;
-  onSelect: (d: Date) => void;
-  reservedDates: Date[];
-}) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [viewDate, setViewDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
-
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-  const firstDayOfMonth = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-  const cells: Array<{ day: number; currentMonth: boolean; date: Date }> = [];
-  for (let i = firstDayOfMonth - 1; i >= 0; i--) {
-    const d = new Date(year, month - 1, daysInPrevMonth - i);
-    cells.push({ day: daysInPrevMonth - i, currentMonth: false, date: d });
-  }
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push({ day: d, currentMonth: true, date: new Date(year, month, d) });
-  }
-  const remaining = 42 - cells.length;
-  for (let d = 1; d <= remaining; d++) {
-    cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) });
-  }
-
-  const isReserved = (date: Date) =>
-    reservedDates.some(rd => {
-      const d = new Date(rd);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime() === date.getTime();
-    });
-
-  const isPast = (date: Date) => date < today;
-  const isSelected = (date: Date) =>
-    selectedDate
-      ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })()
-      : false;
-  const isToday = (date: Date) => date.getTime() === today.getTime();
-
-  const prevMonth = () => {
-    const d = new Date(viewDate);
-    d.setMonth(d.getMonth() - 1);
-    setViewDate(d);
-  };
-  const nextMonth = () => {
-    const d = new Date(viewDate);
-    d.setMonth(d.getMonth() + 1);
-    setViewDate(d);
-  };
-
-  return (
-    <div className="bg-neutral-900 rounded-2xl border border-neutral-700 p-4 select-none">
-      {/* Month Nav */}
-      <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={prevMonth}
-          className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <span className="text-sm font-semibold text-white">
-          {MONTHS[month]} {year}
-        </span>
-        <button
-          onClick={nextMonth}
-          className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-        >
-          <ChevronRight size={16} />
-        </button>
-      </div>
-      {/* Day Headers */}
-      <div className="grid grid-cols-7 mb-2">
-        {DAYS_OF_WEEK.map(d => (
-          <div key={d} className="text-center text-[10px] text-neutral-500 font-semibold uppercase tracking-wider py-1">
-            {d}
-          </div>
-        ))}
-      </div>
-      {/* Day Grid */}
-      <div className="grid grid-cols-7 gap-0.5">
-        {cells.map(({ day, currentMonth, date }, idx) => {
-          const past = isPast(date);
-          const selected = isSelected(date);
-          const today_ = isToday(date);
-          const reserved = isReserved(date) && currentMonth;
-          const clickable = currentMonth && !past;
-          return (
-            <button
-              key={idx}
-              disabled={!clickable}
-              onClick={() => clickable && onSelect(date)}
-              className={`
-                relative aspect-square flex flex-col items-center justify-center rounded-lg text-xs transition-all
-                ${!currentMonth ? 'opacity-20 cursor-default' : ''}
-                ${past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''}
-                ${selected ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50' : ''}
-                ${!selected && today_ ? 'border border-emerald-500 text-emerald-400' : ''}
-                ${!selected && clickable && !today_ ? 'text-neutral-300 hover:bg-neutral-800 hover:text-white' : ''}
-              `}
-            >
-              <span>{day}</span>
-              {reserved && !selected && (
-                <span className="absolute bottom-1 w-1 h-1 rounded-full bg-amber-400" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-3 flex items-center gap-3 text-[10px] text-neutral-500">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Has reservations</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Selected</span>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main HomePage ────────────────────────────────────────────
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, events, addReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext();
+  const { tables, queue, reservations, events, closedDates, reservationTerms, addReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext();
 
   // Announcement rotator
   const [announcementIdx, setAnnouncementIdx] = useState(0);
@@ -245,7 +116,7 @@ export function HomePage() {
   // Register form
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', referralCode: '', showPw: false, error: '' });
 
- // Reservation flow
+  // Reservation flow
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0); // 0=closed, 1=form, 2=payment, 3=confirmed
   const [resTab, setResTab] = useState<'new' | 'my-bookings'>('new');
   const [trackForm, setTrackForm] = useState({ reservationId: '' });
@@ -256,7 +127,7 @@ export function HomePage() {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isLiveMonitorOpen, setIsLiveMonitorOpen] = useState(false);
   const [resForm, setResForm] = useState({
-    name: '', email: '', phone: '', pax: 2, timeSlot: '18:00', duration: 2,
+    name: '', email: '', phone: '', pax: 2, timeSlot: '12:00', duration: 2,
   });
   
   const [paymentMethod, setPaymentMethod] = useState<'gcash'>('gcash');
@@ -316,7 +187,6 @@ export function HomePage() {
       setLoginForm(f => ({ ...f, error: 'Please fill all fields.' }));
       return;
     }
-    // Mock login: any valid email/password
     const name = loginForm.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     setCurrentUser({ name, email: loginForm.email, referralCode: generateReferralCode(name) });
     setShowLoginModal(false);
@@ -399,7 +269,7 @@ export function HomePage() {
   const closeReservation = () => {
     setReservationStep(0);
     setSelectedDate(null);
-    setResForm({ name: currentUser?.name || '', email: currentUser?.email || '', phone: '', pax: 2, timeSlot: '18:00', duration: 2 });
+    setResForm({ name: currentUser?.name || '', email: currentUser?.email || '', phone: '', pax: 2, timeSlot: '12:00', duration: 2 });
     setPaymentMethod('gcash');
     setPromoCodeInput('');
     setAppliedPromo(null);
@@ -433,22 +303,19 @@ export function HomePage() {
   const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + HERO_SLIDES.length) % HERO_SLIDES.length); };
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % HERO_SLIDES.length); };
 
-  // --- AI WAIT-TIME ESTIMATOR (PROTOTYPE LOGIC) ---
+  // --- AI WAIT-TIME ESTIMATOR ---
   const calculateAIWaitTime = () => {
     const waitingCustomers = queue.filter(q => q.status === 'waiting').length;
     if (waitingCustomers === 0) return "No wait";
 
-    // Get all occupied tables and find how many minutes they have left
     const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
     if (activeTables.length === 0) return "Available immediately";
 
     const remainingTimes = activeTables.map(t => {
       const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
       return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
-    }).sort((a, b) => a - b); // Sort from ending soonest to longest
+    }).sort((a, b) => a - b); 
 
-    // Prototype "AI" Math: Grab the table ending soonest, add 2 mins for cleaning, 
-    // and add 15 mins penalty for every person ahead in the queue.
     const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
     const estimatedMinutes = baseWait + 2 + (waitingCustomers * 15);
 
@@ -458,9 +325,10 @@ export function HomePage() {
     return `~${hrs}h ${mins}m`;
   };
 
-  const reservedDates = reservations
-    .filter(r => r.status !== 'cancelled')
-    .map(r => new Date(r.date));
+  // Safe checks for the calendar dates
+  const publicEvents = events.filter(e => e.type !== 'Holiday');
+  const safeEventDates = publicEvents.map(e => new Date(e.date));
+  const safeClosedDates = closedDates.map(c => new Date(c.date));
 
   const allNavSections: { id: Section; label: string; requiresAuth?: boolean }[] = [
     { id: 'home', label: 'Home' },
@@ -789,11 +657,17 @@ export function HomePage() {
                     <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">
                       Step 1 — Pick a Date
                     </p>
-                    <MiniCalendar
-                      selectedDate={selectedDate}
-                      onSelect={setSelectedDate}
-                      reservedDates={reservedDates}
-                    />
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 flex justify-center w-full">
+                      <CalendarUI
+                        mode="single"
+                        selected={selectedDate || undefined}
+                        onSelect={(d) => setSelectedDate(d || null)}
+                        disabled={(date) => isBefore(date, startOfDay(new Date())) || closedDates.some(c => c.date === format(date, 'yyyy-MM-dd'))}
+                        eventDates={safeEventDates}
+                        closedDates={safeClosedDates}
+                        className="w-full"
+                      />
+                    </div>
                     {selectedDate && (
                       <div className="mt-3 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
                         <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
@@ -802,6 +676,10 @@ export function HomePage() {
                         </span>
                       </div>
                     )}
+                    <div className="mt-3 flex items-center justify-center gap-4 text-[10px] text-neutral-500">
+                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Event</span>
+                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" /> Closed</span>
+                    </div>
                   </div>
 
                   {/* Form */}
@@ -875,30 +753,25 @@ export function HomePage() {
                               </select>
                             </div>
                           </div>
-                          {/* Time Slot */}
+                          {/* Time Slot DROPDOWN */}
                           <div>
                             <label className="block text-xs text-neutral-400 mb-1.5">Preferred Time</label>
-                            <div className="grid grid-cols-4 gap-1.5">
-                              {TIME_SLOTS.map(t => {
-                                const isHappyHour = t === '18:00' || t === '19:00';
-                                return (
-                                  <button
-                                    key={t}
-                                    disabled={isHappyHour}
-                                    onClick={() => setResForm(f => ({ ...f, timeSlot: t }))}
-                                    className={`py-2 rounded-lg text-xs font-semibold transition-all ${
-                                      isHappyHour 
-                                        ? 'bg-neutral-800/50 text-neutral-600 cursor-not-allowed border border-neutral-800' 
-                                        : resForm.timeSlot === t
-                                        ? 'bg-emerald-600 text-white'
-                                        : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200'
-                                    }`}
-                                    title={isHappyHour ? "Happy Hour (Walk-in Only)" : ""}
-                                  >
-                                    {t}
-                                  </button>
-                                );
-                              })}
+                            <div className="relative">
+                              <select
+                                value={resForm.timeSlot}
+                                onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors appearance-none pr-9"
+                              >
+                                {TIME_SLOTS.map(t => {
+                                  const isHappyHour = t === '18:00' || t === '19:00';
+                                  return (
+                                    <option key={t} value={t} disabled={isHappyHour}>
+                                      {t} {isHappyHour ? '(Walk-in Only - Happy Hour)' : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
                             </div>
                             <p className="text-[10px] text-amber-500 mt-2">
                               * 18:00 and 19:00 are Happy Hour (Strictly walk-in only). These time slots cannot be booked online.
@@ -1075,14 +948,7 @@ export function HomePage() {
                       }} className="space-y-4">
                         <div>
                           <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-rose-500">*</span></label>
-                          <input 
-                            type="text" 
-                            required 
-                            value={trackForm.reservationId} 
-                            onChange={e => setTrackForm({ reservationId: e.target.value.toUpperCase() })} 
-                            placeholder="e.g. TEST" 
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors font-mono tracking-widest uppercase" 
-                          />
+                          <input type="text" required value={trackForm.reservationId} onChange={e => setTrackForm({ reservationId: e.target.value.toUpperCase() })} placeholder="e.g. TEST" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors font-mono tracking-widest uppercase" />
                         </div>
                         <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">
                           Find Booking
@@ -1199,7 +1065,7 @@ export function HomePage() {
                     name: 'Standard Play',
                     rate: '₱250',
                     unit: '/ hour',
-                    desc: 'Walk-in regular play on any available table Upon.',
+                    desc: 'Walk-in regular play on any available table.',
                     features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'],
                     badge: null,
                     color: 'neutral',
@@ -1271,9 +1137,9 @@ export function HomePage() {
                 ))}
               </div>
 
-              {/* Additional Info */}
+              {/* Additional Info / Reservation Terms */}
               <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
-                <h3 className="text-white font-semibold mb-4">Additional Information</h3>
+                <h3 className="text-white font-semibold mb-4">Reservation Policies & Terms</h3>
 
                 {/* Redemption notice */}
                 <div className="flex gap-3 bg-emerald-950/40 border border-emerald-700/30 rounded-xl p-4 mb-5">
@@ -1290,17 +1156,18 @@ export function HomePage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   {[
-                    { label: 'Minimum booking time', value: '1 hour' },
-                    { label: 'Down payment required', value: '25% of total' },
-                    { label: 'Remaining balance', value: 'Paid on-site before play begins' },
-                    { label: 'Cancellation policy', value: '24 hours before reservation' },
+                    { label: 'Booking Cut-off', value: `Requires at least ${reservationTerms.cancellationHours} hours advance notice.` },
+                    { label: 'Operating Hours', value: 'Mon-Sat 12PM-3AM, Sun 5PM-3AM' },
+                    { label: 'Minimum Booking', value: `${reservationTerms.minHours} hour(s)` },
+                    { label: 'Maximum Booking', value: `${reservationTerms.maxHours} hour(s)` },
+                    { label: 'Grace Period', value: '15 minutes' },
+                    { label: 'Cancellation', value: reservationTerms.cancellationPolicy },
                     { label: 'Payment methods', value: 'GCash, Cash' },
-                    { label: 'Walk-in queue', value: 'First Come, First Served — when tables are available' },
-                    { label: 'Extension charges', value: 'Regular rate applies' },
+                    { label: 'Walk-in queue', value: 'First Come, First Served' },
                   ].map(({ label, value }) => (
                     <div key={label} className="flex justify-between py-2 border-b border-neutral-800/60">
                       <span className="text-neutral-500">{label}</span>
-                      <span className="text-neutral-200 font-medium">{value}</span>
+                      <span className="text-neutral-200 font-medium text-right ml-2">{value}</span>
                     </div>
                   ))}
                 </div>
@@ -1320,16 +1187,16 @@ export function HomePage() {
             >
               <div className="text-center mb-10 mt-6">
                 <h2 className="text-3xl font-black text-white tracking-tight uppercase mb-3">Upcoming Events</h2>
-                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and holiday promos.</p>
+                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and promos.</p>
               </div>
 
               <div className="space-y-6">
-                {events.length === 0 ? (
+                {publicEvents.length === 0 ? (
                   <div className="text-center py-12 border border-dashed border-neutral-800 rounded-xl">
                     <p className="text-neutral-500">No upcoming events at the moment. Check back soon!</p>
                   </div>
                 ) : (
-                  events.map(event => (
+                  publicEvents.map(event => (
                     <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden relative group transition-all hover:border-emerald-600/30 flex flex-col">
                       
                       {/* Image Banner (if exists), else fallback gradient blur */}
@@ -1434,7 +1301,7 @@ export function HomePage() {
                 </div>
               </div>
 
-              {/* Location Map — moved above Facilities */}
+              {/* Location Map */}
               <div className="mb-12">
                 <h3 className="text-center text-xl font-bold text-white mb-6">Our Location</h3>
                 <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-64 flex items-center justify-center relative">

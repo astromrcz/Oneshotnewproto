@@ -1,16 +1,22 @@
 import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { DollarSign, Save, CheckCircle, Info } from 'lucide-react';
+import { DollarSign, Save, CheckCircle, Info, AlertCircle, X, Calendar } from 'lucide-react';
 
 export function AdminRates() {
   const { rates, updateRates } = useAppContext();
   const [form, setForm] = useState({ ...rates });
   const [saved, setSaved] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSaveClick = (e: React.FormEvent) => {
     e.preventDefault();
+    setShowConfirm(true);
+  };
+
+  const handleConfirmSave = () => {
     updateRates(form);
     setSaved(true);
+    setShowConfirm(false);
     setTimeout(() => setSaved(false), 2500);
   };
 
@@ -70,7 +76,7 @@ export function AdminRates() {
         </p>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-5">
+      <form onSubmit={handleSaveClick} className="space-y-5">
         {/* Table Rates */}
         <div>
           <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3 flex items-center gap-2">
@@ -85,16 +91,39 @@ export function AdminRates() {
 
         {/* Happy Hour Times */}
         <div>
-          <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Happy Hour Window</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Happy Hour Window</h3>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Status</span>
+              <div 
+                onClick={() => setForm(f => ({ ...f, isHappyHourActive: !f.isHappyHourActive }))}
+                className={`w-10 h-5 rounded-full relative transition-colors ${form.isHappyHourActive ? 'bg-emerald-500' : 'bg-neutral-700'}`}
+              >
+                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.isHappyHourActive ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </div>
+            </label>
+          </div>
+
+          <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 transition-opacity ${!form.isHappyHourActive ? 'opacity-40 pointer-events-none' : ''}`}>
             <TimeField label="Happy Hour Start" field="happyHourStart" hint="Walk-in sessions only during this window" />
             <TimeField label="Happy Hour End" field="happyHourEnd" />
           </div>
           <div className="mt-2 bg-neutral-950 border border-neutral-800 rounded-xl p-3">
             <p className="text-xs text-neutral-400">
-              Current happy hour: <span className="text-amber-400 font-semibold">{form.happyHourStart} – {form.happyHourEnd}</span>
-              &nbsp;· Rate: <span className="text-amber-400 font-semibold">₱{form.happyHourRate}/hr</span>
+              Current happy hour: <span className={form.isHappyHourActive ? "text-amber-400 font-semibold" : "text-neutral-500 line-through"}>{form.happyHourStart} – {form.happyHourEnd}</span>
+               · Rate: <span className={form.isHappyHourActive ? "text-amber-400 font-semibold" : "text-neutral-500 line-through"}>₱{form.happyHourRate}/hr</span>
             </p>
+          </div>
+        </div>
+
+        {/* Reservation Limits */}
+        <div>
+          <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3 flex items-center gap-2">
+            <Calendar size={12} className="text-amber-500" /> Online Reservation Hours
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <TimeField label="Start Accepting At" field="reservationStartTime" hint="Earliest time a user can book" />
+            <TimeField label="Stop Accepting At" field="reservationEndTime" hint="Cut-off time for bookings" />
           </div>
         </div>
 
@@ -129,6 +158,81 @@ export function AdminRates() {
           <Save size={15} /> Save Rate Changes
         </button>
       </form>
+
+      {/* Confirmation Dialog */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <AlertCircle size={20} className="text-amber-500" />
+                <h2 className="text-base font-bold text-neutral-100">Confirm Rate Changes</h2>
+              </div>
+              <button onClick={() => setShowConfirm(false)} className="p-2 text-neutral-500 hover:text-white rounded-lg">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 space-y-3">
+                <p className="text-sm text-neutral-400 font-semibold">Summary of Changes:</p>
+                {rates.hourlyRate !== form.hourlyRate && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Hourly Rate:</span>
+                    <span><span className="text-rose-400 line-through">₱{rates.hourlyRate}</span> → <span className="text-emerald-400 font-semibold">₱{form.hourlyRate}</span></span>
+                  </div>
+                )}
+                {rates.happyHourRate !== form.happyHourRate && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Happy Hour Rate:</span>
+                    <span><span className="text-rose-400 line-through">₱{rates.happyHourRate}</span> → <span className="text-emerald-400 font-semibold">₱{form.happyHourRate}</span></span>
+                  </div>
+                )}
+                {rates.overtimeRate !== form.overtimeRate && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Overtime Rate:</span>
+                    <span><span className="text-rose-400 line-through">₱{rates.overtimeRate}</span> → <span className="text-emerald-400 font-semibold">₱{form.overtimeRate}</span></span>
+                  </div>
+                )}
+                {rates.happyHourStart !== form.happyHourStart && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Happy Hour Start:</span>
+                    <span><span className="text-rose-400 line-through">{rates.happyHourStart}</span> → <span className="text-emerald-400 font-semibold">{form.happyHourStart}</span></span>
+                  </div>
+                )}
+                {rates.happyHourEnd !== form.happyHourEnd && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Happy Hour End:</span>
+                    <span><span className="text-rose-400 line-through">{rates.happyHourEnd}</span> → <span className="text-emerald-400 font-semibold">{form.happyHourEnd}</span></span>
+                  </div>
+                )}
+                {rates.downPaymentPercent !== form.downPaymentPercent && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Down Payment %:</span>
+                    <span><span className="text-rose-400 line-through">{rates.downPaymentPercent}%</span> → <span className="text-emerald-400 font-semibold">{form.downPaymentPercent}%</span></span>
+                  </div>
+                )}
+              </div>
+              <div className="bg-amber-950/20 border border-amber-900/30 rounded-lg p-3">
+                <p className="text-xs text-amber-600/80">These changes will be applied immediately to all new sessions and reservations.</p>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-neutral-800 flex gap-3">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSave}
+                className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <CheckCircle size={14} /> Confirm & Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

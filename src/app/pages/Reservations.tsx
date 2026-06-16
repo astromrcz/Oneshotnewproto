@@ -41,6 +41,15 @@ export function Reservations() {
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
 
+  // GCash Receipt State (browser memory)
+  const [gcashReceipts, setGcashReceipts] = useState<Record<string, { refNo: string; imageUrl: string }>>(() => {
+    if (typeof window !== 'undefined' && localStorage) {
+      const saved = localStorage.getItem('gcashReceipts');
+      return saved ? JSON.parse(saved) : {};
+    }
+    return {};
+  });
+
   // Form state
   const [form, setForm] = useState({
     customerName: '', contactNumber: '', email: '', date: '',
@@ -85,6 +94,19 @@ export function Reservations() {
   const handleSendEmail = (resId: string) => {
     setEmailToast(`Reschedule email sent to Reservation #${resId.toUpperCase()}`);
     setTimeout(() => setEmailToast(null), 3000);
+  };
+
+  const handleGcashReceiptUpload = (resId: string, refNo: string, imageFile: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageUrl = e.target?.result as string;
+      const updated = { ...gcashReceipts, [resId]: { refNo, imageUrl } };
+      setGcashReceipts(updated);
+      if (typeof window !== 'undefined' && localStorage) {
+        localStorage.setItem('gcashReceipts', JSON.stringify(updated));
+      }
+    };
+    reader.readAsDataURL(imageFile);
   };
 
   // ─── Handlers ────────────────────────────────────────────────────────
@@ -579,22 +601,62 @@ export function Reservations() {
                   </div>
                   
                   {/* GCash Reference & Receipt Display */}
-                  {(selected as any).paymentRef && (
+                  {gcashReceipts[selected.id]?.refNo && (
                     <div className="flex justify-between items-center text-sm border-t border-neutral-800 pt-2 mt-2">
                       <span className="text-neutral-400">GCash Ref No.</span>
-                      <span className="text-neutral-200 font-mono text-xs">{String((selected as any).paymentRef)}</span>
+                      <span className="text-neutral-200 font-mono text-xs">{gcashReceipts[selected.id].refNo}</span>
                     </div>
                   )}
-                  {(selected as any).receiptImg && (
+                  {gcashReceipts[selected.id]?.imageUrl && (
                     <div className="mt-2 pt-2 border-t border-neutral-800">
-                      <a 
-                        href={String((selected as any).receiptImg)} 
-                        target="_blank" 
-                        rel="noreferrer" 
-                        className="flex items-center justify-center gap-2 text-xs bg-neutral-800 hover:bg-neutral-700 text-blue-400 py-2.5 rounded-lg transition-colors border border-neutral-700"
+                      <button 
+                        onClick={() => window.open(gcashReceipts[selected.id].imageUrl, '_blank')}
+                        className="w-full flex items-center justify-center gap-2 text-xs bg-blue-900/20 hover:bg-blue-900/40 text-blue-400 py-2.5 rounded-lg transition-colors border border-blue-700/30"
                       >
-                        <ImageIcon size={14} /> View Uploaded GCash Receipt
-                      </a>
+                        <ImageIcon size={14} /> View Saved GCash Receipt
+                      </button>
+                    </div>
+                  )}
+
+                  {/* GCash Receipt Upload Form */}
+                  {!gcashReceipts[selected.id]?.refNo && (
+                    <div className="mt-3 pt-3 border-t border-neutral-800/60 space-y-2">
+                      <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Add GCash Receipt (Optional)</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="GCash Reference No."
+                          id={`gcash-ref-${selected.id}`}
+                          className="flex-1 text-xs bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-neutral-200 placeholder-neutral-600"
+                        />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          id={`gcash-image-${selected.id}`}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor={`gcash-image-${selected.id}`}
+                          className="cursor-pointer px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs rounded font-semibold border border-blue-700/30 transition-colors"
+                        >
+                          Upload
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const refInput = document.getElementById(`gcash-ref-${selected.id}`) as HTMLInputElement;
+                            const fileInput = document.getElementById(`gcash-image-${selected.id}`) as HTMLInputElement;
+                            if (refInput?.value && fileInput?.files?.length) {
+                              handleGcashReceiptUpload(selected.id, refInput.value, fileInput.files[0]);
+                              refInput.value = '';
+                              fileInput.value = '';
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-xs rounded font-semibold border border-emerald-700/30 transition-colors"
+                        >
+                          Save
+                        </button>
+                      </div>
                     </div>
                   )}
 

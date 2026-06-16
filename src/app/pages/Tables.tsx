@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppContext, HOURLY_RATE, SessionOrder } from '../context/AppContext';
 import { TableCard } from '../components/TableCard';
 import {
@@ -16,8 +16,8 @@ type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 const formatPHP = (amount: number) => `₱${amount.toFixed(2)}`;
 
 type CustomerSource =
-  | { kind: 'queue';        id: string; name: string; partySize: number; contact: string; notes?: string }
-  | { kind: 'reservation';  id: string; name: string; partySize: number; contact: string; durationHours: number; timeSlot: string };
+  | { kind: 'queue'; id: string; name: string; partySize: number; contact: string; notes?: string }
+  | { kind: 'reservation'; id: string; name: string; partySize: number; contact: string; durationHours: number; timeSlot: string };
 
 export function Tables() {
   const { tables, queue, reservations, assignTable, extendSession, freeTable, inventory, submitTableOrders, voidTableOrder } = useAppContext() as any;
@@ -28,20 +28,19 @@ export function Tables() {
   const [extendingTableId, setExtendingTableId] = useState<string | null>(null);
   const [endingTableId,    setEndingTableId]    = useState<string | null>(null);
   
-  // POS States
   const [posTableId,       setPosTableId]       = useState<string | null>(null);
   const [posCart,          setPosCart]          = useState<SessionOrder[]>([]);
   const [voidItem,         setVoidItem]         = useState<{ index: number, order: SessionOrder } | null>(null);
   const [voidPassword,     setVoidPassword]     = useState('');
 
-  // Near-end banner dismissed set
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
 
   // Assign form state
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSource | null>(null);
   const [customerName,     setCustomerName]      = useState('');
-  const [durationMinutes,  setDurationMinutes]   = useState(60);
+  const [durationMinutes,  setDurationMinutes]   = useState<number | 'open'>(60);
   const [amountPaid,       setAmountPaid]        = useState('');
+  const [paymentOption,    setPaymentOption]     = useState<'payNow' | 'payLater'>('payNow');
 
   // Extend form state
   const [extendMinutes,       setExtendMinutes]       = useState(60);
@@ -60,7 +59,6 @@ export function Tables() {
   const [debtName,         setDebtName]         = useState('');
   const [debtContact,      setDebtContact]      = useState('');
 
-  // ── Derived ───────────────────────────────────────────────────
   const activeTables = tables.filter((t: any) => t.isActive);
   const available    = activeTables.filter((t: any) => t.status === 'available').length;
   const occupied     = activeTables.filter((t: any) => t.status === 'occupied').length;
@@ -76,7 +74,7 @@ export function Tables() {
   });
 
   const nearEndTables = activeTables.filter((t: any) => {
-    if (t.status !== 'occupied' || !t.session) return false;
+    if (t.status !== 'occupied' || !t.session || t.session.isOpenTime) return false;
     const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     const secsLeft = differenceInSeconds(endTime, new Date());
     return secsLeft > 0 && secsLeft <= 10 * 60;
@@ -93,34 +91,50 @@ export function Tables() {
 
   const allCustomers: CustomerSource[] = [...waitingCustomers, ...todayReservations];
 
-  // ── End session derived values ─────────────────────────────────
   const endingTable = tables.find((t: any) => t.id === endingTableId);
   const getEndSessionInfo = () => {
     if (!endingTable?.session) return null;
-    const { startTime, durationMinutes: bookedMins, amountPaid: alreadyPaid, hourlyRate, orders = [] } = endingTable.session;
+    const { startTime, durationMinutes: bookedMins, amountPaid: alreadyPaid, hourlyRate, orders = [], isOpenTime } = endingTable.session;
     const now = new Date();
     const elapsedSecs = differenceInSeconds(now, new Date(startTime));
     const elapsedMins = Math.ceil(elapsedSecs / 60);
-    const endTime = addMinutes(new Date(startTime), bookedMins);
-    const isOvertime = now > endTime;
-    const overtimeMins = isOvertime ? Math.ceil(differenceInSeconds(now, endTime) / 60) : 0;
-    const bookedCharge = (bookedMins / 60) * hourlyRate;
-    const overtimeCharge = (overtimeMins / 60) * hourlyRate;
+    
+    let bookedCharge = 0;
+    let overtimeCharge = 0;
+    let isOvertime = false;
+    let overtimeMins = 0;
+
+    if (isOpenTime || bookedMins === null) {
+      const fullHours = Math.floor(elapsedMins / 60);
+      const remainingMins = elapsedMins % 60;
+      
+      let extraCharge = 0;
+      if (remainingMins > 0 && remainingMins <= 30) {
+        extraCharge = hourlyRate / 2;
+      } else if (remainingMins > 30) {
+        extraCharge = hourlyRate;
+      }
+
+      bookedCharge = (fullHours * hourlyRate) + extraCharge;
+    } else {
+      const endTime = addMinutes(new Date(startTime), bookedMins);
+      isOvertime = now > endTime;
+      overtimeMins = isOvertime ? Math.ceil(differenceInSeconds(now, endTime) / 60) : 0;
+      bookedCharge = (bookedMins / 60) * hourlyRate;
+      overtimeCharge = (overtimeMins / 60) * hourlyRate;
+    }
     
     const posOrdersTotal = orders.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
-    
     const totalDue = bookedCharge + overtimeCharge + posOrdersTotal;
     const balance = Math.max(0, totalDue - alreadyPaid);
     
-    return { elapsedMins, alreadyPaid, bookedCharge, overtimeCharge, posOrdersTotal, totalDue, balance, isOvertime, overtimeMins };
+    return { elapsedMins, alreadyPaid, bookedCharge, overtimeCharge, posOrdersTotal, totalDue, balance, isOvertime, overtimeMins, isOpenTime };
   };
   const endInfo = getEndSessionInfo();
 
-  // ── Extend derived values ──────────────────────────────────────
   const extendingTable = tables.find((t: any) => t.id === extendingTableId);
   const extendCharge = (extendMinutes / 60) * HOURLY_RATE;
 
-  // ── POS derived values ─────────────────────────────────────────
   const posTable = tables.find((t: any) => t.id === posTableId);
   const confirmedOrders = posTable?.session?.orders || [];
   const confirmedTotal = confirmedOrders.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
@@ -128,8 +142,19 @@ export function Tables() {
 
   const getPosSessionInfo = () => {
     if (!posTable?.session) return null;
-    const { startTime, durationMinutes: bookedMins, hourlyRate } = posTable.session;
+    const { startTime, durationMinutes: bookedMins, hourlyRate, isOpenTime } = posTable.session;
     const now = new Date();
+    
+    if (isOpenTime || bookedMins === null) {
+      const elapsedMins = Math.ceil(differenceInSeconds(now, new Date(startTime)) / 60);
+      const fullHours = Math.floor(elapsedMins / 60);
+      const remainingMins = elapsedMins % 60;
+      let extraCharge = 0;
+      if (remainingMins > 0 && remainingMins <= 30) extraCharge = hourlyRate / 2;
+      else if (remainingMins > 30) extraCharge = hourlyRate;
+      return { bookedCharge: (fullHours * hourlyRate) + extraCharge, overtimeCharge: 0, isOvertime: false };
+    }
+    
     const endTime = addMinutes(new Date(startTime), bookedMins);
     const isOvertime = now > endTime;
     const overtimeMins = isOvertime ? Math.ceil(differenceInSeconds(now, endTime) / 60) : 0;
@@ -139,9 +164,13 @@ export function Tables() {
   };
   const posInfo = getPosSessionInfo();
 
-  // ── Handlers ──────────────────────────────────────────────────
   const openAssign = (tableId: string) => {
-    setAssigningTableId(tableId); setSelectedCustomer(null); setCustomerName(''); setDurationMinutes(60); setAmountPaid('');
+    setAssigningTableId(tableId);
+    setSelectedCustomer(null);
+    setCustomerName('');
+    setDurationMinutes(60);
+    setAmountPaid('');
+    setPaymentOption('payNow');
   };
 
   const openEnd = (tableId: string) => {
@@ -164,18 +193,35 @@ export function Tables() {
       const mins = c.durationHours * 60;
       setDurationMinutes(mins); setAmountPaid(((mins / 60) * HOURLY_RATE).toFixed(2));
     } else {
-      setAmountPaid(((durationMinutes / 60) * HOURLY_RATE).toFixed(2));
+      setDurationMinutes(60); setAmountPaid(((60 / 60) * HOURLY_RATE).toFixed(2));
     }
   };
 
   const handleAssign = (e: React.FormEvent) => {
     e.preventDefault();
     if (!assigningTableId || !customerName) return;
-    const autoPayment = (durationMinutes / 60) * HOURLY_RATE;
+    
+    const isOpenTime = durationMinutes === 'open';
+    const autoPayment = isOpenTime ? 0 : ((durationMinutes as number) / 60) * HOURLY_RATE;
+    
     assignTable(assigningTableId, {
-      customerName, durationMinutes, startTime: new Date(), isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: parseFloat(amountPaid) || autoPayment, orders: []
+      customerName,
+      durationMinutes: isOpenTime ? null : (durationMinutes as number),
+      isOpenTime: isOpenTime,
+      startTime: new Date(),
+      isPaid: paymentOption === 'payNow',
+      hourlyRate: HOURLY_RATE,
+      amountPaid: paymentOption === 'payNow' ? parseFloat(amountPaid) || autoPayment : 0,
+      orders: [],
+      paymentStatus: paymentOption,
     });
-    setAssigningTableId(null); setSelectedCustomer(null); setCustomerName(''); setDurationMinutes(60); setAmountPaid('');
+    
+    setAssigningTableId(null);
+    setSelectedCustomer(null);
+    setCustomerName('');
+    setDurationMinutes(60);
+    setAmountPaid('');
+    setPaymentOption('payNow');
   };
 
   const handleConfirmEnd = () => {
@@ -192,11 +238,9 @@ export function Tables() {
     setExtendingTableId(null);
   };
 
-  // ── POS Handlers ──────────────────────────────────────────────
   const handleAddToCart = (item: any) => {
     const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
-    if (item.stock - inCartQty <= 0) return; // Prevent adding more than stock
-
+    if (item.stock - inCartQty <= 0) return; 
     setPosCart(prev => {
       const existing = prev.find(p => p.id === item.id);
       if (existing) return prev.map(p => p.id === item.id ? { ...p, qty: p.qty + 1 } : p);
@@ -209,12 +253,11 @@ export function Tables() {
       if (p.id === id) {
         const itemStock = inventory.find((i: any) => i.id === id)?.stock || 0;
         const newQty = p.qty + delta;
-        // Don't exceed stock and don't go below 0
         if (newQty > itemStock || newQty < 0) return p;
         return { ...p, qty: newQty };
       }
       return p;
-    }).filter(p => p.qty > 0)); // Automatically remove if qty hits 0
+    }).filter(p => p.qty > 0));
   };
 
   const handleConfirmOrders = () => {
@@ -226,7 +269,6 @@ export function Tables() {
   const handleVoidSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!posTableId || !voidItem) return;
-    
     if (voidPassword === '123') {
       voidTableOrder(posTableId, voidItem.index, voidItem.order);
       setVoidItem(null);
@@ -236,8 +278,6 @@ export function Tables() {
       setVoidPassword('');
     }
   };
-
-  // ──────────────────────────────────────────────────────────────
 
   const getNextReservation = (tableId: string) => {
     const now = new Date();
@@ -260,6 +300,31 @@ export function Tables() {
   const durationOptions = [30, 60, 90, 120, 180, 240];
   const extendOptions   = [30, 60, 90, 120];
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const assignCustomer = sessionStorage.getItem('assignCustomer');
+      const assignTableId = sessionStorage.getItem('assignTableId');
+      if (assignCustomer && assignTableId) {
+        const customer = JSON.parse(assignCustomer);
+        setAssigningTableId(assignTableId);
+        setSelectedCustomer(customer as any);
+        setCustomerName(customer.name);
+        setPaymentOption('payNow');
+        
+        if (customer.kind === 'reservation') {
+          const mins = (customer as any).durationHours * 60;
+          setDurationMinutes(mins);
+          setAmountPaid(((mins / 60) * HOURLY_RATE).toFixed(2));
+        } else {
+          setAmountPaid(((60 / 60) * HOURLY_RATE).toFixed(2));
+        }
+        
+        sessionStorage.removeItem('assignCustomer');
+        sessionStorage.removeItem('assignTableId');
+      }
+    }
+  }, []);
+
   const PayStatusBtn = ({ value, current, label, onChange }: { value: PaymentStatus; current: PaymentStatus; label: string; onChange: (v: PaymentStatus) => void }) => (
     <button type="button" onClick={() => onChange(value)} className={`flex-1 py-2 rounded-xl border text-xs font-semibold transition-all ${current === value ? value === 'paid' ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : value === 'partial' ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-rose-600/15 border-rose-600 text-rose-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
       {label}
@@ -277,7 +342,6 @@ export function Tables() {
       
       {/* MAIN CONTENT AREA */}
       <div className={`flex-1 space-y-5 overflow-y-auto pr-2 transition-all duration-300 ${posTableId ? 'mr-[380px]' : ''}`}>
-        {/* Stats */}
         <div className="grid grid-cols-4 gap-3">
           {[
             { label: 'Available',   value: available,   color: 'text-emerald-400' },
@@ -292,7 +356,6 @@ export function Tables() {
           ))}
         </div>
 
-        {/* Near-End Session Warning Banner */}
         {nearEndTables.filter((t: any) => !dismissedNearEnd.has(t.id)).length > 0 && (
           <div className="space-y-2">
             {nearEndTables.filter((t: any) => !dismissedNearEnd.has(t.id)).map((t: any) => {
@@ -314,7 +377,6 @@ export function Tables() {
           </div>
         )}
 
-        {/* Toolbar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="relative flex-1 w-full">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
@@ -330,7 +392,6 @@ export function Tables() {
           </div>
         </div>
 
-        {/* Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
           {filtered.map((table: any) => (
             <TableCard
@@ -350,9 +411,7 @@ export function Tables() {
         </div>
       </div>
 
-      {/* ════════════════════════════════════════════════════════
-          SLIDE-OUT POS & INVENTORY SIDEBAR
-      ════════════════════════════════════════════════════════ */}
+      {/* POS SIDEBAR */}
       {posTableId && posTable && (
         <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-40 animate-in slide-in-from-right-10 duration-300">
           <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 flex-none">
@@ -364,13 +423,11 @@ export function Tables() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            
-            {/* 0. LIVE BILL SUMMARY */}
             {posTable.session && posInfo && (
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-2">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2">Live Bill Summary</p>
                 <div className="flex justify-between text-xs">
-                  <span className="text-neutral-400">Table Booked ({posTable.session.durationMinutes < 60 ? `${posTable.session.durationMinutes}m` : `${posTable.session.durationMinutes / 60}h`})</span>
+                  <span className="text-neutral-400">Table Booked {posTable.session.isOpenTime ? '(Open Time)' : `(${(posTable.session.durationMinutes as number) < 60 ? `${posTable.session.durationMinutes}m` : `${(posTable.session.durationMinutes as number) / 60}h`})`}</span>
                   <span className="text-neutral-200">{formatPHP(posInfo.bookedCharge)}</span>
                 </div>
                 {posInfo.isOvertime && (
@@ -392,7 +449,6 @@ export function Tables() {
               </div>
             )}
 
-            {/* 1. CONFIRMED ORDERS */}
             {confirmedOrders.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -411,7 +467,6 @@ export function Tables() {
                         </button>
                       </div>
                       
-                      {/* Secure Void Confirmation Dialog */}
                       {voidItem?.index === i && (
                         <form onSubmit={handleVoidSubmit} className="bg-rose-950/20 px-3 py-2 border-t border-rose-900/30 flex gap-2">
                           <div className="relative flex-1">
@@ -429,7 +484,6 @@ export function Tables() {
               </div>
             )}
 
-            {/* 2. PENDING CART */}
             {posCart.length > 0 && (
               <div>
                 <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold mb-2 flex items-center gap-1"><ShoppingCart size={10}/> New Order (Pending)</p>
@@ -451,7 +505,6 @@ export function Tables() {
               </div>
             )}
 
-            {/* 3. MENU / INVENTORY */}
             <div>
               <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2">Available Menu</p>
               <div className="space-y-2">
@@ -497,9 +550,7 @@ export function Tables() {
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════
-          START SESSION MODAL
-      ════════════════════════════════════════════════════════ */}
+      {/* START SESSION MODAL */}
       {assigningTableId && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[92vh]">
@@ -514,7 +565,6 @@ export function Tables() {
             </div>
 
             <div className="overflow-y-auto flex-1">
-              {/* Customer Picker */}
               {allCustomers.length > 0 && (
                 <div className="px-6 pt-5 pb-4 border-b border-neutral-800/60">
                   <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-3 flex items-center gap-1.5">
@@ -620,30 +670,88 @@ export function Tables() {
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
                     <Clock size={11} /> Duration
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                     {durationOptions.map(d => (
                       <button key={d} type="button"
-                        onClick={() => { setDurationMinutes(d); setAmountPaid(((d / 60) * HOURLY_RATE).toFixed(2)); }}
+                        onClick={() => { 
+                          setDurationMinutes(d); 
+                          if (paymentOption === 'payNow') setAmountPaid(((d / 60) * HOURLY_RATE).toFixed(2)); 
+                        }}
                         className={`py-2 rounded-xl border text-xs font-semibold transition-all ${
                           durationMinutes === d ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
                         }`}
                       >{d < 60 ? `${d}m` : `${d / 60}h`}</button>
                     ))}
+                    <button type="button"
+                      onClick={() => {
+                        setDurationMinutes('open');
+                        setAmountPaid('0');
+                        setPaymentOption('payLater');
+                      }}
+                      className={`col-span-3 sm:col-span-1 py-2 rounded-xl border text-xs font-semibold transition-all ${
+                        durationMinutes === 'open' ? 'bg-blue-600/15 border-blue-600 text-blue-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                      }`}
+                    >
+                      Open Time
+                    </button>
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Amount Paid (PHP)</label>
-                  <input
-                    type="number"
-                    value={amountPaid}
-                    onChange={e => setAmountPaid(e.target.value)}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                    placeholder={`₱${((durationMinutes / 60) * HOURLY_RATE).toFixed(2)}`}
-                    step="0.01"
-                  />
-                  <p className="text-[10px] text-neutral-600">Suggested: {formatPHP((durationMinutes / 60) * HOURLY_RATE)} for {durationMinutes < 60 ? `${durationMinutes}min` : `${durationMinutes / 60}hr`}</p>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment Option</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentOption('payNow')}
+                      className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                        paymentOption === 'payNow'
+                          ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
+                          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                      }`}
+                    >
+                      <CreditCard size={11} className="inline mr-1.5" /> Pay Now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentOption('payLater')}
+                      className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                        paymentOption === 'payLater'
+                          ? 'bg-amber-600/15 border-amber-600 text-amber-400'
+                          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                      }`}
+                    >
+                      <Clock size={11} className="inline mr-1.5" /> Pay Later
+                    </button>
+                  </div>
                 </div>
+
+                {paymentOption === 'payNow' && durationMinutes !== 'open' && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Amount Paid (PHP)</label>
+                    <input
+                      type="number"
+                      value={amountPaid}
+                      onChange={e => setAmountPaid(e.target.value)}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      placeholder={`₱${(((durationMinutes as number) / 60) * HOURLY_RATE).toFixed(2)}`}
+                      step="0.01"
+                    />
+                    <p className="text-[10px] text-neutral-600">Suggested: {formatPHP(((durationMinutes as number) / 60) * HOURLY_RATE)} for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
+                  </div>
+                )}
+
+                {durationMinutes === 'open' && (
+                  <div className="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3">
+                    <p className="text-[10px] text-blue-400 font-semibold mb-1">Open Time Selected</p>
+                    <p className="text-[10px] text-blue-600/80">Customer will be billed automatically at the end of the session based on exact time played.</p>
+                  </div>
+                )}
+
+                {paymentOption === 'payLater' && durationMinutes !== 'open' && (
+                  <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-3">
+                    <p className="text-[10px] text-amber-600/80">Payment will be collected at the end of the session.</p>
+                  </div>
+                )}
 
                 <div className="flex gap-3 pt-1">
                   <button type="button" onClick={() => setAssigningTableId(null)}
@@ -661,9 +769,7 @@ export function Tables() {
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════
-          END SESSION MODAL — Payment Verification
-      ════════════════════════════════════════════════════════ */}
+      {/* END SESSION MODAL */}
       {endingTableId && endingTable?.session && endInfo && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
@@ -676,11 +782,10 @@ export function Tables() {
             </div>
 
             <div className="overflow-y-auto flex-1 p-6 space-y-5">
-              {/* Billing Breakdown */}
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-1">Billing Breakdown</p>
                 <div className="flex justify-between text-xs">
-                  <span className="text-neutral-400">Table Booked ({endingTable.session.durationMinutes < 60 ? `${endingTable.session.durationMinutes}m` : `${endingTable.session.durationMinutes / 60}h`})</span>
+                  <span className="text-neutral-400">Table Booked {endInfo.isOpenTime ? '(Open Time)' : `(${(endingTable.session.durationMinutes as number) < 60 ? `${endingTable.session.durationMinutes}m` : `${(endingTable.session.durationMinutes as number) / 60}h`})`}</span>
                   <span className="text-neutral-200">{formatPHP(endInfo.bookedCharge)}</span>
                 </div>
                 {endInfo.isOvertime && (
@@ -771,9 +876,7 @@ export function Tables() {
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════
-          EXTEND SESSION MODAL
-      ════════════════════════════════════════════════════════ */}
+      {/* EXTEND SESSION MODAL */}
       {extendingTableId && extendingTable?.session && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
@@ -814,7 +917,7 @@ export function Tables() {
                     <PayMethodBtn value="gcash" current={extendPayMethod} icon={CreditCard} label="GCash" onChange={setExtendPayMethod} />
                   </div>
                   {extendPayMethod === 'gcash' ? (
-                    <input type="text" value={extendGcashRef} onChange={e => setExtendGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit GCash Ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-blue-500/40" />
+                    <input type="text" value={extendGcashRef} onChange={e => setExtendGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit GCash Ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-blue-500/40 font-mono" />
                   ) : (
                     <div>
                       <input type="number" value={extendCashTendered} onChange={e => setExtendCashTendered(e.target.value)} placeholder="Amount Tendered" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-emerald-500/40" />

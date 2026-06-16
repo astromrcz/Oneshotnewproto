@@ -382,10 +382,21 @@ export function Queue() {
                   </div>
                   {waiting.length > 0 && (
                     <button
-                      onClick={() => navigate('/staff/tables')}
+                      onClick={() => {
+                        sessionStorage.setItem('assignCustomer', JSON.stringify({
+                          kind: 'queue',
+                          id: waiting[0].id,
+                          name: waiting[0].customerName,
+                          partySize: waiting[0].partySize,
+                          contact: waiting[0].contactNumber,
+                          notes: waiting[0].notes
+                        }));
+                        sessionStorage.setItem('assignTableId', table.id);
+                        navigate('/staff/tables');
+                      }}
                       className="w-full text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-700/30 py-2 rounded-lg transition-colors font-medium"
                     >
-                      Assign to {waiting[0]?.customerName}
+                      Assign {waiting[0]?.customerName} to {table.name}
                     </button>
                   )}
                 </div>

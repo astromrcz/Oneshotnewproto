@@ -13,11 +13,14 @@ export type SessionOrder = {
 export type Session = {
   customerName: string;
   startTime: Date;
-  durationMinutes: number;
+  durationMinutes: number | null; // Null means "Open Time"
+  isOpenTime: boolean; // Flag to track if it's pay-as-you-go
   isPaid: boolean;
   hourlyRate: number;
   amountPaid: number;
   orders?: SessionOrder[];
+  paymentStatus?: 'paid' | 'payLater';
+  gcashReceiptImg?: string;
 };
 
 export type Table = {
@@ -156,8 +159,11 @@ export type RatesConfig = {
   happyHourRate: number;
   happyHourStart: string;
   happyHourEnd: string;
+  isHappyHourActive: boolean; // Toggle switch
   overtimeRate: number;
   downPaymentPercent: number;
+  reservationStartTime: string; // E.g., '12:00'
+  reservationEndTime: string;   // E.g., '02:00'
 };
 
 export type ReservationTerms = {
@@ -367,7 +373,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [inventory, setInventory] = useState<InventoryItem[]>(defaultInventory);
   const [events, setEvents] = useState<Event[]>([]);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>(defaultStaffUsers);
-  const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 250, happyHourRate: 200, happyHourStart: '18:00', happyHourEnd: '19:00', overtimeRate: 250, downPaymentPercent: 25 });
+  const [rates, setRates] = useState<RatesConfig>({ 
+    hourlyRate: 250, 
+    happyHourRate: 200, 
+    happyHourStart: '18:00', 
+    happyHourEnd: '19:00', 
+    isHappyHourActive: true, 
+    overtimeRate: 250, 
+    downPaymentPercent: 25,
+    reservationStartTime: '12:00',
+    reservationEndTime: '02:00'
+  });
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 1, maxHours: 8, minPartySize: 1, maxPartySize: 10, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.' });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);

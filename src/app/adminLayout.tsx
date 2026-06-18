@@ -13,7 +13,6 @@ const navItems = [
   { to: '/admin',                   icon: LayoutDashboard, label: 'Dashboard',           exact: true },
   { to: '/admin/users',             icon: Users,           label: 'User Management' },
   { to: '/admin/tables',            icon: Table2,          label: 'Table Management' },
-  { to: '/admin/inventory', icon: ShoppingCart, label: 'POS Inventory' },
   { to: '/admin/events',            icon: CalendarX2,      label: 'Events & Calendar' }, // Unified Tab
   { to: '/admin/rates',             icon: DollarSign,      label: 'Rates Editor' },
   { to: '/admin/reservation-terms', icon: FileText,        label: 'Reservation Terms' },

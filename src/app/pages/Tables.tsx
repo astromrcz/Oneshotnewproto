@@ -5,7 +5,7 @@ import {
   Search, Play, Zap, X, UserPlus, Clock,
   Calendar, Users, CheckCircle, ChevronRight,
   CreditCard, Banknote, AlertTriangle, CircleCheck,
-  ShoppingCart, Plus, Minus, Trash2, Lock
+  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2
 } from 'lucide-react';
 import { isToday, differenceInSeconds, addMinutes } from 'date-fns';
 
@@ -20,7 +20,10 @@ type CustomerSource =
   | { kind: 'reservation'; id: string; name: string; partySize: number; contact: string; durationHours: number; timeSlot: string };
 
 export function Tables() {
-  const { tables, queue, reservations, assignTable, extendSession, freeTable, inventory, submitTableOrders, voidTableOrder } = useAppContext() as any;
+  const { 
+    tables, queue, reservations, assignTable, extendSession, freeTable, 
+    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile 
+  } = useAppContext() as any;
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
   const [search, setSearch]       = useState('');
@@ -34,6 +37,12 @@ export function Tables() {
   const [voidPassword,     setVoidPassword]     = useState('');
 
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
+
+  // Menu Editing States
+  const isAdmin = staffProfile?.role?.toLowerCase() === 'manager' || staffProfile?.username === 'admin';
+  const [isEditingMenu, setIsEditingMenu] = useState(false);
+  const [editingItem, setEditingItem] = useState<any | null>(null);
+  const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', price: 0, stock: 0 });
 
   // Assign form state
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSource | null>(null);
@@ -279,6 +288,28 @@ export function Tables() {
     }
   };
 
+  // ── Inline Menu Handlers ──
+  const handleSaveMenuItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItemForm.name || newItemForm.price <= 0) return;
+
+    if (editingItem) {
+      updateInventoryItem(editingItem.id, newItemForm);
+    } else {
+      addInventoryItem({ ...newItemForm, isActive: true });
+    }
+    
+    setEditingItem(null);
+    setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 });
+    setIsEditingMenu(false);
+  };
+
+  const startEditItem = (item: any) => {
+    setEditingItem(item);
+    setNewItemForm({ name: item.name, category: item.category, price: item.price, stock: item.stock });
+    setIsEditingMenu(true);
+  };
+
   const getNextReservation = (tableId: string) => {
     const now = new Date();
     const upcoming = reservations
@@ -316,6 +347,7 @@ export function Tables() {
           setDurationMinutes(mins);
           setAmountPaid(((mins / 60) * HOURLY_RATE).toFixed(2));
         } else {
+          setDurationMinutes(60);
           setAmountPaid(((60 / 60) * HOURLY_RATE).toFixed(2));
         }
         
@@ -416,7 +448,7 @@ export function Tables() {
         <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-40 animate-in slide-in-from-right-10 duration-300">
           <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 flex-none">
             <div>
-              <h3 className="font-bold text-neutral-100 flex items-center gap-2"><ShoppingCart size={15} className="text-emerald-400"/> POS Order Menu</h3>
+              <h3 className="font-bold text-neutral-100 flex items-center gap-2"><ShoppingCart size={15} className="text-emerald-400"/> Table Billing & Extras</h3>
               <p className="text-xs text-neutral-500">{posTable.name} · {posTable.session?.customerName || 'No Session'}</p>
             </div>
             <button onClick={() => setPosTableId(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16}/></button>
@@ -505,30 +537,82 @@ export function Tables() {
               </div>
             )}
 
+            {/* 3. MENU / INLINE INVENTORY */}
             <div>
-              <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2">Available Menu</p>
-              <div className="space-y-2">
-                {inventory.filter((i: any) => i.isActive).map((item: any) => {
-                  const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
-                  const stockRemaining = item.stock - inCartQty;
-                  const outOfStock = stockRemaining <= 0;
-                  
-                  return (
-                    <button key={item.id} disabled={outOfStock || !posTable.session} onClick={() => handleAddToCart(item)}
-                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${outOfStock ? 'bg-neutral-900/50 border-neutral-800/50 opacity-60 cursor-not-allowed' : 'bg-neutral-900 border-neutral-800 hover:border-emerald-600/40'}`}>
-                      <div>
-                        <p className={`text-sm font-semibold ${outOfStock ? 'text-neutral-500' : 'text-neutral-200'}`}>{item.name}</p>
-                        <p className="text-[10px] text-neutral-500">{item.category} · Available: {stockRemaining}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-sm font-black ${outOfStock ? 'text-neutral-500' : 'text-emerald-400'}`}>{formatPHP(item.price)}</p>
-                        {outOfStock && <p className="text-[9px] text-rose-500 font-bold uppercase">Out of stock</p>}
-                      </div>
-                    </button>
-                  );
-                })}
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><ShoppingCart size={11} /> Available Menu</p>
+                {isAdmin && (
+                  <button 
+                    onClick={() => { setIsEditingMenu(!isEditingMenu); setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} 
+                    className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${isEditingMenu ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`}
+                  >
+                    {isEditingMenu ? 'Done Editing' : 'Edit Menu'}
+                  </button>
+                )}
               </div>
+
+              {isEditingMenu ? (
+                <div className="space-y-4">
+                  <form onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
+                    <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold mb-2">{editingItem ? 'Edit Item' : 'Add New Item'}</p>
+                    <input type="text" value={newItemForm.name} onChange={e => setNewItemForm(f => ({ ...f, name: e.target.value }))} placeholder="Item Name" required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <select value={newItemForm.category} onChange={e => setNewItemForm(f => ({ ...f, category: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 appearance-none">
+                        <option value="Drinks">Drinks</option>
+                        <option value="Food">Food</option>
+                        <option value="Extras">Extras</option>
+                      </select>
+                      <input type="number" value={newItemForm.price || ''} onChange={e => setNewItemForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} placeholder="Price ₱" required min="1" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Add Stock</label>
+                      <input type="number" value={newItemForm.stock === 0 ? '' : newItemForm.stock} onChange={e => setNewItemForm(f => ({ ...f, stock: parseInt(e.target.value) || 0 }))} placeholder="Current Stock" min="0" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                    </div>
+                    <div className="flex gap-2 pt-2">
+                      {editingItem && <button type="button" onClick={() => { setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} className="flex-1 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg transition-colors">Cancel</button>}
+                      <button type="submit" className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">{editingItem ? 'Save Changes' : 'Add Item'}</button>
+                    </div>
+                  </form>
+                  <div className="space-y-2">
+                    {inventory.map((item: any) => (
+                      <div key={item.id} className="w-full flex items-center justify-between p-3 rounded-xl border bg-neutral-900 border-neutral-800">
+                        <div>
+                          <p className="text-sm font-semibold text-neutral-200">{item.name}</p>
+                          <p className="text-[10px] text-neutral-500">{item.category} · Stock: {item.stock}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <p className="text-sm font-black text-amber-400">{formatPHP(item.price)}</p>
+                          <button onClick={() => startEditItem(item)} className="p-1.5 text-neutral-500 hover:text-white bg-neutral-800 rounded-md transition-colors"><Edit2 size={12} /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {inventory.filter((i: any) => i.isActive).map((item: any) => {
+                    const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
+                    const stockRemaining = item.stock - inCartQty;
+                    const outOfStock = stockRemaining <= 0;
+                    
+                    return (
+                      <button key={item.id} disabled={outOfStock || !posTable.session} onClick={() => handleAddToCart(item)}
+                        className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${outOfStock ? 'bg-neutral-900/50 border-neutral-800/50 opacity-60 cursor-not-allowed' : 'bg-neutral-900 border-neutral-800 hover:border-emerald-600/40'}`}>
+                        <div>
+                          <p className={`text-sm font-semibold ${outOfStock ? 'text-neutral-500' : 'text-neutral-200'}`}>{item.name}</p>
+                          <p className="text-[10px] text-neutral-500">{item.category} · Available: {stockRemaining}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-black ${outOfStock ? 'text-neutral-500' : 'text-emerald-400'}`}>{formatPHP(item.price)}</p>
+                          {outOfStock && <p className="text-[9px] text-rose-500 font-bold uppercase">Out of stock</p>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
           </div>
 
           <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex-none">

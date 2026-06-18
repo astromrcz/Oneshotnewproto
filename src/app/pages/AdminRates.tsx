@@ -48,18 +48,7 @@ export function AdminRates() {
     </div>
   );
 
-  const TimeField = ({ label, field, hint }: { label: string; field: 'happyHourStart' | 'happyHourEnd'; hint?: string }) => (
-    <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-      <label className="block text-xs text-neutral-400 font-medium uppercase tracking-wider mb-3">{label}</label>
-      <input
-        type="time" value={form[field]}
-        onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
-      />
-      {hint && <p className="text-[10px] text-neutral-600 mt-2">{hint}</p>}
-      <p className="text-lg font-black text-amber-400 mt-2">{form[field]}</p>
-    </div>
-  );
+  
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -116,16 +105,7 @@ export function AdminRates() {
           </div>
         </div>
 
-        {/* Reservation Limits */}
-        <div>
-          <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3 flex items-center gap-2">
-            <Calendar size={12} className="text-amber-500" /> Online Reservation Hours
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <TimeField label="Start Accepting At" field="reservationStartTime" hint="Earliest time a user can book" />
-            <TimeField label="Stop Accepting At" field="reservationEndTime" hint="Cut-off time for bookings" />
-          </div>
-        </div>
+        
 
         {/* Other Fees */}
         <div>

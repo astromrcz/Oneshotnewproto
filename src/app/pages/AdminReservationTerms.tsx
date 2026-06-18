@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { FileText, Save, CheckCircle, Info, AlertCircle, X } from 'lucide-react';
+import { FileText, Save, CheckCircle, Info, AlertCircle, X, Calendar } from 'lucide-react';
 
 export function AdminReservationTerms() {
   const { reservationTerms, updateReservationTerms } = useAppContext();
@@ -20,6 +20,21 @@ export function AdminReservationTerms() {
     setShowConfirm(false);
     setTimeout(() => setSaved(false), 2500);
   };
+
+  // Reusable TimeField component for the reservation hours
+  const TimeField = ({ label, field, hint }: { label: string; field: string; hint?: string }) => (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+      <label className="block text-xs text-neutral-400 font-medium uppercase tracking-wider mb-3">{label}</label>
+      <input
+        type="time" 
+        value={(form as any)[field] || '12:00'}
+        onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
+      />
+      {hint && <p className="text-[10px] text-neutral-600 mt-2">{hint}</p>}
+      <p className="text-lg font-black text-amber-400 mt-2">{(form as any)[field] || '12:00'}</p>
+    </div>
+  );
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -54,6 +69,18 @@ export function AdminReservationTerms() {
         {/* Booking Rules */}
         {activeTab === 'rules' && (
           <div className="space-y-4">
+            
+            {/* Online Reservation Hours */}
+            <div>
+              <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3 flex items-center gap-2">
+                <Calendar size={12} className="text-amber-500" /> Online Reservation Hours
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <TimeField label="Start Accepting At" field="reservationStartTime" hint="Earliest time a user can book" />
+                <TimeField label="Stop Accepting At" field="reservationEndTime" hint="Cut-off time for bookings" />
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               {[
                 { label: 'Minimum Hours', field: 'minHours' as const },
@@ -101,7 +128,7 @@ export function AdminReservationTerms() {
             {/* Preview */}
             <div className="bg-neutral-950 border border-amber-900/30 rounded-xl p-4">
               <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Preview (shown to customers)</p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                 <div className="bg-neutral-900 rounded-lg p-2 text-center">
                   <p className="text-amber-400 font-black">{form.minHours}–{form.maxHours} hrs</p>
                   <p className="text-neutral-600">Duration range</p>
@@ -203,6 +230,18 @@ export function AdminReservationTerms() {
                   <div className="flex justify-between text-sm">
                     <span className="text-neutral-500">Cancellation Hours:</span>
                     <span><span className="text-rose-400 line-through">{reservationTerms.cancellationHours}h</span> → <span className="text-emerald-400 font-semibold">{form.cancellationHours}h</span></span>
+                  </div>
+                )}
+                {(reservationTerms as any).reservationStartTime !== (form as any).reservationStartTime && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Reservation Start:</span>
+                    <span><span className="text-rose-400 line-through">{(reservationTerms as any).reservationStartTime}</span> → <span className="text-emerald-400 font-semibold">{(form as any).reservationStartTime}</span></span>
+                  </div>
+                )}
+                {(reservationTerms as any).reservationEndTime !== (form as any).reservationEndTime && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Reservation End:</span>
+                    <span><span className="text-rose-400 line-through">{(reservationTerms as any).reservationEndTime}</span> → <span className="text-emerald-400 font-semibold">{(form as any).reservationEndTime}</span></span>
                   </div>
                 )}
                 {reservationTerms.cancellationPolicy !== form.cancellationPolicy && (

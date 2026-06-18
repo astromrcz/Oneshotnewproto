@@ -7,7 +7,7 @@ import {
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  Sparkles, Upload, Search, Copy, ExternalLink, ImageIcon
+  Sparkles, Upload, Search, Copy, ExternalLink, ImageIcon, AlertTriangle
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, generateReferralCode } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -36,11 +36,6 @@ const ANNOUNCEMENTS = [
   "🏆 Tournament Night every Saturday! Cash prizes await champions!",
   "🎉 FREE pool lessons every Sunday evening — visit us at Autobase OAX!",
   "☎️ For inquiries: 0917-123-4567 | oneshot.billiards@gmail.com",
-];
-
-const TIME_SLOTS = [
-  '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', 
-  '18:00', '19:00', '20:00', '21:00', '22:00', '23:00', '00:00', '01:00'
 ];
 
 type Section = 'home' | 'reservations' | 'rates' | 'events' | 'about' | 'feedback';
@@ -84,7 +79,7 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext();
+  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservationStatus, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
 
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
@@ -114,11 +109,12 @@ export function HomePage() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isLiveMonitorOpen, setIsLiveMonitorOpen] = useState(false);
+  
+  // Notice timeSlot is now initialized as an empty string to allow flexible time
   const [resForm, setResForm] = useState({
-    name: '', email: '', phone: '', pax: 2, timeSlot: '12:00', duration: 2,
+    name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2,
   });
   
-  const [paymentMethod, setPaymentMethod] = useState<'gcash'>('gcash');
   const [confirmingPayment, setConfirmingPayment] = useState(false);
   const [paymentRef, setPaymentRef] = useState('');
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
@@ -207,7 +203,7 @@ export function HomePage() {
   };
 
   const handleReservationSubmit = () => {
-    if (!resForm.name || !resForm.email || !resForm.phone || !selectedDate) return;
+    if (!resForm.name || !resForm.email || !resForm.phone || !selectedDate || !resForm.timeSlot) return;
     setReservationStep(2);
   };
 
@@ -218,7 +214,7 @@ export function HomePage() {
       const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
       reservationDate.setHours(hours, minutes, 0, 0);
 
-      const newId = (addReservation as any)({
+      const newId = addReservation({
         customerName: resForm.name,
         contactNumber: resForm.phone,
         email: resForm.email,
@@ -247,8 +243,7 @@ export function HomePage() {
   const closeReservation = () => {
     setReservationStep(0);
     setSelectedDate(null);
-    setResForm({ name: currentUser?.name || '', email: currentUser?.email || '', phone: '', pax: 2, timeSlot: '12:00', duration: 2 });
-    setPaymentMethod('gcash');
+    setResForm({ name: currentUser?.name || '', email: currentUser?.email || '', phone: '', pax: 2, timeSlot: '', duration: 2 });
     setPromoCodeInput('');
     setAppliedPromo(null);
     setPromoError('');
@@ -256,6 +251,16 @@ export function HomePage() {
     setReceiptImg(null);
     setGeneratedResId('');
     if (currentUser) setResTab('my-bookings');
+  };
+
+  const handleCancelBooking = (id: string) => {
+    if(window.confirm("Are you sure you want to cancel this booking?")) {
+       cancelReservation(id, "Cancelled by user");
+       // Refetch tracked reservations if tracking as guest
+       if (!currentUser && trackForm.reservationId) {
+         setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId));
+       }
+    }
   };
 
   const handleFeedbackSubmit = (e?: React.FormEvent) => {
@@ -282,16 +287,16 @@ export function HomePage() {
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % HERO_SLIDES.length); };
 
   const calculateAIWaitTime = () => {
-    const waitingCustomers = queue.filter(q => q.status === 'waiting').length;
+    const waitingCustomers = queue.filter((q: any) => q.status === 'waiting').length;
     if (waitingCustomers === 0) return "No wait";
 
-    const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
+    const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
     if (activeTables.length === 0) return "Available immediately";
 
-    const remainingTimes = activeTables.map(t => {
-      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0); // Handle null duration
+    const remainingTimes = activeTables.map((t: any) => {
+      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0);
       return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
-    }).sort((a, b) => a - b); 
+    }).sort((a: any, b: any) => a - b); 
 
     const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
     const estimatedMinutes = baseWait + 2 + (waitingCustomers * 15);
@@ -303,9 +308,9 @@ export function HomePage() {
   };
 
   // Hide holidays from public UI
-  const publicEvents = events.filter(e => e.type !== 'Holiday');
-  const safeEventDates = publicEvents.map(e => new Date(e.date));
-  const safeClosedDates = closedDates.map(c => new Date(c.date));
+  const publicEvents = events.filter((e: any) => e.type !== 'Holiday');
+  const safeEventDates = publicEvents.map((e: any) => new Date(e.date));
+  const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
 
   const allNavSections: { id: Section; label: string; requiresAuth?: boolean }[] = [
     { id: 'home', label: 'Home' },
@@ -316,6 +321,32 @@ export function HomePage() {
     { id: 'feedback', label: 'Feedback' },
   ];
   const navSections = allNavSections.filter(s => !s.requiresAuth || currentUser !== null);
+
+  // Time Validation Logic for Flexible Input
+  const validateTimeSlot = (time: string) => {
+    if(!time) return false;
+    const slotHour = parseInt(time.split(':')[0]);
+    const startReserveHour = parseInt(rates?.reservationStartTime?.split(':')[0] || '12');
+    let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
+    
+    if (endReserveHour < startReserveHour) endReserveHour += 24;
+    const normalizedSlotHour = slotHour < startReserveHour && slotHour <= endReserveHour % 24 ? slotHour + 24 : slotHour;
+
+    if (normalizedSlotHour < startReserveHour || normalizedSlotHour >= endReserveHour) {
+      return 'closed';
+    }
+
+    if (rates?.isHappyHourActive) {
+      const startHour = parseInt(rates.happyHourStart?.split(':')[0] || '18');
+      const endHour = parseInt(rates.happyHourEnd?.split(':')[0] || '19');
+      if (slotHour >= startHour && slotHour < endHour) {
+        return 'happyhour';
+      }
+    }
+    return 'valid';
+  };
+
+  const timeValidation = validateTimeSlot(resForm.timeSlot);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col">
@@ -518,7 +549,6 @@ export function HomePage() {
 
               {resTab === 'new' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20">
-                  {/* Calendar Fix */}
                   <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
                     <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-4">Step 1 — Pick a Date</p>
                     <div className="flex justify-center w-full bg-neutral-950 rounded-xl border border-neutral-800 p-2">
@@ -526,7 +556,7 @@ export function HomePage() {
                         mode="single"
                         selected={selectedDate || undefined}
                         onSelect={(d) => setSelectedDate(d || null)}
-                        disabled={(date) => isBefore(date, startOfDay(new Date())) || closedDates.some(c => c.date === format(date, 'yyyy-MM-dd'))}
+                        disabled={(date) => isBefore(date, startOfDay(new Date())) || closedDates.some((c: any) => c.date === format(date, 'yyyy-MM-dd'))}
                         eventDates={safeEventDates}
                         closedDates={safeClosedDates}
                         className="w-full max-w-sm"
@@ -579,51 +609,27 @@ export function HomePage() {
                             </div>
                           </div>
                           
-                          {/* Time Slot with Happy Hour constraints */}
+                          {/* FLEXIBLE TIME INPUT */}
                           <div>
                             <label className="block text-xs text-neutral-400 mb-1.5">Preferred Time</label>
-                            <div className="relative">
-                              <select
-                                value={resForm.timeSlot}
-                                onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
-                                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors appearance-none pr-9"
-                              >
-                                {TIME_SLOTS.map(t => {
-                                  const slotHour = parseInt(t.split(':')[0]);
-                                  const startReserveHour = parseInt(rates?.reservationStartTime?.split(':')[0] || '12');
-                                  let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
-                                  
-                                  if (endReserveHour < startReserveHour) endReserveHour += 24;
-                                  const normalizedSlotHour = slotHour < startReserveHour && slotHour <= endReserveHour % 24 ? slotHour + 24 : slotHour;
-
-                                  let isOutsideHours = false;
-                                  if (normalizedSlotHour < startReserveHour || normalizedSlotHour >= endReserveHour) {
-                                    isOutsideHours = true;
-                                  }
-
-                                  let isHappyHour = false;
-                                  if (rates?.isHappyHourActive && !isOutsideHours) {
-                                    const startHour = parseInt(rates.happyHourStart?.split(':')[0] || '18');
-                                    const endHour = parseInt(rates.happyHourEnd?.split(':')[0] || '19');
-                                    if (slotHour >= startHour && slotHour < endHour) {
-                                      isHappyHour = true;
-                                    }
-                                  }
-
-                                  const isDisabled = isHappyHour || isOutsideHours;
-
-                                  return (
-                                    <option key={t} value={t} disabled={isDisabled}>
-                                      {t} {isOutsideHours ? '(Closed)' : isHappyHour ? '(Walk-in Only - Happy Hour)' : ''}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
-                            </div>
-                            <p className="text-[10px] text-amber-500 mt-2">
-                              * Happy Hour slots are Walk-in only. Bookings are only accepted between {rates?.reservationStartTime || '12:00'} and {rates?.reservationEndTime || '02:00'}.
-                            </p>
+                            <input
+                              type="time"
+                              value={resForm.timeSlot}
+                              onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
+                              className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
+                                timeValidation === 'closed' || timeValidation === 'happyhour' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
+                              }`}
+                            />
+                            {timeValidation === 'closed' && (
+                              <p className="text-[10px] text-rose-400 mt-2 font-semibold">
+                                * The establishment is closed or not accepting bookings at this hour. Please choose a time between {rates?.reservationStartTime || '12:00'} and {rates?.reservationEndTime || '02:00'}.
+                              </p>
+                            )}
+                            {timeValidation === 'happyhour' && (
+                              <p className="text-[10px] text-amber-500 mt-2 font-semibold">
+                                * Happy Hour ({rates.happyHourStart} - {rates.happyHourEnd}) is strictly walk-in only. Online booking is unavailable for this time.
+                              </p>
+                            )}
                           </div>
 
                           <div>
@@ -633,7 +639,7 @@ export function HomePage() {
                                 <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
                               </button>
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                {tables.map(table => {
+                                {tables.map((table: any) => {
                                   const isAvail = table.status === 'available';
                                   const isRes = table.status === 'reserved';
                                   const isOcc = table.status === 'occupied';
@@ -683,7 +689,7 @@ export function HomePage() {
                             <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Booking Summary</p>
                             <div className="space-y-1.5 text-xs">
                               <div className="flex justify-between"><span className="text-neutral-400">Date</span><span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
-                              <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot}</span></div>
+                              <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot || '—'}</span></div>
                               <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{HOURLY_RATE}/hr</span></div>
                               {appliedPromo && (
                                 <div className="flex justify-between text-emerald-400"><span>Promo ({appliedPromo.code})</span><span>−₱{discountAmount}.00</span></div>
@@ -697,7 +703,11 @@ export function HomePage() {
                             </div>
                           </div>
 
-                          <button onClick={handleReservationSubmit} disabled={!resForm.name || !resForm.email || !resForm.phone} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
+                          <button 
+                            onClick={handleReservationSubmit} 
+                            disabled={!resForm.name || !resForm.email || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid'} 
+                            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                          >
                             Proceed to Payment <ArrowRight size={14} />
                           </button>
                         </div>
@@ -749,24 +759,44 @@ export function HomePage() {
                           </div>
                         )}
                         {myBookings.map((r: any) => (
-                          <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-wrap items-center gap-4">
-                            <div className="flex-1 min-w-0 space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="text-sm font-semibold text-neutral-200">{new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                                <span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.timeSlot}</p><span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.durationHours}h</p>
+                          <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4">
+                            <div className="flex flex-wrap items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0 space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm font-semibold text-neutral-200">{new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                                  <span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.timeSlot}</p><span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.durationHours}h</p>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-neutral-500 flex-wrap">
+                                  <span>{r.partySize} person{r.partySize > 1 ? 's' : ''}</span>
+                                  {r.promoCode && <span className="flex items-center gap-1 text-emerald-500"><Tag size={9} /> {r.promoCode}</span>}
+                                </div>
                               </div>
-                              <div className="flex items-center gap-3 text-xs text-neutral-500 flex-wrap">
-                                <span>{r.partySize} person{r.partySize > 1 ? 's' : ''}</span>
-                                {r.promoCode && <span className="flex items-center gap-1 text-emerald-500"><Tag size={9} /> {r.promoCode}</span>}
+                              <div className="flex flex-col items-end gap-1.5">
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-white">₱{r.totalAmount.toLocaleString()}</p>
+                                  <p className="text-[10px] text-neutral-600">Total</p>
+                                </div>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>{r.status.replace('-', ' ')}</span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <div className="text-right">
-                                <p className="text-sm font-bold text-white">₱{r.totalAmount.toLocaleString()}</p>
-                                <p className="text-[10px] text-neutral-600">Total</p>
+                            
+                            {/* Actions Panel */}
+                            {(r.status === 'pending' || r.status === 'confirmed') && (
+                              <div className="border-t border-neutral-800/60 pt-3 flex justify-end gap-2">
+                                <button 
+                                  onClick={() => alert('To reschedule, please cancel this booking and create a new one.')} 
+                                  className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors"
+                                >
+                                  Reschedule
+                                </button>
+                                <button 
+                                  onClick={() => handleCancelBooking(r.id)} 
+                                  className="text-[10px] font-semibold text-rose-400 hover:text-white bg-rose-950/30 border border-rose-900/50 hover:bg-rose-900/50 px-3 py-1.5 rounded transition-colors"
+                                >
+                                  Cancel Booking
+                                </button>
                               </div>
-                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>{r.status.replace('-', ' ')}</span>
-                            </div>
+                            )}
                           </div>
                         ))}
                         <button onClick={() => setResTab('new')} className="w-full py-2.5 mt-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all flex items-center justify-center gap-2"><Calendar size={14} /> Make Another Booking</button>
@@ -1053,6 +1083,124 @@ export function HomePage() {
       </AnimatePresence>
 
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+        {/* Floating Live Monitor */}
+        <AnimatePresence>
+          {isLiveMonitorOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl shadow-black/60 w-72 max-h-[70vh] overflow-hidden flex flex-col"
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 bg-neutral-900/80 backdrop-blur-sm flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-xs font-semibold text-neutral-200">Live Status</span>
+                </div>
+                <button onClick={() => setIsLiveMonitorOpen(false)} className="text-neutral-600 hover:text-neutral-300 transition-colors"><X size={14} /></button>
+              </div>
+
+              <div className="overflow-y-auto flex-1 p-4 space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Tables</p>
+                    <div className="flex items-center gap-2">
+                      {[{ c: 'bg-emerald-500', l: 'Free' }, { c: 'bg-amber-500', l: 'Rsv' }, { c: 'bg-rose-500', l: 'Busy' }].map(s => (
+                        <span key={s.l} className="text-[9px] flex items-center gap-1 text-neutral-500">
+                          <span className={`w-1.5 h-1.5 rounded-full ${s.c}`} />{s.l}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-0.5">
+                    {tables.map((table: any) => {
+                      const isAvail = table.status === 'available';
+                      const isRes = table.status === 'reserved';
+                      let statusLabel = isAvail ? 'Free' : isRes ? 'Reserved' : 'Occupied';
+                      let dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
+                      let timeDetail = '';
+                      
+                      if (table.session) {
+                        if (table.session.isOpenTime || table.session.durationMinutes === null) {
+                           timeDetail = "Open Time";
+                        } else {
+                          const end = new Date(new Date(table.session.startTime).getTime() + table.session.durationMinutes * 60000);
+                          const remMs = end.getTime() - now.getTime();
+                          if (remMs < 0) {
+                            const otMins = Math.floor(Math.abs(remMs) / 60000);
+                            statusLabel = 'Overtime';
+                            timeDetail = `+${otMins}m`;
+                            dotColor = 'bg-rose-600 animate-pulse';
+                          } else {
+                            const endStr = end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const rMins = Math.floor(remMs / 60000);
+                            timeDetail = `${rMins < 60 ? `${rMins}m` : `${Math.floor(rMins/60)}h${rMins % 60 > 0 ? ` ${rMins % 60}m` : ''}`} · ends ${endStr}`;
+                          }
+                        }
+                      }
+                      
+                      return (
+                        <div key={table.id} className="flex items-center justify-between py-1.5 border-b border-neutral-900 last:border-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                            <span className="text-[10px] text-neutral-200 font-semibold">{table.name}</span>
+                            <span className={`text-[9px] font-medium ${isAvail ? 'text-emerald-500' : isRes ? 'text-amber-500' : statusLabel === 'Overtime' ? 'text-rose-400' : 'text-neutral-500'}`}>{statusLabel}</span>
+                          </div>
+                          {timeDetail && (
+                            <span className="text-[9px] text-neutral-600 text-right max-w-[90px] truncate">{timeDetail}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Walk-in Queue</p>
+                    <span className="text-[10px] bg-neutral-800 text-neutral-300 px-2 py-0.5 rounded-full font-bold">
+                      {queue.filter((q: any) => q.status === 'waiting').length} waiting
+                    </span>
+                  </div>
+                  
+                  <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={14} className="text-emerald-400" />
+                      <span className="text-xs text-emerald-300 font-semibold">AI Est. Wait Time</span>
+                    </div>
+                    <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
+                  </div>
+
+                  <p className="text-[9px] text-amber-500/80 font-semibold mb-2 flex items-center gap-1">
+                    <Info size={9} /> Reservations skip this queue
+                  </p>
+                  {queue.filter((q: any) => q.status === 'waiting').length === 0 ? (
+                    <div className="text-center py-4 border border-dashed border-neutral-800 rounded-lg">
+                      <p className="text-[10px] text-neutral-600">No one waiting</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {queue.filter((q: any) => q.status === 'waiting').slice(0, 5).map((q: any, i: number) => (
+                        <div key={q.id} className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-2">
+                          <span className="text-[9px] font-black text-neutral-500 w-3">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] text-neutral-300 truncate">{q.customerName || 'Walk-in'}</p>
+                            <p className="text-[9px] text-neutral-600">{q.partySize} pax · {new Date(q.arrivalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {queue.filter((q: any) => q.status === 'waiting').length > 5 && (
+                        <p className="text-[10px] text-neutral-600 text-center">+{queue.filter((q: any) => q.status === 'waiting').length - 5} more</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <button onClick={() => setIsLiveMonitorOpen(p => !p)} className="w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all bg-emerald-600 hover:bg-emerald-500 text-white">
           {isLiveMonitorOpen ? <X size={18} /> : <Users size={18} />}
         </button>

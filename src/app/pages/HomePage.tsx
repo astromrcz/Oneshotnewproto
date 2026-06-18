@@ -37,6 +37,11 @@ const ANNOUNCEMENTS = [
   "☎️ For inquiries: 0917-123-4567 | oneshot.billiards@gmail.com",
 ];
 
+const TIME_SLOTS = [
+  '10:00', '11:00', '12:00', '13:00', '14:00', '15:00',
+  '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00',
+];
+
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -81,11 +86,12 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
 
 // ─── Custom Mini Calendar Component ───────────────────────────
 function MiniCalendar({
-  selectedDate, onSelect, reservedDates
+  selectedDate, onSelect, reservedDates, closedDates
 }: {
   selectedDate: Date | null;
   onSelect: (d: Date) => void;
   reservedDates: Date[];
+  closedDates: Date[];
 }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -118,6 +124,13 @@ function MiniCalendar({
   const isReserved = (date: Date) =>
     reservedDates.some(rd => {
       const d = new Date(rd);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime() === date.getTime();
+    });
+
+  const isClosed = (date: Date) =>
+    closedDates.some(cd => {
+      const d = new Date(cd);
       d.setHours(0, 0, 0, 0);
       return d.getTime() === date.getTime();
     });
@@ -175,7 +188,9 @@ function MiniCalendar({
           const selected = isSelected(date);
           const today_ = isTodayDate(date);
           const reserved = isReserved(date) && currentMonth;
-          const clickable = currentMonth && !past;
+          const closed = isClosed(date) && currentMonth;
+          const clickable = currentMonth && !past && !closed;
+          
           return (
             <div key={idx} className="flex justify-center">
               <button
@@ -185,13 +200,14 @@ function MiniCalendar({
                   relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all
                   ${!currentMonth ? 'opacity-20 cursor-default' : ''}
                   ${past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''}
+                  ${closed && !past && currentMonth ? 'opacity-50 cursor-not-allowed text-rose-500' : ''}
                   ${selected ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5' : ''}
-                  ${!selected && today_ ? 'border border-emerald-500 text-emerald-400' : ''}
+                  ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400' : ''}
                   ${!selected && clickable && !today_ ? 'text-neutral-300 hover:bg-neutral-800' : ''}
                 `}
               >
                 <span className={selected ? 'font-bold' : 'font-medium'}>{day}</span>
-                {reserved && !selected && (
+                {reserved && !selected && !closed && (
                   <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-amber-500" />
                 )}
                 {selected && (
@@ -202,14 +218,18 @@ function MiniCalendar({
           );
         })}
       </div>
-      <div className="mt-8 flex items-center gap-4 px-2">
+      <div className="mt-8 flex flex-wrap items-center gap-4 px-2">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span className="text-[10px] text-neutral-500">Selected</span>
+        </div>
         <div className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-amber-500"></span>
           <span className="text-[10px] text-neutral-500">Has reservations</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span className="text-[10px] text-neutral-500">Selected</span>
+          <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+          <span className="text-[10px] text-neutral-500">Closed</span>
         </div>
       </div>
     </div>
@@ -218,7 +238,7 @@ function MiniCalendar({
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
+  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservationStatus, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
 
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
@@ -419,6 +439,7 @@ export function HomePage() {
   const handleCancelBooking = (id: string) => {
     if(window.confirm("Are you sure you want to cancel this booking?")) {
        cancelReservation(id, "Cancelled by user");
+       // Refetch tracked reservations if tracking as guest
        if (!currentUser && trackForm.reservationId) {
          setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId));
        }
@@ -456,7 +477,7 @@ export function HomePage() {
     if (activeTables.length === 0) return "Available immediately";
 
     const remainingTimes = activeTables.map((t: any) => {
-      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0);
+      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0); // Handle null duration
       return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
     }).sort((a: any, b: any) => a - b); 
 
@@ -471,6 +492,8 @@ export function HomePage() {
 
   // Hide holidays from public UI
   const publicEvents = events.filter((e: any) => e.type !== 'Holiday');
+  const safeEventDates = publicEvents.map((e: any) => new Date(e.date));
+  const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
   const reservedDates = reservations.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date));
 
   const allNavSections: { id: Section; label: string; requiresAuth?: boolean }[] = [
@@ -691,7 +714,20 @@ export function HomePage() {
                       selectedDate={selectedDate}
                       onSelect={setSelectedDate}
                       reservedDates={reservedDates}
+                      closedDates={safeClosedDates}
                     />
+                    {selectedDate && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-4 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2"
+                      >
+                        <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                        <span className="text-xs text-emerald-300">
+                          Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                        </span>
+                      </motion.div>
+                    )}
                   </div>
 
                   <div>
@@ -1039,7 +1075,7 @@ export function HomePage() {
                 {publicEvents.length === 0 ? (
                   <div className="text-center py-12 border border-dashed border-neutral-800 rounded-xl"><p className="text-neutral-500">No upcoming events at the moment. Check back soon!</p></div>
                 ) : (
-                  publicEvents.map(event => (
+                  publicEvents.map((event: any) => (
                     <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden relative group transition-all hover:border-emerald-600/30 flex flex-col">
                       {event.attachments && event.attachments.length > 0 ? (
                         <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative flex-shrink-0">

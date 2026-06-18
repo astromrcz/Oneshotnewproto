@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, generateReferralCode } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-import { Calendar as CalendarUI } from '../components/ui/Calendar';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
@@ -37,6 +36,9 @@ const ANNOUNCEMENTS = [
   "🎉 FREE pool lessons every Sunday evening — visit us at Autobase OAX!",
   "☎️ For inquiries: 0917-123-4567 | oneshot.billiards@gmail.com",
 ];
+
+const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 type Section = 'home' | 'reservations' | 'rates' | 'events' | 'about' | 'feedback';
 
@@ -77,9 +79,146 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
   );
 }
 
+// ─── Custom Mini Calendar Component ───────────────────────────
+function MiniCalendar({
+  selectedDate, onSelect, reservedDates
+}: {
+  selectedDate: Date | null;
+  onSelect: (d: Date) => void;
+  reservedDates: Date[];
+}) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const [viewDate, setViewDate] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const cells: Array<{ day: number; currentMonth: boolean; date: Date }> = [];
+  for (let i = firstDayOfMonth - 1; i >= 0; i--) {
+    const d = new Date(year, month - 1, daysInPrevMonth - i);
+    cells.push({ day: daysInPrevMonth - i, currentMonth: false, date: d });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ day: d, currentMonth: true, date: new Date(year, month, d) });
+  }
+  const remaining = 42 - cells.length;
+  for (let d = 1; d <= remaining; d++) {
+    cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) });
+  }
+
+  const isReserved = (date: Date) =>
+    reservedDates.some(rd => {
+      const d = new Date(rd);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime() === date.getTime();
+    });
+
+  const isPast = (date: Date) => date < today;
+  const isSelected = (date: Date) =>
+    selectedDate
+      ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })()
+      : false;
+  const isTodayDate = (date: Date) => date.getTime() === today.getTime();
+
+  const prevMonth = () => {
+    const d = new Date(viewDate);
+    d.setMonth(d.getMonth() - 1);
+    setViewDate(d);
+  };
+  const nextMonth = () => {
+    const d = new Date(viewDate);
+    d.setMonth(d.getMonth() + 1);
+    setViewDate(d);
+  };
+
+  return (
+    <div className="bg-[#111111] rounded-2xl border border-neutral-800/80 p-5 pb-6 shadow-xl select-none">
+      {/* Month Nav */}
+      <div className="flex items-center justify-between mb-6 px-2">
+        <button
+          onClick={prevMonth}
+          className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <span className="text-sm font-semibold text-white">
+          {MONTHS[month]} {year}
+        </span>
+        <button
+          onClick={nextMonth}
+          className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+      {/* Day Headers */}
+      <div className="grid grid-cols-7 mb-4">
+        {DAYS_OF_WEEK.map(d => (
+          <div key={d} className="text-center text-[9px] text-neutral-500 font-medium uppercase tracking-widest">
+            {d}
+          </div>
+        ))}
+      </div>
+      {/* Day Grid */}
+      <div className="grid grid-cols-7 gap-y-3">
+        {cells.map(({ day, currentMonth, date }, idx) => {
+          const past = isPast(date);
+          const selected = isSelected(date);
+          const today_ = isTodayDate(date);
+          const reserved = isReserved(date) && currentMonth;
+          const clickable = currentMonth && !past;
+          return (
+            <div key={idx} className="flex justify-center">
+              <button
+                disabled={!clickable}
+                onClick={() => clickable && onSelect(date)}
+                className={`
+                  relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all
+                  ${!currentMonth ? 'opacity-20 cursor-default' : ''}
+                  ${past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''}
+                  ${selected ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5' : ''}
+                  ${!selected && today_ ? 'border border-emerald-500 text-emerald-400' : ''}
+                  ${!selected && clickable && !today_ ? 'text-neutral-300 hover:bg-neutral-800' : ''}
+                `}
+              >
+                <span className={selected ? 'font-bold' : 'font-medium'}>{day}</span>
+                {reserved && !selected && (
+                  <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-amber-500" />
+                )}
+                {selected && (
+                  <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-emerald-500" />
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-8 flex items-center gap-4 px-2">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+          <span className="text-[10px] text-neutral-500">Has reservations</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span className="text-[10px] text-neutral-500">Selected</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservationStatus, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
+  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
 
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
@@ -110,7 +249,6 @@ export function HomePage() {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isLiveMonitorOpen, setIsLiveMonitorOpen] = useState(false);
   
-  // Notice timeSlot is now initialized as an empty string to allow flexible time
   const [resForm, setResForm] = useState({
     name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2,
   });
@@ -202,8 +340,33 @@ export function HomePage() {
     setPromoError('');
   };
 
+  const validateTimeSlot = (time: string) => {
+    if(!time) return false;
+    const slotHour = parseInt(time.split(':')[0]);
+    const startReserveHour = parseInt(rates?.reservationStartTime?.split(':')[0] || '12');
+    let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
+    
+    if (endReserveHour < startReserveHour) endReserveHour += 24;
+    const normalizedSlotHour = slotHour < startReserveHour && slotHour <= endReserveHour % 24 ? slotHour + 24 : slotHour;
+
+    if (normalizedSlotHour < startReserveHour || normalizedSlotHour >= endReserveHour) {
+      return 'closed';
+    }
+
+    if (rates?.isHappyHourActive) {
+      const startHour = parseInt(rates.happyHourStart?.split(':')[0] || '18');
+      const endHour = parseInt(rates.happyHourEnd?.split(':')[0] || '19');
+      if (slotHour >= startHour && slotHour < endHour) {
+        return 'happyhour';
+      }
+    }
+    return 'valid';
+  };
+
+  const timeValidation = validateTimeSlot(resForm.timeSlot);
+
   const handleReservationSubmit = () => {
-    if (!resForm.name || !resForm.email || !resForm.phone || !selectedDate || !resForm.timeSlot) return;
+    if (!resForm.name || !resForm.email || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
     setReservationStep(2);
   };
 
@@ -256,7 +419,6 @@ export function HomePage() {
   const handleCancelBooking = (id: string) => {
     if(window.confirm("Are you sure you want to cancel this booking?")) {
        cancelReservation(id, "Cancelled by user");
-       // Refetch tracked reservations if tracking as guest
        if (!currentUser && trackForm.reservationId) {
          setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId));
        }
@@ -309,8 +471,7 @@ export function HomePage() {
 
   // Hide holidays from public UI
   const publicEvents = events.filter((e: any) => e.type !== 'Holiday');
-  const safeEventDates = publicEvents.map((e: any) => new Date(e.date));
-  const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
+  const reservedDates = reservations.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date));
 
   const allNavSections: { id: Section; label: string; requiresAuth?: boolean }[] = [
     { id: 'home', label: 'Home' },
@@ -321,32 +482,6 @@ export function HomePage() {
     { id: 'feedback', label: 'Feedback' },
   ];
   const navSections = allNavSections.filter(s => !s.requiresAuth || currentUser !== null);
-
-  // Time Validation Logic for Flexible Input
-  const validateTimeSlot = (time: string) => {
-    if(!time) return false;
-    const slotHour = parseInt(time.split(':')[0]);
-    const startReserveHour = parseInt(rates?.reservationStartTime?.split(':')[0] || '12');
-    let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
-    
-    if (endReserveHour < startReserveHour) endReserveHour += 24;
-    const normalizedSlotHour = slotHour < startReserveHour && slotHour <= endReserveHour % 24 ? slotHour + 24 : slotHour;
-
-    if (normalizedSlotHour < startReserveHour || normalizedSlotHour >= endReserveHour) {
-      return 'closed';
-    }
-
-    if (rates?.isHappyHourActive) {
-      const startHour = parseInt(rates.happyHourStart?.split(':')[0] || '18');
-      const endHour = parseInt(rates.happyHourEnd?.split(':')[0] || '19');
-      if (slotHour >= startHour && slotHour < endHour) {
-        return 'happyhour';
-      }
-    }
-    return 'valid';
-  };
-
-  const timeValidation = validateTimeSlot(resForm.timeSlot);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col">
@@ -549,29 +684,14 @@ export function HomePage() {
 
               {resTab === 'new' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20">
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
-                    <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-4">Step 1 — Pick a Date</p>
-                    <div className="flex justify-center w-full bg-neutral-950 rounded-xl border border-neutral-800 p-2">
-                      <CalendarUI
-                        mode="single"
-                        selected={selectedDate || undefined}
-                        onSelect={(d) => setSelectedDate(d || null)}
-                        disabled={(date) => isBefore(date, startOfDay(new Date())) || closedDates.some((c: any) => c.date === format(date, 'yyyy-MM-dd'))}
-                        eventDates={safeEventDates}
-                        closedDates={safeClosedDates}
-                        className="w-full max-w-sm"
-                      />
-                    </div>
-                    {selectedDate && (
-                      <div className="mt-4 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
-                        <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
-                        <span className="text-xs text-emerald-300">Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong></span>
-                      </div>
-                    )}
-                    <div className="mt-4 flex items-center justify-center gap-4 text-[10px] text-neutral-500">
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Event</span>
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" /> Closed</span>
-                    </div>
+                  {/* Custom Mini Calendar */}
+                  <div>
+                    <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 1 — Pick a Date</p>
+                    <MiniCalendar
+                      selectedDate={selectedDate}
+                      onSelect={setSelectedDate}
+                      reservedDates={reservedDates}
+                    />
                   </div>
 
                   <div>
@@ -726,29 +846,57 @@ export function HomePage() {
                         <h3 className="text-lg font-bold text-white mb-1">Track Reservation</h3>
                         <p className="text-xs text-neutral-400">Enter your details to find your booking, or <button onClick={() => setShowLoginModal(true)} className="text-emerald-400 hover:underline font-semibold">log in</button>.</p>
                       </div>
-                      <form onSubmit={(e) => { e.preventDefault(); const found = reservations.filter((r: any) => r.id.toUpperCase() === trackForm.reservationId.toUpperCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()); setTrackedReservations(found); }} className="space-y-4">
+                      <form onSubmit={(e) => {
+                        e.preventDefault();
+                        const found = reservations.filter((r: any) => 
+                          r.id.toUpperCase() === trackForm.reservationId.toUpperCase()
+                        ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        setTrackedReservations(found);
+                      }} className="space-y-4">
                         <div>
                           <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-rose-500">*</span></label>
                           <input type="text" required value={trackForm.reservationId} onChange={e => setTrackForm({ reservationId: e.target.value.toUpperCase() })} placeholder="e.g. TEST" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors font-mono tracking-widest uppercase" />
                         </div>
-                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">Find Booking</button>
+                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">
+                          Find Booking
+                        </button>
                       </form>
                     </div>
                   ) : (() => {
-                    const myBookings = currentUser ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : (trackedReservations || []);
-                    const statusColors: Record<string, string> = { pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25', confirmed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', 'checked-in': 'bg-sky-500/15 text-sky-400 border-sky-500/25', completed: 'bg-neutral-700/50 text-neutral-400 border-neutral-700', cancelled: 'bg-rose-500/15 text-rose-400 border-rose-500/25' };
+                    const myBookings = currentUser 
+                      ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      : (trackedReservations || []);
 
-                    if (myBookings.length === 0) return (
-                      <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-12 text-center">
-                        <BookOpen size={36} className="text-neutral-700 mx-auto mb-3" />
-                        <p className="text-neutral-400 font-semibold mb-1">No bookings found</p>
-                        <p className="text-neutral-600 text-sm mb-5">We couldn't find any reservations matching those details.</p>
-                        <div className="flex justify-center gap-3">
-                          {!currentUser && <button onClick={() => setTrackedReservations(null)} className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all border border-neutral-700">Try Again</button>}
-                          <button onClick={() => setResTab('new')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all inline-flex items-center gap-2"><Calendar size={14} /> Book Now</button>
+                    const statusColors: Record<string, string> = {
+                      pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
+                      confirmed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
+                      'checked-in': 'bg-sky-500/15 text-sky-400 border-sky-500/25',
+                      completed: 'bg-neutral-700/50 text-neutral-400 border-neutral-700',
+                      cancelled: 'bg-rose-500/15 text-rose-400 border-rose-500/25',
+                    };
+
+                    if (myBookings.length === 0) {
+                      return (
+                        <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-12 text-center">
+                          <BookOpen size={36} className="text-neutral-700 mx-auto mb-3" />
+                          <p className="text-neutral-400 font-semibold mb-1">No bookings found</p>
+                          <p className="text-neutral-600 text-sm mb-5">We couldn't find any reservations matching those details.</p>
+                          <div className="flex justify-center gap-3">
+                            {!currentUser && (
+                              <button onClick={() => setTrackedReservations(null)} className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all border border-neutral-700">
+                                Try Again
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setResTab('new')}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all inline-flex items-center gap-2"
+                            >
+                              <Calendar size={14} /> Book Now
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    );
+                      );
+                    }
 
                     return (
                       <div className="space-y-3">
@@ -763,12 +911,21 @@ export function HomePage() {
                             <div className="flex flex-wrap items-start justify-between gap-4">
                               <div className="flex-1 min-w-0 space-y-1">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="text-sm font-semibold text-neutral-200">{new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                                  <span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.timeSlot}</p><span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.durationHours}h</p>
+                                  <p className="text-sm font-semibold text-neutral-200">
+                                    {new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </p>
+                                  <span className="text-neutral-600">·</span>
+                                  <p className="text-sm text-neutral-400">{r.timeSlot}</p>
+                                  <span className="text-neutral-600">·</span>
+                                  <p className="text-sm text-neutral-400">{r.durationHours}h</p>
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-neutral-500 flex-wrap">
                                   <span>{r.partySize} person{r.partySize > 1 ? 's' : ''}</span>
-                                  {r.promoCode && <span className="flex items-center gap-1 text-emerald-500"><Tag size={9} /> {r.promoCode}</span>}
+                                  {r.promoCode && (
+                                    <span className="flex items-center gap-1 text-emerald-500">
+                                      <Tag size={9} /> {r.promoCode}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex flex-col items-end gap-1.5">
@@ -776,7 +933,9 @@ export function HomePage() {
                                   <p className="text-sm font-bold text-white">₱{r.totalAmount.toLocaleString()}</p>
                                   <p className="text-[10px] text-neutral-600">Total</p>
                                 </div>
-                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>{r.status.replace('-', ' ')}</span>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>
+                                  {r.status.replace('-', ' ')}
+                                </span>
                               </div>
                             </div>
                             
@@ -799,7 +958,12 @@ export function HomePage() {
                             )}
                           </div>
                         ))}
-                        <button onClick={() => setResTab('new')} className="w-full py-2.5 mt-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all flex items-center justify-center gap-2"><Calendar size={14} /> Make Another Booking</button>
+                        <button
+                          onClick={() => setResTab('new')}
+                          className="w-full py-2.5 mt-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                        >
+                          <Calendar size={14} /> Make Another Booking
+                        </button>
                       </div>
                     );
                   })()}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { FileText, Save, CheckCircle, Info, AlertCircle, X, Calendar } from 'lucide-react';
 
@@ -8,6 +8,11 @@ export function AdminReservationTerms() {
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'rules' | 'policy' | 'tnc'>('rules');
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // 🟢 ADDED: Sync form state when database data arrives
+  useEffect(() => {
+    setForm({ ...reservationTerms });
+  }, [reservationTerms]);
 
   const handleSaveClick = (e: React.FormEvent) => {
     e.preventDefault();

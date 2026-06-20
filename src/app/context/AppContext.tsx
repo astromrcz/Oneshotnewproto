@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { toast } from 'sonner';
 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
@@ -204,7 +205,6 @@ export type WeatherData = {
   locationName: string;
 };
 
-// ── Default Data ───────────────────────────────────────────────
 export const HOURLY_RATE = 250;
 export const DOWN_PAYMENT_RATE = 0.25;
 
@@ -221,182 +221,54 @@ export const generateReferralCode = (name?: string) => {
   return generateRandomPromoCode();
 };
 
-const now = new Date();
-const makeTime = (minsAgo: number) => new Date(now.getTime() - minsAgo * 60 * 1000);
-
-const defaultTables: Table[] = [
-  { id: 't1', name: 'Table 1', status: 'occupied', session: { customerName: 'Juan dela Cruz', startTime: makeTime(45), durationMinutes: 120, isOpenTime: false, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 500, orders: [] }, isActive: true },
-  { id: 't2', name: 'Table 2', status: 'occupied', session: { customerName: 'Maria Santos', startTime: makeTime(70), durationMinutes: 60, isOpenTime: false, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 250, orders: [] }, isActive: true },
-  { id: 't3', name: 'Table 3', status: 'occupied', session: { customerName: 'Carlo Reyes', startTime: makeTime(20), durationMinutes: 180, isOpenTime: false, isPaid: false, hourlyRate: HOURLY_RATE, amountPaid: 0, orders: [] }, isActive: true },
-  { id: 't4', name: 'Table 4', status: 'reserved', isActive: true },
-  { id: 't5', name: 'Table 5', status: 'available', isActive: true },
-  { id: 't6', name: 'Table 6', status: 'available', isActive: true },
-  { id: 't7', name: 'Table 7', status: 'available', isActive: true },
-  { id: 't8', name: 'Table 8', status: 'available', isActive: true },
-  { id: 't9', name: 'Table 9', status: 'available', isActive: true },
-  { id: 't10', name: 'Table 10', status: 'available', isActive: true },
-];
-
-const defaultInventory: InventoryItem[] = [
-  { id: 'i1', name: 'San Mig Light', category: 'Drinks', price: 75, stock: 48, isActive: true },
-  { id: 'i2', name: 'Red Horse (500ml)', category: 'Drinks', price: 85, stock: 24, isActive: true },
-  { id: 'i3', name: 'Pork Sisig', category: 'Food', price: 250, stock: 15, isActive: true },
-  { id: 'i4', name: 'French Fries', category: 'Food', price: 150, stock: 20, isActive: true },
-  { id: 'i5', name: 'Extra Cue Stick', category: 'Extras', price: 50, stock: 10, isActive: true },
-];
-
-const defaultQueue: QueueItem[] = [
-  { id: 'q1', customerName: 'Lito Bautista', contactNumber: '09171234567', partySize: 2, arrivalTime: makeTime(15), status: 'waiting', queueNumber: 1 },
-];
-
-const defaultStaffUsers: StaffUser[] = [
-  { id: 'u1', username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'manager', isAdmin: true, phone: '09171234567', isActive: true, createdAt: new Date('2024-01-15') },
-  { id: 'u2', username: 'staff1', password: 'staff123', fullName: 'Juan Staff', email: 'staff1@oneshot.com', role: 'manager', isAdmin: false, phone: '09281234567', isActive: true, createdAt: new Date('2024-03-01') },
-  { id: 'u3', username: 'cashier1', password: 'cash123', fullName: 'Maria Cashier', email: 'cashier1@oneshot.com', role: 'cashier', isAdmin: false, phone: '09391234567', isActive: true, createdAt: new Date('2024-04-15') },
-];
-
-const defaultReservations: Reservation[] = [
-  {
-    id: 'TEST',
-    customerName: 'Test Guest',
-    contactNumber: '09123456789',
-    email: 'test@example.com',
-    date: new Date(),
-    timeSlot: '18:00',
-    durationHours: 2,
-    partySize: 4,
-    status: 'confirmed',
-    totalAmount: 500,
-    downPaymentAmount: 125,
-    downPaymentPaid: true,
-    balancePaid: false,
-    createdAt: new Date(),
-  }
-];
-
 // ── Context Type ───────────────────────────────────────────────
 type AppContextType = {
-  tables: Table[];
-  queue: QueueItem[];
-  reservations: Reservation[];
-  feedback: Feedback[];
-  activities: Activity[];
-  promoCodes: PromoCode[];
-  staffUsers: StaffUser[];
-  inventory: InventoryItem[];
-  rates: RatesConfig;
-  reservationTerms: ReservationTerms;
-  announcements: Announcement[];
-  closedDates: ClosedDate[];
-  weather: WeatherData | null;
-  updateWeatherLocation: (lat: string, lon: string, name: string) => void;
-
-  activeAnnouncement: string;
-  updateActiveAnnouncement: (msg: string) => void;
-
-  staffLoggedIn: boolean;
-  adminLoggedIn: boolean;
-  staffProfile: StaffProfile;
-  
-  staffLogin: (u: string, p: string) => boolean;
-  staffLogout: () => void;
-  adminLogin: (u: string, p: string) => boolean;
-  adminLogout: () => void;
-  updateStaffProfile: (profile: Partial<StaffProfile>) => void;
-  
-  assignTable: (id: string, s: Session) => void;
-  freeTable: (id: string) => void;
-  reserveTable: (id: string) => void;
-  extendSession: (id: string, mins: number, pay: number) => void;
-  setTableMaintenance: (id: string, reason: string) => void;
-  addTable: (n: string) => void;
-  updateTable: (id: string, n: string) => void;
-  toggleTableActive: (id: string) => void;
-  deleteTable: (id: string) => void;
-
-  // Inventory & POS functions
-  addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void;
-  updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void;
-  deleteInventoryItem: (id: string) => void;
-  submitTableOrders: (tableId: string, cart: SessionOrder[]) => void;
-  voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
-  
-  addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void;
-  removeFromQueue: (id: string) => void;
-  callQueueItem: (id: string) => void;
-  
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string;
-  updateReservationStatus: (id: string, s: ReservationStatus) => void;
-  updateReservation: (id: string, u: Partial<Reservation>) => void; // NEW
-  cancelReservation: (id: string, r: string) => void;
-  updateDownPayment: (id: string, p: boolean) => void;
-  updateBalance: (id: string, p: boolean) => void;
-  
-  addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void;
-  addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;
-  
-  addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string;
-  updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void;
-  togglePromoCode: (id: string) => void;
-  deletePromoCode: (id: string) => void;
-  applyPromoCode: (c: string) => PromoCode | null;
-
-  events: Event[];
-  addEvent: (e: Omit<Event, 'id'>) => void;
-  updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void;
-  deleteEvent: (id: string) => void;
-  
-  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void;
-  updateStaffUser: (id: string, u: Partial<StaffUser>) => void;
-  resetStaffUserPassword: (id: string) => void;
-  toggleStaffUserActive: (id: string) => void;
-  
-  updateRates: (r: Partial<RatesConfig>) => void;
-  updateReservationTerms: (t: Partial<ReservationTerms>) => void;
-  addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void;
-  updateAnnouncement: (id: string, u: Partial<Announcement>) => void;
-  deleteAnnouncement: (id: string) => void;
-  toggleAnnouncement: (id: string) => void;
-  addClosedDate: (c: Omit<ClosedDate, 'id'>) => void;
-  removeClosedDate: (id: string) => void;
-  updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
+  tables: Table[]; queue: QueueItem[]; reservations: Reservation[]; feedback: Feedback[]; activities: Activity[]; promoCodes: PromoCode[]; staffUsers: StaffUser[]; inventory: InventoryItem[]; rates: RatesConfig; reservationTerms: ReservationTerms; announcements: Announcement[]; closedDates: ClosedDate[]; weather: WeatherData | null; updateWeatherLocation: (lat: string, lon: string, name: string) => void;
+  activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
+  staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
+  staffLogin: (u: string, p: string) => boolean; staffLogout: () => void; adminLogin: (u: string, p: string) => boolean; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
+  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; setTableMaintenance: (id: string, reason: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
+  addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
+  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
+  addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;
+  addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
+  events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
+  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => void; toggleStaffUserActive: (id: string) => void;
+  updateRates: (r: Partial<RatesConfig>) => void; updateReservationTerms: (t: Partial<ReservationTerms>) => void; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [tables, setTables] = useState<Table[]>(defaultTables);
-  const [queue, setQueue] = useState<QueueItem[]>(defaultQueue);
-  const [reservations, setReservations] = useState<Reservation[]>(defaultReservations);
+  // 🟢 NEW STATE: System Initialization Check
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // States
+  const [tables, setTables] = useState<Table[]>([]);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
+  
+  // Safe fallbacks for UI while loading
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>(defaultInventory);
-  const [events, setEvents] = useState<Event[]>([]);
-  const [staffUsers, setStaffUsers] = useState<StaffUser[]>(defaultStaffUsers);
-  const [rates, setRates] = useState<RatesConfig>({ 
-    hourlyRate: 250, 
-    happyHourRate: 200, 
-    happyHourStart: '18:00', 
-    happyHourEnd: '19:00', 
-    isHappyHourActive: true, 
-    overtimeRate: 250, 
-    downPaymentPercent: 25,
-    reservationStartTime: '12:00',
-    reservationEndTime: '02:00'
-  });
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([
+    { id: 'u1', username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'manager', isAdmin: true, phone: '09171234567', isActive: true, createdAt: new Date() }
+  ]);
+  const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 250, happyHourRate: 200, happyHourStart: '18:00', happyHourEnd: '19:00', isHappyHourActive: true, overtimeRate: 250, downPaymentPercent: 25, reservationStartTime: '12:00', reservationEndTime: '02:00' });
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 1, maxHours: 8, minPartySize: 1, maxPartySize: 10, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.' });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   
-  // Weather state and configuration
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [weatherConfig, setWeatherConfig] = useState({ lat: '14.5794', lon: '121.1143', name: 'Cainta, Rizal' });
 
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
-  const updateActiveAnnouncement = (msg: string) => {
-    setActiveAnnouncement(msg);
-  };
+  const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
+  
   const [staffLoggedIn, setStaffLoggedIn] = useState(false);
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [staffProfile, setStaffProfile] = useState<StaffProfile>({ username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15' });
@@ -405,9 +277,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setWeatherConfig({ lat, lon, name });
   }, []);
 
-  // ─── API FETCHERS (WEATHER & HOLIDAYS) ───
+  // 🟢 FETCH LOCAL DATABASE ON MOUNT
   useEffect(() => {
-    // 1. Fetch Weather (Dynamically updates when weatherConfig changes)
+    const fetchLocalDatabase = async () => {
+      console.log("📡 Attempting to fetch data from localhost:3001...");
+      try {
+        const [tablesRes, resRes, invRes, queueRes, ratesRes] = await Promise.all([
+          fetch('http://localhost:3001/api/tables').catch(e => { console.error("Table fetch failed:", e); return null; }),
+          fetch('http://localhost:3001/api/reservations').catch(() => null),
+          fetch('http://localhost:3001/api/inventory').catch(() => null),
+          fetch('http://localhost:3001/api/queue').catch(() => null),
+          fetch('http://localhost:3001/api/settings/rates').catch(() => null),
+        ]);
+
+        if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
+        if (ratesRes && ratesRes.ok) setRates(await ratesRes.json());
+        if (resRes && resRes.ok) setReservations(await resRes.json());
+        if (invRes && invRes.ok) setInventory(await invRes.json());
+        if (queueRes && queueRes.ok) setQueue(await queueRes.json());
+        
+        console.log("✅ Local SQLite database successfully synchronized to state.");
+      } catch (err) {
+        console.error("❌ Failed to connect to local SQLite Edge Server.", err);
+      } finally {
+        // Add a small 800ms artificial delay so the UI doesn't visually "flicker" on fast local networks
+        setTimeout(() => setIsInitializing(false), 800);
+      }
+    };
+
+    fetchLocalDatabase();
+  }, []);
+
+  // Fetch Weather (Does NOT block the loading screen)
+  useEffect(() => {
     const fetchWeather = async () => {
       try {
         const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${weatherConfig.lat}&longitude=${weatherConfig.lon}&current=temperature_2m,weather_code&timezone=Asia%2FManila`);
@@ -429,12 +331,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.error("Weather API failed:", err);
       }
     };
-
     fetchWeather();
   }, [weatherConfig]);
 
+  // Fetch Philippine Holidays (Does NOT block the loading screen)
   useEffect(() => {
-    // 2. Fetch Philippine Holidays
     const fetchHolidays = async () => {
       try {
         const currentYear = new Date().getFullYear();
@@ -459,15 +360,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.error("Holiday API failed:", err);
       }
     };
-
     fetchHolidays();
   }, []);
 
-  useEffect(() => {
-    if (adminLoggedIn || staffLoggedIn) {
-      console.log('🔄 SYNC ONCE: Fetching initial state from Supabase to local "SQLite"...');
+  const syncToDB = async (endpoint: string, method: 'POST' | 'PUT' | 'DELETE', payload: any, successMsg: string) => {
+    try {
+      const res = await fetch(`http://localhost:3001${endpoint}`, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        console.log(`💾 [DB SAVED]: ${successMsg} fully inputted into SQLite Database.`);
+      } else {
+        console.error(`❌ [DB ERROR]: Failed to save ${endpoint}`);
+        toast.error("Database sync failed. Check server.js");
+      }
+    } catch (e) {
+      console.error("Network error. Is server.js running?", e);
+      toast.error("Offline Mode: Changes saved to RAM, but database server is unreachable.");
     }
-  }, [adminLoggedIn, staffLoggedIn]);
+  };
 
   const syncToSupabase = useCallback((action: string, payload: any) => {
     console.log(`📤 PUSH CHANGE [${action}]: Sending only major event back to Supabase to save egress:`, payload);
@@ -475,6 +388,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
     setActivities(prev => [{ id: Math.random().toString(36).substring(7), type, description, timestamp: new Date(), metadata }, ...prev]);
+    toast.success(description);
+    console.log(`✅ [SYSTEM SUCCESS]: ${description} | Data accurately updated.`);
   };
 
   const staffLogin = (u: string, p: string) => { const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive); if (valid || (u==='staff' && p==='staff123')) { setStaffLoggedIn(true); return true; } return false; };
@@ -488,28 +403,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('table_assigned', `Table assigned to ${session.customerName}`, { tableId });
     syncToSupabase('TABLE_ASSIGNED', { tableId, session });
   };
+
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
     addActivity('table_freed', `Table freed`, { tableId });
     syncToSupabase('TABLE_FREED', { tableId });
   };
+
   const reserveTable = (tableId: string) => setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'reserved' } : t));
+  
   const setTableMaintenance = (tableId: string, reason: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
     addActivity('admin_action', `Table set to maintenance: ${reason}`, { tableId });
   };
+
   const extendSession = (tableId: string, mins: number, pay: number) => {
     setTables(prev => prev.map(t => t.id === tableId && t.session ? { ...t, session: { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay } } : t));
+    addActivity('session_extended', `Extended table session by ${mins} minutes`);
     syncToSupabase('SESSION_EXTENDED', { tableId, mins, pay });
   };
-  const addTable = (name: string) => setTables(prev => [...prev, { id: `t${Date.now()}`, name, status: 'available', isActive: true }]);
+
+  const addTable = (name: string) => {
+    setTables(prev => [...prev, { id: `t${Date.now()}`, name, status: 'available', isActive: true }]);
+    addActivity('admin_action', `Added new table: ${name}`);
+  };
+
   const updateTable = (id: string, name: string) => setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
   const toggleTableActive = (id: string) => setTables(prev => prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t));
   const deleteTable = (id: string) => setTables(prev => prev.filter(t => t.id !== id));
 
-  // --- INVENTORY / POS LOGIC ---
-  const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => setInventory(prev => [...prev, { ...i, id: `inv${Date.now()}` }]);
-  const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+  const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
+    const newItem = { ...i, id: `inv${Date.now()}` };
+    setInventory(prev => [...prev, newItem]);
+    syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`);
+    addActivity('admin_action', `Added new menu item: ${i.name}`); 
+  };
+
+  const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => {
+    setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`);
+    addActivity('admin_action', `Updated menu item details`);
+  };
+
   const deleteInventoryItem = (id: string) => setInventory(prev => prev.filter(i => i.id !== id));
   
   const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
@@ -548,11 +483,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addToQueue = (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => {
     setQueue(prev => {
       const nextNum = Math.max(0, ...prev.map(q => q.queueNumber ?? 0)) + 1;
-      return [...prev, { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting', queueNumber: nextNum }];
+      const newItem = { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting' as const, queueNumber: nextNum };
+      addActivity('queue_added', `Added ${i.customerName} to queue position #${nextNum}`);
+      return [...prev, newItem];
     });
   };
   const removeFromQueue = (id: string) => setQueue(prev => prev.filter(q => q.id !== id));
-  const callQueueItem = (id: string) => setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
+  const callQueueItem = (id: string) => {
+    setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
+    addActivity('queue_called', `Called customer from queue to available table`);
+  };
 
   const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -561,10 +501,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return id;
   };
   const updateReservationStatus = (id: string, status: ReservationStatus) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
-  
-  // NEW: Ability to update reservation objects completely (e.g. rescheduling)
   const updateReservation = (id: string, u: Partial<Reservation>) => setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
-  
   const cancelReservation = (id: string, reason: string) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
   const updateDownPayment = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
   const updateBalance = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
@@ -574,6 +511,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
     const id = `p${Date.now()}`;
     setPromoCodes(prev => [...prev, { ...i, id, createdAt: new Date(), usageCount: 0 }]);
+    addActivity('promo_created', `Generated new promo code: ${i.code}`);
     return id;
   };
   const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
@@ -595,8 +533,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const resetStaffUserPassword = (id: string) => setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: 'password123' } : u));
   const toggleStaffUserActive = (id: string) => setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
 
-  const updateRates = (r: Partial<RatesConfig>) => setRates(prev => ({ ...prev, ...r }));
-  const updateReservationTerms = (t: Partial<ReservationTerms>) => setReservationTerms(prev => ({ ...prev, ...t }));
+  const updateRates = (r: Partial<RatesConfig>) => {
+    setRates(prev => ({ ...prev, ...r }));
+    syncToDB('/api/settings/rates', 'PUT', r, `Updated System Rates`);
+    addActivity('admin_action', 'System rates updated');
+  };
+
+  const updateReservationTerms = (t: Partial<ReservationTerms>) => {
+    setReservationTerms(prev => ({ ...prev, ...t }));
+    addActivity('admin_action', 'Reservation terms updated');
+  };
+
   const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => setAnnouncements(prev => [...prev, { ...a, id: `a${Date.now()}`, createdAt: new Date() }]);
   const updateAnnouncement = (id: string, u: Partial<Announcement>) => setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, ...u } : a));
   const deleteAnnouncement = (id: string) => setAnnouncements(prev => prev.filter(a => a.id !== id));
@@ -605,9 +552,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeClosedDate = (id: string) => setClosedDates(prev => prev.filter(c => c.id !== id));
   const updateClosedDate = (id: string, u: Partial<ClosedDate>) => setClosedDates(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
 
-  const addEvent = (e: Omit<Event, 'id'>) => setEvents(prev => [...prev, { ...e, id: Date.now().toString() }]);
+  const addEvent = (e: Omit<Event, 'id'>) => {
+    setEvents(prev => [...prev, { ...e, id: Date.now().toString() }]);
+    addActivity('admin_action', `Created new event: ${e.title}`);
+  };
   const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
   const deleteEvent = (id: string) => setEvents(prev => prev.filter(e => e.id !== id));
+
+  // 🟢 GLOBAL LOADING SCREEN
+  // If the SQLite database hasn't finished answering, display the dark mode spinner
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center">
+        <div className="relative w-16 h-16 mb-6">
+          <div className="absolute inset-0 border-4 border-neutral-800 rounded-full"></div>
+          <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
+        </div>
+        <h1 className="text-2xl font-black text-white tracking-widest">ONE SHOT</h1>
+        <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-[0.2em] mt-2 animate-pulse">Syncing Database...</p>
+      </div>
+    );
+  }
 
   return (
     <AppContext.Provider value={{

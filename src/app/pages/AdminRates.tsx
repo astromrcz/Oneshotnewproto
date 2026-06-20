@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { DollarSign, Save, CheckCircle, Info, AlertCircle, X, Calendar } from 'lucide-react';
 
@@ -7,6 +7,11 @@ export function AdminRates() {
   const [form, setForm] = useState({ ...rates });
   const [saved, setSaved] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // 🟢 ADDED: Sync form state when database data arrives
+  useEffect(() => {
+    setForm({ ...rates });
+  }, [rates]);
 
   const handleSaveClick = (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +53,20 @@ export function AdminRates() {
     </div>
   );
 
-  
+  // RESTORED: TimeField component for Happy Hour times
+  const TimeField = ({ label, field, hint }: { label: string; field: 'happyHourStart' | 'happyHourEnd'; hint?: string }) => (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+      <label className="block text-xs text-neutral-400 font-medium uppercase tracking-wider mb-3">{label}</label>
+      <input
+        type="time" 
+        value={form[field] as string}
+        onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
+      />
+      {hint && <p className="text-[10px] text-neutral-600 mt-2">{hint}</p>}
+      <p className="text-lg font-black text-amber-400 mt-2">{form[field]}</p>
+    </div>
+  );
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -104,8 +122,6 @@ export function AdminRates() {
             </p>
           </div>
         </div>
-
-        
 
         {/* Other Fees */}
         <div>

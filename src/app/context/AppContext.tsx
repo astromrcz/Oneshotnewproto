@@ -225,9 +225,9 @@ const now = new Date();
 const makeTime = (minsAgo: number) => new Date(now.getTime() - minsAgo * 60 * 1000);
 
 const defaultTables: Table[] = [
-  { id: 't1', name: 'Table 1', status: 'occupied', session: { customerName: 'Juan dela Cruz', startTime: makeTime(45), durationMinutes: 120, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 500, orders: [] }, isActive: true },
-  { id: 't2', name: 'Table 2', status: 'occupied', session: { customerName: 'Maria Santos', startTime: makeTime(70), durationMinutes: 60, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 250, orders: [] }, isActive: true },
-  { id: 't3', name: 'Table 3', status: 'occupied', session: { customerName: 'Carlo Reyes', startTime: makeTime(20), durationMinutes: 180, isPaid: false, hourlyRate: HOURLY_RATE, amountPaid: 0, orders: [] }, isActive: true },
+  { id: 't1', name: 'Table 1', status: 'occupied', session: { customerName: 'Juan dela Cruz', startTime: makeTime(45), durationMinutes: 120, isOpenTime: false, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 500, orders: [] }, isActive: true },
+  { id: 't2', name: 'Table 2', status: 'occupied', session: { customerName: 'Maria Santos', startTime: makeTime(70), durationMinutes: 60, isOpenTime: false, isPaid: true, hourlyRate: HOURLY_RATE, amountPaid: 250, orders: [] }, isActive: true },
+  { id: 't3', name: 'Table 3', status: 'occupied', session: { customerName: 'Carlo Reyes', startTime: makeTime(20), durationMinutes: 180, isOpenTime: false, isPaid: false, hourlyRate: HOURLY_RATE, amountPaid: 0, orders: [] }, isActive: true },
   { id: 't4', name: 'Table 4', status: 'reserved', isActive: true },
   { id: 't5', name: 'Table 5', status: 'available', isActive: true },
   { id: 't6', name: 'Table 6', status: 'available', isActive: true },
@@ -327,6 +327,7 @@ type AppContextType = {
   
   addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string;
   updateReservationStatus: (id: string, s: ReservationStatus) => void;
+  updateReservation: (id: string, u: Partial<Reservation>) => void; // NEW
   cancelReservation: (id: string, r: string) => void;
   updateDownPayment: (id: string, p: boolean) => void;
   updateBalance: (id: string, p: boolean) => void;
@@ -498,7 +499,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Table set to maintenance: ${reason}`, { tableId });
   };
   const extendSession = (tableId: string, mins: number, pay: number) => {
-    setTables(prev => prev.map(t => t.id === tableId && t.session ? { ...t, session: { ...t.session, durationMinutes: t.session.durationMinutes + mins, amountPaid: t.session.amountPaid + pay } } : t));
+    setTables(prev => prev.map(t => t.id === tableId && t.session ? { ...t, session: { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay } } : t));
     syncToSupabase('SESSION_EXTENDED', { tableId, mins, pay });
   };
   const addTable = (name: string) => setTables(prev => [...prev, { id: `t${Date.now()}`, name, status: 'available', isActive: true }]);
@@ -560,6 +561,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return id;
   };
   const updateReservationStatus = (id: string, status: ReservationStatus) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+  
+  // NEW: Ability to update reservation objects completely (e.g. rescheduling)
+  const updateReservation = (id: string, u: Partial<Reservation>) => setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
+  
   const cancelReservation = (id: string, reason: string) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
   const updateDownPayment = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
   const updateBalance = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
@@ -613,7 +618,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       assignTable, freeTable, reserveTable, extendSession, setTableMaintenance, addTable, updateTable, toggleTableActive, deleteTable,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,
-      addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance,
+      addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,
       addFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,

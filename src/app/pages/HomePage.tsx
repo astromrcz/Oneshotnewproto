@@ -37,11 +37,6 @@ const ANNOUNCEMENTS = [
   "☎️ For inquiries: 0917-123-4567 | oneshot.billiards@gmail.com",
 ];
 
-const TIME_SLOTS = [
-  '10:00', '11:00', '12:00', '13:00', '14:00', '15:00',
-  '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00',
-];
-
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -158,6 +153,7 @@ function MiniCalendar({
       {/* Month Nav */}
       <div className="flex items-center justify-between mb-6 px-2">
         <button
+          type="button"
           onClick={prevMonth}
           className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
         >
@@ -167,6 +163,7 @@ function MiniCalendar({
           {MONTHS[month]} {year}
         </span>
         <button
+          type="button"
           onClick={nextMonth}
           className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
         >
@@ -194,6 +191,7 @@ function MiniCalendar({
           return (
             <div key={idx} className="flex justify-center">
               <button
+                type="button"
                 disabled={!clickable}
                 onClick={() => clickable && onSelect(date)}
                 className={`
@@ -238,7 +236,7 @@ function MiniCalendar({
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservationStatus, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
+  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
 
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
@@ -273,6 +271,10 @@ export function HomePage() {
     name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2,
   });
   
+  // Reschedule State
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [rescheduleData, setRescheduleData] = useState<{ date: Date | null; timeSlot: string }>({ date: null, timeSlot: '' });
+
   const [confirmingPayment, setConfirmingPayment] = useState(false);
   const [paymentRef, setPaymentRef] = useState('');
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
@@ -361,7 +363,7 @@ export function HomePage() {
   };
 
   const validateTimeSlot = (time: string) => {
-    if(!time) return false;
+    if(!time) return 'invalid';
     const slotHour = parseInt(time.split(':')[0]);
     const startReserveHour = parseInt(rates?.reservationStartTime?.split(':')[0] || '12');
     let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
@@ -439,11 +441,34 @@ export function HomePage() {
   const handleCancelBooking = (id: string) => {
     if(window.confirm("Are you sure you want to cancel this booking?")) {
        cancelReservation(id, "Cancelled by user");
-       // Refetch tracked reservations if tracking as guest
        if (!currentUser && trackForm.reservationId) {
          setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId));
        }
     }
+  };
+
+  const handleRescheduleSubmit = (id: string) => {
+    if (!rescheduleData.date || !rescheduleData.timeSlot) return;
+    
+    // Quick validation check
+    const val = validateTimeSlot(rescheduleData.timeSlot);
+    if (val !== 'valid') {
+      alert(`Invalid time selected: ${val === 'closed' ? 'Outside of reservation hours' : 'Walk-in only happy hour'}`);
+      return;
+    }
+
+    const reservationDate = new Date(rescheduleData.date);
+    const [hours, minutes] = rescheduleData.timeSlot.split(':').map(Number);
+    reservationDate.setHours(hours, minutes, 0, 0);
+
+    updateReservation(id, {
+      date: reservationDate,
+      timeSlot: rescheduleData.timeSlot,
+      status: 'pending' // Setting back to pending requires staff re-approval
+    });
+    
+    setReschedulingId(null);
+    alert('Reservation successfully rescheduled! Staff will review and confirm your new time.');
   };
 
   const handleFeedbackSubmit = (e?: React.FormEvent) => {
@@ -490,7 +515,6 @@ export function HomePage() {
     return `~${hrs}h ${mins}m`;
   };
 
-  // Hide holidays from public UI
   const publicEvents = events.filter((e: any) => e.type !== 'Holiday');
   const safeEventDates = publicEvents.map((e: any) => new Date(e.date));
   const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
@@ -979,7 +1003,10 @@ export function HomePage() {
                             {(r.status === 'pending' || r.status === 'confirmed') && (
                               <div className="border-t border-neutral-800/60 pt-3 flex justify-end gap-2">
                                 <button 
-                                  onClick={() => alert('To reschedule, please cancel this booking and create a new one.')} 
+                                  onClick={() => {
+                                    setReschedulingId(r.id);
+                                    setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot });
+                                  }} 
                                   className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors"
                                 >
                                   Reschedule
@@ -990,6 +1017,34 @@ export function HomePage() {
                                 >
                                   Cancel Booking
                                 </button>
+                              </div>
+                            )}
+
+                            {/* Reschedule Dropdown */}
+                            {reschedulingId === r.id && (
+                              <div className="mt-2 p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                                <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Select New Date & Time</h4>
+                                
+                                <MiniCalendar
+                                  selectedDate={rescheduleData.date}
+                                  onSelect={(d) => setRescheduleData(prev => ({ ...prev, date: d }))}
+                                  reservedDates={reservedDates}
+                                  closedDates={safeClosedDates}
+                                />
+                                
+                                <div>
+                                   <label className="block text-xs text-neutral-400 mb-1.5">New Time</label>
+                                   <input
+                                     type="time"
+                                     value={rescheduleData.timeSlot}
+                                     onChange={e => setRescheduleData(prev => ({ ...prev, timeSlot: e.target.value }))}
+                                     className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                                   />
+                                </div>
+                                <div className="flex gap-2 justify-end pt-2 border-t border-neutral-800/60">
+                                   <button onClick={() => setReschedulingId(null)} className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors">Cancel</button>
+                                   <button onClick={() => handleRescheduleSubmit(r.id)} disabled={!rescheduleData.date || !rescheduleData.timeSlot} className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white rounded-lg transition-colors shadow-md shadow-emerald-900/20">Confirm Reschedule</button>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -1068,7 +1123,7 @@ export function HomePage() {
             <motion.div key="events" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="max-w-screen-md mx-auto px-5 pb-20">
               <div className="text-center mb-10 mt-6">
                 <h2 className="text-3xl font-black text-white tracking-tight uppercase mb-3">Upcoming Events</h2>
-                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and promos.</p>
+                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and holiday promos.</p>
               </div>
 
               <div className="space-y-6">

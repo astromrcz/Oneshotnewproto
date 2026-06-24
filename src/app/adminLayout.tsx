@@ -19,6 +19,8 @@ const navItems = [
   { to: '/admin/announcements',     icon: Megaphone,       label: 'Announcements' },
   { to: '/admin/analytics',         icon: BarChart3,       label: 'Analytics' },
   { to: '/admin/feedback',          icon: Tag,             label: 'Feedback' },
+  { to: '/admin/site-settings',     icon: FileText,        label: 'Site Settings' },
+
 ];
 
 const pageTitles: Record<string, string> = {

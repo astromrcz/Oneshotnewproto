@@ -27,6 +27,7 @@ import { AdminInventory } from './pages/AdminInventory';
 // Offline Login
 import { OfflineLogin } from './pages/OfflineLogin';
 import { NotFound } from './pages/NotFound';
+import { AdminSiteSettings } from './pages/AdminSiteSettings';
 
 const isDesktop = import.meta.env.VITE_APP_MODE === 'desktop';
 
@@ -71,6 +72,8 @@ export const router = createBrowserRouter([
           { path: 'events',                 Component: AdminEvents },
           { path: 'analytics',              Component: Analytics },
           { path: 'feedback',               Component: FeedbackPage },
+          { path: 'site-settings',               Component: AdminSiteSettings },
+
         ],
       },
       { path: '*', Component: NotFound },

@@ -1,3 +1,6 @@
+// ==========================================
+// ONE SHOT BAR & BILLIARDS: LOCAL EDGE SERVER
+// ==========================================
 import express from 'express';
 import cors from 'cors';
 import sqlite3Pkg from 'sqlite3';
@@ -27,7 +30,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
 app.get('/api/tables', (req, res) => {
   db.all(`SELECT * FROM tables`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    // SQLite stores booleans as 1 or 0, we quickly map them to true/false for React
     res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1 })));
   });
 });
@@ -35,29 +37,21 @@ app.get('/api/tables', (req, res) => {
 app.get('/api/reservations', (req, res) => {
   db.all(`SELECT * FROM reservations ORDER BY createdAt DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(r => ({ 
-      ...r, 
-      downPaymentPaid: r.downPaymentPaid === 1, 
-      balancePaid: r.balancePaid === 1 
-    })));
+    res.json(rows.map(r => ({ ...r, downPaymentPaid: r.downPaymentPaid === 1, balancePaid: r.balancePaid === 1 })));
   });
 });
 
 app.get('/api/settings/rates', (req, res) => {
   db.all(`SELECT keyName, settingValue FROM systemSettings`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    
     const config = {};
     rows.forEach(row => {
       let val = row.settingValue;
-      // Clean string conversion without relying on regex parsing
       if (val === 'true') val = true;
       else if (val === 'false') val = false;
       else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
-      
       config[row.keyName] = val;
     });
-
     res.json(config);
   });
 });
@@ -79,28 +73,38 @@ app.get('/api/queue', (req, res) => {
 app.get('/api/events', (req, res) => {
   db.all(`SELECT * FROM events`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(e => ({ 
-      ...e, 
-      slotsFull: e.slotsFull === 1,
-      attachments: e.attachments ? [e.attachments] : [] 
-    })));
+    res.json(rows.map(e => ({ ...e, slotsFull: e.slotsFull === 1, attachments: e.attachments ? [e.attachments] : [] })));
   });
 });
 
 app.get('/api/feedback', (req, res) => {
   db.all(`SELECT * FROM feedback ORDER BY date DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    // Parse the JSON tags string back into an array for React
-    const formatted = rows.map(f => ({
-      ...f,
-      tags: f.tags ? JSON.parse(f.tags) : []
-    }));
-    res.json(formatted);
+    res.json(rows.map(f => ({ ...f, tags: f.tags ? JSON.parse(f.tags) : [] })));
+  });
+});
+
+app.get('/api/announcements', (req, res) => {
+  db.all(`SELECT * FROM announcements ORDER BY createdAt DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(a => ({ ...a, isActive: a.isActive === 1 })));
+  });
+});
+
+// 🟢 NEW: CMS GET ROUTE
+app.get('/api/cms', (req, res) => {
+  db.all(`SELECT keyName, settingValue FROM cms`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const config = {};
+    rows.forEach(row => {
+      config[row.keyName] = row.keyName === 'heroImages' ? JSON.parse(row.settingValue) : row.settingValue;
+    });
+    res.json(config);
   });
 });
 
 // ==========================================
-// 📥 WRITE ROUTES (POST/PUT) 
+// 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
 
 app.post('/api/reservations', (req, res) => {
@@ -147,43 +151,82 @@ app.put('/api/inventory/:id', (req, res) => {
   params.push(id);
   db.run(`UPDATE inventory SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "Inventory item updated in DB." });
+    res.json({ message: "Inventory updated in DB." });
   });
 });
 
-// The UPSERT function now takes the EXACT keys React sends it and saves them cleanly
 app.put('/api/settings/rates', (req, res) => {
   const payload = req.body;
   let completed = 0;
   const keys = Object.keys(payload);
-  
   if (keys.length === 0) return res.json({ message: "No rates to update" });
-
   keys.forEach(key => {
     let value = payload[key];
     if (typeof value === 'boolean') value = value ? 'true' : 'false';
     else value = value !== null && value !== undefined ? value.toString() : '';
-
-    const sql = `
-      INSERT INTO systemSettings (keyName, settingValue) 
-      VALUES (?, ?) 
-      ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP
-    `;
-    
+    const sql = `INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`;
     db.run(sql, [key, value], (err) => {
-      if (err) console.error("DB UPSERT Error:", err);
       completed++;
-      if (completed === keys.length) res.json({ message: "System settings successfully synced to DB." });
+      if (completed === keys.length) res.json({ message: "System settings synced." });
     });
   });
 });
 
 app.post('/api/feedback', (req, res) => {
   const { id, customerName, contactInfo, feedbackType, comment, reservationId, tags } = req.body;
-  const sql = `INSERT INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-  db.run(sql, [id, customerName, contactInfo, feedbackType, comment, reservationId, JSON.stringify(tags || [])], function(err) {
+  db.run(`INSERT INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags) VALUES (?, ?, ?, ?, ?, ?, ?)`, 
+  [id, customerName, contactInfo, feedbackType, comment, reservationId, JSON.stringify(tags || [])], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: "Feedback saved to DB." });
+  });
+});
+
+app.post('/api/announcements', (req, res) => {
+  const { id, title, content, type, isActive, expiresAt } = req.body;
+  db.run(`INSERT INTO announcements (id, title, content, type, isActive, expiresAt) VALUES (?, ?, ?, ?, ?, ?)`, 
+  [id, title, content, type, isActive ? 1 : 0, expiresAt], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Announcement added to DB." });
+  });
+});
+
+app.put('/api/announcements/:id', (req, res) => {
+  const id = req.params.id;
+  const { title, content, type, isActive, expiresAt } = req.body;
+  let updates = [], params = [];
+  if (title) { updates.push("title = ?"); params.push(title); }
+  if (content) { updates.push("content = ?"); params.push(content); }
+  if (type) { updates.push("type = ?"); params.push(type); }
+  if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
+  if (expiresAt !== undefined) { updates.push("expiresAt = ?"); params.push(expiresAt); }
+  if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  params.push(id);
+  db.run(`UPDATE announcements SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Announcement updated." });
+  });
+});
+
+app.delete('/api/announcements/:id', (req, res) => {
+  db.run(`DELETE FROM announcements WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Announcement deleted." });
+  });
+});
+
+// 🟢 NEW: CMS PUT ROUTE
+app.put('/api/cms', (req, res) => {
+  const payload = req.body;
+  let completed = 0;
+  const keys = Object.keys(payload);
+  if (keys.length === 0) return res.json({ message: "No CMS updates" });
+  keys.forEach(key => {
+    let value = key === 'heroImages' ? JSON.stringify(payload[key]) : payload[key].toString();
+    const sql = `INSERT INTO cms (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`;
+    db.run(sql, [key, value], (err) => {
+      completed++;
+      if (completed === keys.length) res.json({ message: "CMS synced." });
+    });
   });
 });
 

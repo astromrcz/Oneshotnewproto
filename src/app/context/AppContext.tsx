@@ -236,6 +236,8 @@ type AppContextType = {
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => void; toggleStaffUserActive: (id: string) => void;
   updateRates: (r: Partial<RatesConfig>) => void; updateReservationTerms: (t: Partial<ReservationTerms>) => void; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
+  siteConfig: any;
+  updateSiteConfig: (config: any) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -272,7 +274,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [staffLoggedIn, setStaffLoggedIn] = useState(false);
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [staffProfile, setStaffProfile] = useState<StaffProfile>({ username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15' });
-
+  const [siteConfig, setSiteConfig] = useState<any>(null);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => {
     setWeatherConfig({ lat, lon, name });
   }, []);
@@ -282,13 +284,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const fetchLocalDatabase = async () => {
       console.log("📡 Attempting to fetch data from localhost:3001...");
       try {
-        const [tablesRes, resRes, invRes, queueRes, ratesRes] = await Promise.all([
+        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes] = await Promise.all([
           fetch('http://localhost:3001/api/tables').catch(e => { console.error("Table fetch failed:", e); return null; }),
           fetch('http://localhost:3001/api/reservations').catch(() => null),
           fetch('http://localhost:3001/api/inventory').catch(() => null),
           fetch('http://localhost:3001/api/queue').catch(() => null),
           fetch('http://localhost:3001/api/settings/rates').catch(() => null),
           fetch('http://localhost:3001/api/feedback').catch(() => null),
+          fetch('http://localhost:3001/api/announcements').catch(() => null),
+          fetch('http://localhost:3001/api/cms').catch(() => null),
         ]);
 
         if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
@@ -297,6 +301,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (invRes && invRes.ok) setInventory(await invRes.json());
         if (queueRes && queueRes.ok) setQueue(await queueRes.json());
         if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
+        if (annRes && annRes.ok) setAnnouncements(await annRes.json());
+        if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
         
         console.log("✅ Local SQLite database successfully synchronized to state.");
       } catch (err) {
@@ -551,13 +557,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', 'Reservation terms updated');
   };
 
-  const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => setAnnouncements(prev => [...prev, { ...a, id: `a${Date.now()}`, createdAt: new Date() }]);
-  const updateAnnouncement = (id: string, u: Partial<Announcement>) => setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, ...u } : a));
-  const deleteAnnouncement = (id: string) => setAnnouncements(prev => prev.filter(a => a.id !== id));
-  const toggleAnnouncement = (id: string) => setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a));
+ const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {
+    const newAnn = { ...a, id: `a${Date.now()}`, createdAt: new Date() };
+    setAnnouncements(prev => [newAnn, ...prev]);
+    syncToDB('/api/announcements', 'POST', newAnn, `Created announcement: ${a.title}`);
+  };
+
+  const updateAnnouncement = (id: string, u: Partial<Announcement>) => {
+    setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, ...u } : a));
+    syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`);
+  };
+  
+
+  const deleteAnnouncement = (id: string) => {
+    setAnnouncements(prev => prev.filter(a => a.id !== id));
+    syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`);
+  };
+
+  const toggleAnnouncement = (id: string) => {
+    const target = announcements.find(a => a.id === id);
+    if (target) {
+      setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a));
+      syncToDB(`/api/announcements/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled announcement visibility`);
+    }
+  };
+
   const addClosedDate = (c: Omit<ClosedDate, 'id'>) => setClosedDates(prev => [...prev, { ...c, id: `cd${Date.now()}` }]);
   const removeClosedDate = (id: string) => setClosedDates(prev => prev.filter(c => c.id !== id));
   const updateClosedDate = (id: string, u: Partial<ClosedDate>) => setClosedDates(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
+
+  const updateSiteConfig = (newConfig: any) => {
+    setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
+    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`);
+    addActivity('admin_action', `Updated public website CMS content`);
+  };
 
   const addEvent = (e: Omit<Event, 'id'>) => {
     setEvents(prev => [...prev, { ...e, id: Date.now().toString() }]);
@@ -594,7 +627,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
-      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate
+      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig
     }}>
       {children}
     </AppContext.Provider>

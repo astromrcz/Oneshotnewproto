@@ -27,16 +27,6 @@ const HERO_SLIDES = [
   { src: heroImg5, alt: 'Precision Billiards' },
 ];
 
-const ANNOUNCEMENTS = [
-  "🎱 Welcome to One Shot Bar & Billiards! Book your favorite table now!",
-  "📍 Visit us at Autobase OAX, San Juan, Cainta, Rizal · Mon–Sat 12PM–3AM · Sun 5PM–3AM",
-  "💸 Happy Hour: 6PM – 8PM – Get 20% off walk-in rates every weekday!",
-  "📅 Reserve in advance and secure your preferred date & time slot!",
-  "🏆 Tournament Night every Saturday! Cash prizes await champions!",
-  "🎉 FREE pool lessons every Sunday evening — visit us at Autobase OAX!",
-  "☎️ For inquiries: 0917-123-4567 | oneshot.billiards@gmail.com",
-];
-
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -236,7 +226,13 @@ function MiniCalendar({
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
+  const { announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
+
+  // Filter live announcements dynamically from database
+  const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
+  const displayAnnouncements = activeAnnouncements.length > 0 
+    ? activeAnnouncements.map((a: any) => a.content) 
+    : ["🎱 Welcome to One Shot Bar & Billiards!"];
 
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
@@ -289,10 +285,10 @@ export function HomePage() {
   useEffect(() => {
     const interval = setInterval(() => {
       setAnnouncementDir(1);
-      setAnnouncementIdx(prev => (prev + 1) % ANNOUNCEMENTS.length);
+      setAnnouncementIdx(prev => (prev + 1) % displayAnnouncements.length);
     }, 4500);
     return () => clearInterval(interval);
-  }, []);
+  }, [displayAnnouncements.length]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -563,12 +559,12 @@ export function HomePage() {
                   transition={{ duration: 0.35 }}
                   className="text-xs text-neutral-300 truncate"
                 >
-                  {ANNOUNCEMENTS[announcementIdx]}
+                  {displayAnnouncements[announcementIdx]}
                 </motion.p>
               </AnimatePresence>
             </div>
             <div className="flex gap-1 flex-shrink-0">
-              {ANNOUNCEMENTS.map((_, i) => (
+              {displayAnnouncements.map((_: any, i: number) => (
                 <button
                   key={i}
                   onClick={() => { setAnnouncementDir(i > announcementIdx ? 1 : -1); setAnnouncementIdx(i); }}
@@ -668,7 +664,7 @@ export function HomePage() {
                 <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
                   {[
                     { value: '10', label: 'Billiard Tables', color: 'text-emerald-400' },
-                    { value: '₱250', label: 'Per Hour', color: 'text-amber-400' },
+                    { value: `₱${rates?.hourlyRate || HOURLY_RATE}`, label: 'Per Hour', color: 'text-amber-400' },
                     { value: '15+', label: 'Hours Open Daily', color: 'text-sky-400' },
                     { value: 'A+', label: 'Top Tier Facility', color: 'text-rose-400' },
                   ].map(({ value, label, color }) => (
@@ -870,7 +866,7 @@ export function HomePage() {
                             <div className="space-y-1.5 text-xs">
                               <div className="flex justify-between"><span className="text-neutral-400">Date</span><span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
                               <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot || '—'}</span></div>
-                              <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{HOURLY_RATE}/hr</span></div>
+                              <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{rates?.hourlyRate || HOURLY_RATE}/hr</span></div>
                               {appliedPromo && (
                                 <div className="flex justify-between text-emerald-400"><span>Promo ({appliedPromo.code})</span><span>−₱{discountAmount}.00</span></div>
                               )}
@@ -878,7 +874,7 @@ export function HomePage() {
                                 <span className="text-neutral-400">Total Amount</span><span className="text-white font-semibold">₱{totalAmount}.00</span>
                               </div>
                               <div className="flex justify-between">
-                                <span className="text-amber-400">Down Payment (25%)</span><span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
+                                <span className="text-amber-400">Down Payment ({rates?.downPaymentPercent || 25}%)</span><span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
                               </div>
                             </div>
                           </div>
@@ -1099,7 +1095,7 @@ export function HomePage() {
                   <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-600/20 flex items-center justify-center mt-0.5"><Info size={13} className="text-emerald-400" /></div>
                   <div>
                     <p className="text-emerald-300 text-xs font-semibold mb-1">Reservation Redemption Policy</p>
-                    <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and 25% down payment, the <span className="text-white font-medium">remaining balance must be settled in full upon arrival</span> before your table time begins — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
+                    <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent || 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled in full upon arrival</span> before your table time begins — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
@@ -1279,7 +1275,7 @@ export function HomePage() {
               <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex items-center justify-between"><div><h3 className="text-base font-bold text-white">Down Payment</h3></div><button onClick={closeReservation} className="text-neutral-600 hover:text-white"><X size={18} /></button></div>
               <div className="p-6">
                 <div className="bg-amber-950/30 border border-amber-800/30 rounded-xl p-4 mb-5 text-center">
-                  <p className="text-xs text-amber-500 mb-1">Amount Due (25% Down Payment)</p>
+                  <p className="text-xs text-amber-500 mb-1">Amount Due ({rates?.downPaymentPercent || 25}% Down Payment)</p>
                   <p className="text-4xl font-black text-amber-400">₱{downPayment}.00</p>
                   <p className="text-xs text-neutral-500 mt-1">Remaining balance <span className="text-neutral-300 font-semibold">₱{totalAmount - downPayment}.00</span> must be paid on arrival</p>
                 </div>

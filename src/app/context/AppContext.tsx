@@ -288,6 +288,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fetch('http://localhost:3001/api/inventory').catch(() => null),
           fetch('http://localhost:3001/api/queue').catch(() => null),
           fetch('http://localhost:3001/api/settings/rates').catch(() => null),
+          fetch('http://localhost:3001/api/feedback').catch(() => null),
         ]);
 
         if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
@@ -295,6 +296,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (resRes && resRes.ok) setReservations(await resRes.json());
         if (invRes && invRes.ok) setInventory(await invRes.json());
         if (queueRes && queueRes.ok) setQueue(await queueRes.json());
+        if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
         
         console.log("✅ Local SQLite database successfully synchronized to state.");
       } catch (err) {
@@ -506,7 +508,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateDownPayment = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
   const updateBalance = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
 
-  const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => setFeedback(prev => [{ ...i, id: `f${Date.now()}`, date: new Date() }, ...prev]);
+  const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
+    const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
+    setFeedback(prev => [newFeedback, ...prev]);
+    
+    syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback");
+  };
 
   const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
     const id = `p${Date.now()}`;

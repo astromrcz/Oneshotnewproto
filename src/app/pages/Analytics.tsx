@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
-import { useAppContext, HOURLY_RATE } from '../context/AppContext';
-import { TrendingUp, TrendingDown, BarChart3, Clock, DollarSign, TableProperties, Calendar, Printer, CheckCircle, Table2, Users, BarChart2 } from 'lucide-react';
-import { format, isToday, startOfDay, endOfDay } from 'date-fns';
+import { useAppContext } from '../context/AppContext';
+import { TrendingUp, TrendingDown, BarChart3, Clock, DollarSign, TableProperties, Calendar as CalendarIcon, Printer, CheckCircle, Table2, Users, BarChart2 } from 'lucide-react';
+import { format, isToday, startOfDay, endOfDay, subDays, subMonths, isSameDay, isSameMonth, parseISO } from 'date-fns';
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
 
@@ -19,73 +19,13 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   cancelled:    { label: 'Cancelled',  color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
 };
 
-// Mock historical data
-const weeklyRevenue = [
-  { day: 'Mon', revenue: 875, tables: 35 },
-  { day: 'Tue', revenue: 750, tables: 30 },
-  { day: 'Wed', revenue: 1125, tables: 45 },
-  { day: 'Thu', revenue: 1000, tables: 40 },
-  { day: 'Fri', revenue: 1625, tables: 65 },
-  { day: 'Sat', revenue: 2000, tables: 80 },
-  { day: 'Sun', revenue: 1750, tables: 70 },
-];
-
-const peakHours = [
-  { hour: '10AM', occupancy: 20 },
-  { hour: '11AM', occupancy: 35 },
-  { hour: '12PM', occupancy: 55 },
-  { hour: '1PM', occupancy: 70 },
-  { hour: '2PM', occupancy: 80 },
-  { hour: '3PM', occupancy: 85 },
-  { hour: '4PM', occupancy: 90 },
-  { hour: '5PM', occupancy: 95 },
-  { hour: '6PM', occupancy: 88 },
-  { hour: '7PM', occupancy: 82 },
-  { hour: '8PM', occupancy: 75 },
-  { hour: '9PM', occupancy: 65 },
-  { hour: '10PM', occupancy: 50 },
-  { hour: '11PM', occupancy: 35 },
-  { hour: '12AM', occupancy: 25 },
-  { hour: '1AM', occupancy: 10 },
-];
-
-const monthlyTrend = [
-  { month: 'Jan', revenue: 24500, sessions: 980 },
-  { month: 'Feb', revenue: 22000, sessions: 880 },
-  { month: 'Mar', revenue: 27500, sessions: 1100 },
-  { month: 'Apr', revenue: 31000, sessions: 1240 },
-  { month: 'May', revenue: 29000, sessions: 1160 },
-  { month: 'Jun', revenue: 33000, sessions: 1320 },
-  { month: 'Jul', revenue: 35000, sessions: 1400 },
-];
-
-const tableUsage = [
-  { name: 'Table 1', sessions: 145, revenue: 3625, usage: 92 },
-  { name: 'Table 2', sessions: 138, revenue: 3450, usage: 87 },
-  { name: 'Table 3', sessions: 130, revenue: 3250, usage: 82 },
-  { name: 'Table 4', sessions: 125, revenue: 3125, usage: 79 },
-  { name: 'Table 5', sessions: 118, revenue: 2950, usage: 75 },
-  { name: 'Table 6', sessions: 112, revenue: 2800, usage: 71 },
-  { name: 'Table 7', sessions: 105, revenue: 2625, usage: 66 },
-  { name: 'Table 8', sessions: 98, revenue: 2450, usage: 62 },
-  { name: 'Table 9', sessions: 88, revenue: 2200, usage: 56 },
-  { name: 'Table 10', sessions: 75, revenue: 1875, usage: 47 },
-];
-
-const sessionDist = [
-  { name: '1 Hour', value: 35 },
-  { name: '2 Hours', value: 40 },
-  { name: '3 Hours', value: 18 },
-  { name: '4+ Hours', value: 7 },
-];
-
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
       <div className="bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 shadow-xl">
         <p className="text-xs text-neutral-400 mb-1">{label}</p>
         {payload.map((p: any, i: number) => (
-          <p key={`tooltip-${i}-${String(p.name ?? i)}-${String(p.dataKey ?? i)}`} className="text-xs font-semibold" style={{ color: p.color }}>
+          <p key={`tooltip-${i}`} className="text-xs font-semibold" style={{ color: p.color }}>
             {p.name}:{' '}
             {p.dataKey === 'revenue' ? `₱${p.value.toLocaleString()}` : p.value}
             {p.dataKey === 'occupancy' ? '%' : ''}
@@ -108,9 +48,9 @@ function StatCard({ label, value, sub, trend, icon: Icon, color }: any) {
       </div>
       <p className={`text-2xl font-black ${color}`}>{value}</p>
       {sub && <p className="text-xs text-neutral-500 mt-1">{sub}</p>}
-      {trend && (
-        <div className={`flex items-center gap-1 mt-1.5 text-xs font-semibold ${trend > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-          {trend > 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+      {trend !== undefined && (
+        <div className={`flex items-center gap-1 mt-1.5 text-xs font-semibold ${trend >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+          {trend >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
           {Math.abs(trend)}% vs last week
         </div>
       )}
@@ -122,16 +62,109 @@ export function Analytics() {
   const { tables, reservations, queue } = useAppContext();
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   
-  const totalRevenue = weeklyRevenue.reduce((s, d) => s + d.revenue, 0);
-  const avgOccupancy = Math.round(peakHours.reduce((s, d) => s + d.occupancy, 0) / peakHours.length);
-  const peakHour = peakHours.reduce((max, d) => d.occupancy > max.occupancy ? d : max, peakHours[0]);
+  // ==========================================
+  // 🟢 DYNAMIC DATA CALCULATIONS (Replaces Hardcoded Arrays)
+  // ==========================================
+  const validReservations = useMemo(() => reservations.filter(r => r.status === 'completed' || r.status === 'checked-in'), [reservations]);
 
-  // Shift Summary calculations
+  // 1. Weekly Revenue (Last 7 Days)
+  const weeklyRevenue = useMemo(() => {
+    return Array.from({ length: 7 }).map((_, i) => {
+      const targetDate = subDays(new Date(), 6 - i); // 6 days ago up to today
+      const dayRes = validReservations.filter(r => isSameDay(new Date(r.date), targetDate));
+      return {
+        day: format(targetDate, 'EEE'), // e.g., 'Mon', 'Tue'
+        revenue: dayRes.reduce((s, r) => s + r.totalAmount, 0),
+        tables: dayRes.length
+      };
+    });
+  }, [validReservations]);
+
+  // 2. Monthly Trend (Last 6 Months)
+  const monthlyTrend = useMemo(() => {
+    return Array.from({ length: 6 }).map((_, i) => {
+      const targetMonth = subMonths(new Date(), 5 - i);
+      const monthRes = validReservations.filter(r => isSameMonth(new Date(r.date), targetMonth));
+      return {
+        month: format(targetMonth, 'MMM'), // e.g., 'Jan', 'Feb'
+        revenue: monthRes.reduce((s, r) => s + r.totalAmount, 0),
+        sessions: monthRes.length
+      };
+    });
+  }, [validReservations]);
+
+  // 3. Session Length Distribution
+  const sessionDist = useMemo(() => {
+    const counts = { '1 Hour': 0, '2 Hours': 0, '3 Hours': 0, '4+ Hours': 0 };
+    validReservations.forEach(r => {
+      if (r.durationHours === 1) counts['1 Hour']++;
+      else if (r.durationHours === 2) counts['2 Hours']++;
+      else if (r.durationHours === 3) counts['3 Hours']++;
+      else if (r.durationHours >= 4) counts['4+ Hours']++;
+    });
+    
+    const total = validReservations.length || 1; // avoid division by zero
+    return Object.entries(counts).map(([name, count]) => ({
+      name,
+      value: Math.round((count / total) * 100)
+    })).filter(c => c.value > 0);
+  }, [validReservations]);
+
+  // 4. Peak Hours
+  const peakHours = useMemo(() => {
+    const hoursCount: Record<string, number> = {};
+    validReservations.forEach(r => {
+      const hourStr = r.timeSlot.split(':')[0]; // e.g., "14" from "14:00"
+      const hourNum = parseInt(hourStr, 10);
+      const label = hourNum === 12 ? '12PM' : hourNum > 12 ? `${hourNum - 12}PM` : `${hourNum}AM`;
+      hoursCount[label] = (hoursCount[label] || 0) + 1;
+    });
+
+    const total = validReservations.length || 1;
+    // Map to an array of common operating hours
+    const operatingHours = ['12PM','1PM','2PM','3PM','4PM','5PM','6PM','7PM','8PM','9PM','10PM','11PM','12AM'];
+    return operatingHours.map(hour => ({
+      hour,
+      // Rough occupancy estimation for demo based on counts
+      occupancy: Math.min(100, Math.round(((hoursCount[hour] || 0) / (total / operatingHours.length)) * 50))
+    }));
+  }, [validReservations]);
+
+  // 5. Table Usage
+  const tableUsage = useMemo(() => {
+    return tables.map(table => {
+      const tRes = validReservations.filter(r => r.tableId === table.id);
+      const totalRev = tRes.reduce((s, r) => s + r.totalAmount, 0);
+      return {
+        name: table.name,
+        sessions: tRes.length,
+        revenue: totalRev,
+        // Rough mock usage calc: max possible is arbitrary 20 for this view
+        usage: Math.min(100, Math.round((tRes.length / 20) * 100))
+      };
+    }).sort((a, b) => b.revenue - a.revenue); // Sort best performing to top
+  }, [tables, validReservations]);
+
+
+  // ==========================================
+  // TOP KPI CALCULATIONS
+  // ==========================================
+  const totalRevenue = weeklyRevenue.reduce((s, d) => s + d.revenue, 0);
+  const avgOccupancy = Math.round(peakHours.reduce((s, d) => s + d.occupancy, 0) / peakHours.length) || 0;
+  const peakHour = peakHours.reduce((max, d) => d.occupancy > max.occupancy ? d : max, peakHours[0]) || { hour: 'N/A', occupancy: 0 };
+  const overallAvgDuration = validReservations.length 
+    ? (validReservations.reduce((s, r) => s + r.durationHours, 0) / validReservations.length).toFixed(1)
+    : '0';
+
+  // ==========================================
+  // SHIFT SUMMARY CALCULATIONS
+  // ==========================================
   const dayStart = useMemo(() => startOfDay(new Date(selectedDate + 'T00:00:00')), [selectedDate]);
   const dayEnd   = useMemo(() => endOfDay(new Date(selectedDate + 'T00:00:00')), [selectedDate]);
 
   const dayReservations = useMemo(() => reservations.filter(r => {
-    const d = new Date(r.date);
+    // Need to handle both actual Date objects and stringified ISO dates coming from backend
+    const d = typeof r.date === 'string' ? parseISO(r.date) : new Date(r.date);
     return d >= dayStart && d <= dayEnd;
   }), [reservations, dayStart, dayEnd]);
 
@@ -140,8 +173,6 @@ export function Analytics() {
     dayReservations.forEach(r => { if (r.tableId) used.add(r.tableId); });
     return used.size;
   }, [dayReservations]);
-
-  const totalSessions = dayReservations.length;
 
   const revenueCollected = useMemo(() => {
     return dayReservations
@@ -154,27 +185,16 @@ export function Analytics() {
       }, 0);
   }, [dayReservations]);
 
-  const reservationsServed = useMemo(() =>
-    dayReservations.filter(r => r.status === 'checked-in' || r.status === 'completed').length,
-    [dayReservations]
-  );
-
-  const avgDuration = useMemo(() => {
-    const completed = dayReservations.filter(r => r.status !== 'cancelled');
-    if (!completed.length) return 0;
-    return completed.reduce((s, r) => s + r.durationHours, 0) / completed.length;
-  }, [dayReservations]);
-
   const isSelectedToday = isToday(new Date(selectedDate + 'T00:00:00'));
 
   return (
     <div className="space-y-5">
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Weekly Revenue" value={`₱${totalRevenue.toLocaleString()}`} sub="Table rentals only" trend={12} icon={DollarSign} color="text-emerald-400" />
-        <StatCard label="Avg Occupancy" value={`${avgOccupancy}%`} sub="Across operating hours" trend={5} icon={TableProperties} color="text-blue-400" />
+        <StatCard label="Weekly Revenue" value={`₱${totalRevenue.toLocaleString()}`} sub="Table rentals only" trend={0} icon={DollarSign} color="text-emerald-400" />
+        <StatCard label="Avg Occupancy" value={`${avgOccupancy}%`} sub="Across operating hours" icon={TableProperties} color="text-blue-400" />
         <StatCard label="Peak Hour" value={peakHour.hour} sub={`${peakHour.occupancy}% occupancy`} icon={Clock} color="text-amber-400" />
-        <StatCard label="Avg Session" value="1.8 hrs" sub="Per table booking" trend={-3} icon={BarChart3} color="text-purple-400" />
+        <StatCard label="Avg Session" value={`${overallAvgDuration} hrs`} sub="Per table booking" icon={BarChart3} color="text-purple-400" />
       </div>
 
       {/* Charts Row 1 */}
@@ -186,7 +206,6 @@ export function Analytics() {
               <h3 className="text-sm font-semibold text-neutral-300">Weekly Revenue</h3>
               <p className="text-xs text-neutral-600 mt-0.5">Table rental income this week</p>
             </div>
-            <span className="text-xs text-emerald-400 font-semibold bg-emerald-500/10 px-2.5 py-1 rounded-lg">+12% WoW</span>
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={weeklyRevenue}>
@@ -213,7 +232,7 @@ export function Analytics() {
             <PieChart>
               <Pie data={sessionDist} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={3}>
                 {sessionDist.map((entry, i) => (
-                  <Cell key={`pie-cell-${entry.name.replace(/\s+/g, '-')}-${i}`} fill={COLORS[i % COLORS.length]} />
+                  <Cell key={`pie-cell-${i}`} fill={COLORS[i % COLORS.length]} />
                 ))}
               </Pie>
               <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #404040', borderRadius: '8px', fontSize: '12px' }} />
@@ -240,7 +259,7 @@ export function Analytics() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-semibold text-neutral-300">Peak Hours Analysis</h3>
-              <p className="text-xs text-neutral-600 mt-0.5">Table occupancy by hour of day</p>
+              <p className="text-xs text-neutral-600 mt-0.5">Estimated table occupancy by hour</p>
             </div>
             <div className="flex items-center gap-1.5 bg-amber-500/10 px-2.5 py-1 rounded-lg">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
@@ -256,20 +275,6 @@ export function Analytics() {
               <Line key="line-peak-occupancy" type="monotone" dataKey="occupancy" name="Peak Occupancy" stroke="#f59e0b" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-            <div className="bg-neutral-900 rounded-lg p-2 border border-neutral-800">
-              <p className="text-xs font-black text-amber-400">11AM–6PM</p>
-              <p className="text-[10px] text-neutral-600">Peak Window</p>
-            </div>
-            <div className="bg-neutral-900 rounded-lg p-2 border border-neutral-800">
-              <p className="text-xs font-black text-emerald-400">{avgOccupancy}%</p>
-              <p className="text-[10px] text-neutral-600">Avg Occupancy</p>
-            </div>
-            <div className="bg-neutral-900 rounded-lg p-2 border border-neutral-800">
-              <p className="text-xs font-black text-blue-400">{peakHour.occupancy}%</p>
-              <p className="text-[10px] text-neutral-600">Peak Rate</p>
-            </div>
-          </div>
         </div>
 
         {/* Monthly Trend */}
@@ -277,7 +282,7 @@ export function Analytics() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-semibold text-neutral-300">Monthly Trend</h3>
-              <p className="text-xs text-neutral-600 mt-0.5">Revenue growth over 7 months</p>
+              <p className="text-xs text-neutral-600 mt-0.5">Revenue growth over 6 months</p>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={180}>
@@ -297,7 +302,7 @@ export function Analytics() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-sm font-semibold text-neutral-300">Table Performance Report</h3>
-            <p className="text-xs text-neutral-600 mt-0.5">Historical usage and revenue per table — supports add/reduce decisions</p>
+            <p className="text-xs text-neutral-600 mt-0.5">Historical usage and revenue per table</p>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -310,7 +315,7 @@ export function Analytics() {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/40">
-              {tableUsage.map((t, i) => (
+              {tableUsage.map((t) => (
                 <tr key={t.name} className="hover:bg-neutral-900/40 transition-colors">
                   <td className="py-3 pr-4 text-sm font-semibold text-neutral-200">{t.name}</td>
                   <td className="py-3 pr-4 text-sm text-neutral-400">{t.sessions}</td>
@@ -341,11 +346,6 @@ export function Analytics() {
             </tbody>
           </table>
         </div>
-        <div className="mt-4 p-3 bg-blue-950/20 border border-blue-900/30 rounded-lg">
-          <p className="text-xs text-blue-300">
-            <strong>AI Insight:</strong> Tables 1–3 show consistently high demand (80%+ utilization). Consider adding 2–3 more tables to accommodate peak-hour overflow. Tables 9–10 underperform — consider repositioning or promotional pricing.
-          </p>
-        </div>
       </div>
 
       {/* Daily Shift Summary */}
@@ -359,7 +359,7 @@ export function Analytics() {
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2">
-              <Calendar size={14} className="text-neutral-500" />
+              <CalendarIcon size={14} className="text-neutral-500" />
               <input
                 type="date"
                 value={selectedDate}
@@ -389,10 +389,10 @@ export function Analytics() {
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
           {[
             { label: 'Tables Used', value: tablesUsedToday, icon: Table2, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
-            { label: 'Total Sessions', value: totalSessions, icon: BarChart2, color: 'text-sky-400', bg: 'bg-sky-500/10 border-sky-500/20' },
+            { label: 'Total Sessions', value: dayReservations.length, icon: BarChart2, color: 'text-sky-400', bg: 'bg-sky-500/10 border-sky-500/20' },
             { label: 'Revenue Collected', value: formatPHP(revenueCollected), icon: DollarSign, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
-            { label: 'Reservations Served', value: reservationsServed, icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
-            { label: 'Avg Session Duration', value: avgDuration > 0 ? `${avgDuration.toFixed(1)}h` : '—', icon: Clock, color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20' },
+            { label: 'Reservations Served', value: dayReservations.filter(r => r.status === 'checked-in' || r.status === 'completed').length, icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+            { label: 'Avg Session Duration', value: dayReservations.length ? `${(dayReservations.reduce((s, r) => s + r.durationHours, 0) / dayReservations.length).toFixed(1)}h` : '—', icon: Clock, color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20' },
             { label: 'Queue Served', value: isSelectedToday ? queue.filter((q: any) => q.status === 'called' || q.status === 'seated').length : '—', icon: Users, color: 'text-rose-400', bg: 'bg-rose-500/10 border-rose-500/20' },
           ].map(({ label, value, icon: Icon, color, bg }) => (
             <div key={label} className={`bg-neutral-950 border rounded-xl p-4 ${bg}`}>
@@ -416,7 +416,7 @@ export function Analytics() {
 
           {dayReservations.length === 0 ? (
             <div className="px-5 py-12 text-center">
-              <Calendar size={28} className="mx-auto text-neutral-700 mb-2" />
+              <CalendarIcon size={28} className="mx-auto text-neutral-700 mb-2" />
               <p className="text-sm text-neutral-500">No reservations for this date.</p>
             </div>
           ) : (
@@ -475,36 +475,6 @@ export function Analytics() {
             </div>
           )}
         </div>
-
-        {/* Active Tables Status (live, only if today) */}
-        {isSelectedToday && (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-neutral-800">
-              <h3 className="text-sm font-bold text-neutral-200">Live Table Status</h3>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 p-4">
-              {tables.filter(t => t.isActive).map(t => (
-                <div key={t.id} className={`rounded-xl border p-3 text-center ${
-                  t.status === 'occupied'    ? 'bg-rose-950/20 border-rose-800/30' :
-                  t.status === 'reserved'   ? 'bg-amber-950/20 border-amber-800/30' :
-                  t.status === 'maintenance'? 'bg-orange-950/20 border-orange-800/30' :
-                  'bg-neutral-900 border-neutral-800'
-                }`}>
-                  <p className="text-xs font-semibold text-neutral-300 mb-1">{t.name}</p>
-                  <p className={`text-[10px] font-bold uppercase tracking-wider ${
-                    t.status === 'occupied'    ? 'text-rose-400' :
-                    t.status === 'reserved'   ? 'text-amber-400' :
-                    t.status === 'maintenance'? 'text-orange-400' :
-                    'text-emerald-400'
-                  }`}>{t.status}</p>
-                  {t.session && (
-                    <p className="text-[9px] text-neutral-600 mt-1 truncate">{t.session.customerName}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

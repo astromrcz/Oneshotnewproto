@@ -87,6 +87,18 @@ app.get('/api/events', (req, res) => {
   });
 });
 
+app.get('/api/feedback', (req, res) => {
+  db.all(`SELECT * FROM feedback ORDER BY date DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    // Parse the JSON tags string back into an array for React
+    const formatted = rows.map(f => ({
+      ...f,
+      tags: f.tags ? JSON.parse(f.tags) : []
+    }));
+    res.json(formatted);
+  });
+});
+
 // ==========================================
 // 📥 WRITE ROUTES (POST/PUT) 
 // ==========================================
@@ -163,6 +175,15 @@ app.put('/api/settings/rates', (req, res) => {
       completed++;
       if (completed === keys.length) res.json({ message: "System settings successfully synced to DB." });
     });
+  });
+});
+
+app.post('/api/feedback', (req, res) => {
+  const { id, customerName, contactInfo, feedbackType, comment, reservationId, tags } = req.body;
+  const sql = `INSERT INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+  db.run(sql, [id, customerName, contactInfo, feedbackType, comment, reservationId, JSON.stringify(tags || [])], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Feedback saved to DB." });
   });
 });
 

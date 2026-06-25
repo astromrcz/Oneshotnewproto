@@ -238,6 +238,7 @@ type AppContextType = {
   updateRates: (r: Partial<RatesConfig>) => void; updateReservationTerms: (t: Partial<ReservationTerms>) => void; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
   siteConfig: any;
   updateSiteConfig: (config: any) => void;
+  refreshLiveMonitor: () => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -278,6 +279,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => {
     setWeatherConfig({ lat, lon, name });
   }, []);
+
+  // 🟢 SILENT BACKGROUND REFRESH (Zero Online Egress)
+  const refreshLiveMonitor = async () => {
+    try {
+      // Only fetch the specific data the TV needs to save local RAM
+      const [tablesRes, queueRes] = await Promise.all([
+        fetch('http://localhost:3001/api/tables').catch(() => null),
+        fetch('http://localhost:3001/api/queue').catch(() => null),
+      ]);
+
+      if (tablesRes && tablesRes.ok) {
+        const newTables = await tablesRes.json();
+        // Only update state if something actually changed to prevent React stuttering
+        setTables(prev => JSON.stringify(prev) !== JSON.stringify(newTables) ? newTables : prev);
+      }
+      
+      if (queueRes && queueRes.ok) {
+        const newQueue = await queueRes.json();
+        setQueue(prev => JSON.stringify(prev) !== JSON.stringify(newQueue) ? newQueue : prev);
+      }
+    } catch (error) {
+      // Fail silently - it will just try again on the next tick
+    }
+  };
 
   // 🟢 FETCH LOCAL DATABASE ON MOUNT
   useEffect(() => {
@@ -407,15 +432,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateStaffProfile = (p: Partial<StaffProfile>) => setStaffProfile(prev => ({ ...prev, ...p }));
 
   const assignTable = (tableId: string, session: Session) => {
-    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: { ...session, orders: [] } } : t));
+    const updatedSession = { ...session, orders: [] };
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: updatedSession } : t));
     addActivity('table_assigned', `Table assigned to ${session.customerName}`, { tableId });
-    syncToSupabase('TABLE_ASSIGNED', { tableId, session });
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`);
   };
 
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
     addActivity('table_freed', `Table freed`, { tableId });
-    syncToSupabase('TABLE_FREED', { tableId });
+    // 🟢 Send to Server
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`);
+  };
+
+  const extendSession = (tableId: string, mins: number, pay: number) => {
+    setTables(prev => prev.map(t => {
+      if (t.id === tableId && t.session) {
+        const updatedSession = { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay };
+        // 🟢 Send to Server
+        syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`);
+        return { ...t, session: updatedSession };
+      }
+      return t;
+    }));
+    addActivity('session_extended', `Extended table session by ${mins} minutes`);
   };
 
   const reserveTable = (tableId: string) => setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'reserved' } : t));
@@ -425,11 +465,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Table set to maintenance: ${reason}`, { tableId });
   };
 
-  const extendSession = (tableId: string, mins: number, pay: number) => {
-    setTables(prev => prev.map(t => t.id === tableId && t.session ? { ...t, session: { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay } } : t));
-    addActivity('session_extended', `Extended table session by ${mins} minutes`);
-    syncToSupabase('SESSION_EXTENDED', { tableId, mins, pay });
-  };
+  
 
   const addTable = (name: string) => {
     setTables(prev => [...prev, { id: `t${Date.now()}`, name, status: 'available', isActive: true }]);
@@ -493,13 +529,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextNum = Math.max(0, ...prev.map(q => q.queueNumber ?? 0)) + 1;
       const newItem = { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting' as const, queueNumber: nextNum };
       addActivity('queue_added', `Added ${i.customerName} to queue position #${nextNum}`);
+      // 🟢 Send to Server
+      syncToDB('/api/queue', 'POST', newItem, `Queue item added`);
       return [...prev, newItem];
     });
   };
-  const removeFromQueue = (id: string) => setQueue(prev => prev.filter(q => q.id !== id));
+
+  const removeFromQueue = (id: string) => {
+    setQueue(prev => prev.filter(q => q.id !== id));
+    // 🟢 Send to Server
+    syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`);
+  };
+
   const callQueueItem = (id: string) => {
     setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
     addActivity('queue_called', `Called customer from queue to available table`);
+    // 🟢 Send to Server
+    syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`);
   };
 
   const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
@@ -627,7 +673,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
-      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig
+      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor
     }}>
       {children}
     </AppContext.Provider>

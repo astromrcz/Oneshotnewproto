@@ -171,7 +171,8 @@ export function Reservations() {
       const matchStatus = filterStatus === 'all' || r.status === filterStatus;
       return matchSearch && matchStatus;
     })
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    // 🟢 Wrap createdAt in new Date() to safely convert it from a string before sorting
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const selected = reservations.find(r => r.id === selectedId);
 

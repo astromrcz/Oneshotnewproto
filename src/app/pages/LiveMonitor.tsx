@@ -1,29 +1,53 @@
 import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Table, QueueItem } from '../context/AppContext';
-import { Clock, Users, X, Maximize2, Sparkles } from 'lucide-react';
+import { Clock, Users, X, Sparkles } from 'lucide-react';
 import { addMinutes, differenceInSeconds } from 'date-fns';
 
 // ── Helpers ────────────────────────────────────────────────────
 function getSessionTimer(table: Table): {
-  mm: string; ss: string; isOvertime: boolean; percentLeft: number; label: string;
+  mm: string; ss: string; isOvertime: boolean; percentLeft: number; label: string; isOpenTime: boolean;
 } {
-  if (!table.session) return { mm: '--', ss: '--', isOvertime: false, percentLeft: 0, label: '' };
+  if (!table.session || !table.session.startTime) {
+    return { mm: '--', ss: '--', isOvertime: false, percentLeft: 0, label: '', isOpenTime: false };
+  }
+
   const start = new Date(table.session.startTime).getTime();
-  const totalMs = table.session.durationMinutes * 60000;
   const elapsed = Date.now() - start;
+
+  // Handle "Open Time" (Pay-as-you-go, counting UP)
+  if (table.session.durationMinutes === null || table.session.isOpenTime) {
+    const abs = elapsed;
+    const hh = String(Math.floor(abs / 3600000)).padStart(2, '0');
+    const mm = String(Math.floor((abs % 3600000) / 60000)).padStart(2, '0');
+    const ss = String(Math.floor((abs % 60000) / 1000)).padStart(2, '0');
+    
+    return { 
+      mm: hh !== '00' ? hh : mm, // Show hours if over 60 mins, otherwise minutes
+      ss: hh !== '00' ? mm : ss, // Show minutes if over 60 mins, otherwise seconds
+      isOvertime: false, 
+      percentLeft: 100, 
+      label: 'Elapsed Time', 
+      isOpenTime: true 
+    };
+  }
+
+  // Handle "Fixed Duration" (Counting DOWN)
+  const totalMs = table.session.durationMinutes * 60000;
   const remaining = totalMs - elapsed;
   const isOvertime = remaining < 0;
-  const abs = Math.abs(remaining);
-  const mm = String(Math.floor(abs / 60000)).padStart(2, '0');
-  const ss = String(Math.floor((abs % 60000) / 1000)).padStart(2, '0');
+  const absRemaining = Math.abs(remaining);
+  
+  const mm = String(Math.floor(absRemaining / 60000)).padStart(2, '0');
+  const ss = String(Math.floor((absRemaining % 60000) / 1000)).padStart(2, '0');
   const percentLeft = Math.max(0, Math.min(100, (remaining / totalMs) * 100));
   const label = isOvertime ? `+${mm}:${ss} Overtime` : `${mm}:${ss} remaining`;
-  return { mm, ss, isOvertime, percentLeft, label };
+  
+  return { mm, ss, isOvertime, percentLeft, label, isOpenTime: false };
 }
 
 // ── Single Table Card ──────────────────────────────────────────
-function TableCard({ table, tick }: { table: Table; tick: number }) {
+function TableCard({ table }: { table: Table }) {
   const timer = getSessionTimer(table);
 
   if (table.status === 'available') {
@@ -63,7 +87,7 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
     );
   }
 
-  // Occupied
+  // Occupied Status
   return (
     <div className={`relative border-2 rounded-2xl p-5 flex flex-col gap-3 overflow-hidden ${
       timer.isOvertime
@@ -74,7 +98,7 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
         <div className="absolute inset-0 bg-rose-500/5 animate-pulse pointer-events-none" />
       )}
 
-      {/* Table number + customer */}
+      {/* Table number + Status Badge */}
       <div className="flex items-start justify-between">
         <div className="w-9 h-9 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center flex-shrink-0">
           <span className="text-white font-black">{table.name.replace('Table ', '')}</span>
@@ -82,9 +106,11 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
         <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
           timer.isOvertime
             ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+            : timer.isOpenTime
+            ? 'bg-sky-500/15 text-sky-400 border border-sky-500/20'
             : 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
         }`}>
-          {timer.isOvertime ? '⚠ OVERTIME' : 'IN USE'}
+          {timer.isOvertime ? '⚠ OVERTIME' : timer.isOpenTime ? 'OPEN TIME' : 'IN USE'}
         </div>
       </div>
 
@@ -94,20 +120,20 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
         <p className="text-white font-bold text-sm mt-0.5 truncate">{table.session?.customerName || '—'}</p>
       </div>
 
-      {/* Countdown */}
+      {/* Countdown / Countup */}
       <div className="text-center">
         <p className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">
-          {timer.isOvertime ? 'Overtime' : 'Time Left'}
+          {timer.isOpenTime ? 'Time Elapsed' : timer.isOvertime ? 'Overtime' : 'Time Left'}
         </p>
         <div className={`font-black text-4xl tabular-nums tracking-tight ${
-          timer.isOvertime ? 'text-rose-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'
+          timer.isOvertime ? 'text-rose-400' : timer.isOpenTime ? 'text-sky-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'
         }`}>
           {timer.mm}:{timer.ss}
         </div>
 
         {/* Progress bar */}
-        <div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-          {!timer.isOvertime && (
+        <div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden relative">
+          {!timer.isOvertime && !timer.isOpenTime && (
             <div
               className={`h-full rounded-full transition-all duration-1000 ${
                 timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500'
@@ -117,6 +143,11 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
           )}
           {timer.isOvertime && (
             <div className="h-full w-full bg-rose-500/40 animate-pulse" />
+          )}
+          {timer.isOpenTime && (
+            <div className="h-full w-full bg-sky-900 overflow-hidden relative">
+              <div className="absolute inset-0 w-1/2 bg-sky-400/50 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] skew-x-12" />
+            </div>
           )}
         </div>
       </div>
@@ -167,18 +198,25 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 
 // ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
-  const { tables, queue } = useAppContext();
+  // 🟢 Extract refreshLiveMonitor from context
+  const { tables, queue, refreshLiveMonitor } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
 
-  // Refresh timers every second
+  // Refresh timers and check for database updates
   useEffect(() => {
     const id = setInterval(() => {
-      setTick(t => t + 1);
+      setTick(t => {
+        // 🟢 Every 3 seconds (ticks), silently fetch new data from local SQLite
+        if (t % 3 === 0) {
+          refreshLiveMonitor();
+        }
+        return t + 1;
+      });
       setNow(new Date());
     }, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [refreshLiveMonitor]);
 
   // --- GLOBAL AI WAIT-TIME ESTIMATOR ---
   const calculateAIWaitTime = (position: number) => {
@@ -186,7 +224,9 @@ export function LiveMonitor() {
     if (activeTables.length === 0) return "0 mins";
 
     const remainingTimes = activeTables.map(t => {
-      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+      // If it's an open time, assume a default 2 hour block for estimation purposes
+      const duration = t.session?.durationMinutes || 120;
+      const endTime = addMinutes(new Date(t.session!.startTime), duration);
       return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
     }).sort((a, b) => a - b);
 
@@ -260,7 +300,7 @@ export function LiveMonitor() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
             {tables.map(table => (
-              <TableCard key={table.id} table={table} tick={tick} />
+              <TableCard key={table.id} table={table} />
             ))}
           </div>
 

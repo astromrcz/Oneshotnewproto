@@ -20,7 +20,13 @@ app.use(express.json());
 const dbPath = path.resolve(__dirname, 'oneshot.db');
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error('❌ Error connecting to SQLite database:', err.message);
-  else console.log('✅ Connected to local SQLite database (Direct Match Mode active).');
+  else {
+    console.log('✅ Connected to local SQLite database (Direct Match Mode active).');
+    // 🟢 AUTO-MIGRATION: Automatically add the sessionData column to tables if it's missing!
+    db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, (err) => {
+      // If it throws an error, it just means the column already exists. Totally safe!
+    });
+  }
 });
 
 // ==========================================
@@ -30,7 +36,12 @@ const db = new sqlite3.Database(dbPath, (err) => {
 app.get('/api/tables', (req, res) => {
   db.all(`SELECT * FROM tables`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1 })));
+    // 🟢 Parse the sessionData JSON string back into an object for React!
+    res.json(rows.map(r => ({ 
+      ...r, 
+      isActive: r.isActive === 1,
+      session: r.sessionData ? JSON.parse(r.sessionData) : undefined 
+    })));
   });
 });
 
@@ -64,7 +75,7 @@ app.get('/api/inventory', (req, res) => {
 });
 
 app.get('/api/queue', (req, res) => {
-  db.all(`SELECT * FROM queue WHERE status = 'waiting' ORDER BY queueNumber ASC`, [], (err, rows) => {
+  db.all(`SELECT * FROM queue WHERE status IN ('waiting', 'called') ORDER BY queueNumber ASC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
@@ -91,7 +102,6 @@ app.get('/api/announcements', (req, res) => {
   });
 });
 
-// 🟢 NEW: CMS GET ROUTE
 app.get('/api/cms', (req, res) => {
   db.all(`SELECT keyName, settingValue FROM cms`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -106,6 +116,47 @@ app.get('/api/cms', (req, res) => {
 // ==========================================
 // 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
+
+// 🟢 NEW: Update Table Status & Save Live Session Timer Data
+app.put('/api/tables/:id', (req, res) => {
+  const { status, session } = req.body;
+  const sessionData = session ? JSON.stringify(session) : null;
+  db.run(
+    `UPDATE tables SET status = ?, sessionData = ? WHERE id = ?`, 
+    [status, sessionData, req.params.id], 
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: "Table updated successfully." });
+    }
+  );
+});
+
+// 🟢 NEW: Queue Management Routes
+app.post('/api/queue', (req, res) => {
+  const { id, customerName, contactNumber, partySize, status, queueNumber, notes } = req.body;
+  const sql = `INSERT INTO queue (id, customerName, contactNumber, partySize, status, queueNumber, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+  db.run(sql, [id, customerName, contactNumber, partySize, status, queueNumber, notes || ''], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: 'Added to queue' });
+  });
+});
+
+app.put('/api/queue/:id', (req, res) => {
+  const { status } = req.body;
+  db.run(`UPDATE queue SET status = ? WHERE id = ?`, [status, req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Queue updated." });
+  });
+});
+
+app.delete('/api/queue/:id', (req, res) => {
+  db.run(`DELETE FROM queue WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Removed from queue." });
+  });
+});
+
+// -- (All existing POST/PUT routes remain unchanged below) --
 
 app.post('/api/reservations', (req, res) => {
   const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
@@ -214,7 +265,6 @@ app.delete('/api/announcements/:id', (req, res) => {
   });
 });
 
-// 🟢 NEW: CMS PUT ROUTE
 app.put('/api/cms', (req, res) => {
   const payload = req.body;
   let completed = 0;

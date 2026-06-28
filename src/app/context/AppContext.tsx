@@ -160,11 +160,11 @@ export type RatesConfig = {
   happyHourRate: number;
   happyHourStart: string;
   happyHourEnd: string;
-  isHappyHourActive: boolean; // Toggle switch
+  isHappyHourActive: boolean; 
   overtimeRate: number;
   downPaymentPercent: number;
-  reservationStartTime: string; // E.g., '12:00'
-  reservationEndTime: string;   // E.g., '02:00'
+  reservationStartTime: string; 
+  reservationEndTime: string;   
 };
 
 export type ReservationTerms = {
@@ -190,7 +190,7 @@ export type Announcement = {
 
 export type ClosedDate = {
   id: string;
-  date: string; // 'YYYY-MM-DD'
+  date: string; 
   reason: string;
   isFullDay: boolean;
   openTime?: string;
@@ -211,14 +211,6 @@ export const DOWN_PAYMENT_RATE = 0.25;
 export const generateRandomPromoCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-};
-
-export const generateReferralCode = (name?: string) => {
-  if (name) {
-    const cleanName = name.replace(/[^A-Za-z0-9]/g, '').substring(0, 4).toUpperCase();
-    return `${cleanName}${generateRandomPromoCode().substring(0, 4)}`;
-  }
-  return generateRandomPromoCode();
 };
 
 // ── Context Type ───────────────────────────────────────────────
@@ -244,7 +236,6 @@ type AppContextType = {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // 🟢 NEW STATE: System Initialization Check
   const [isInitializing, setIsInitializing] = useState(true);
 
   // States
@@ -283,7 +274,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 🟢 SILENT BACKGROUND REFRESH (Zero Online Egress)
   const refreshLiveMonitor = async () => {
     try {
-      // Only fetch the specific data the TV needs to save local RAM
       const [tablesRes, queueRes] = await Promise.all([
         fetch('http://localhost:3001/api/tables').catch(() => null),
         fetch('http://localhost:3001/api/queue').catch(() => null),
@@ -291,7 +281,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (tablesRes && tablesRes.ok) {
         const newTables = await tablesRes.json();
-        // Only update state if something actually changed to prevent React stuttering
         setTables(prev => JSON.stringify(prev) !== JSON.stringify(newTables) ? newTables : prev);
       }
       
@@ -333,7 +322,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.error("❌ Failed to connect to local SQLite Edge Server.", err);
       } finally {
-        // Add a small 800ms artificial delay so the UI doesn't visually "flicker" on fast local networks
         setTimeout(() => setIsInitializing(false), 800);
       }
     };
@@ -341,7 +329,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchLocalDatabase();
   }, []);
 
-  // Fetch Weather (Does NOT block the loading screen)
+  // Fetch Weather
   useEffect(() => {
     const fetchWeather = async () => {
       try {
@@ -367,7 +355,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchWeather();
   }, [weatherConfig]);
 
-  // Fetch Philippine Holidays (Does NOT block the loading screen)
+  // Fetch Philippine Holidays
   useEffect(() => {
     const fetchHolidays = async () => {
       try {
@@ -441,7 +429,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
     addActivity('table_freed', `Table freed`, { tableId });
-    // 🟢 Send to Server
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`);
   };
 
@@ -449,7 +436,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const updatedSession = { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay };
-        // 🟢 Send to Server
         syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`);
         return { ...t, session: updatedSession };
       }
@@ -464,8 +450,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
     addActivity('admin_action', `Table set to maintenance: ${reason}`, { tableId });
   };
-
-  
 
   const addTable = (name: string) => {
     setTables(prev => [...prev, { id: `t${Date.now()}`, name, status: 'available', isActive: true }]);
@@ -529,7 +513,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextNum = Math.max(0, ...prev.map(q => q.queueNumber ?? 0)) + 1;
       const newItem = { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting' as const, queueNumber: nextNum };
       addActivity('queue_added', `Added ${i.customerName} to queue position #${nextNum}`);
-      // 🟢 Send to Server
       syncToDB('/api/queue', 'POST', newItem, `Queue item added`);
       return [...prev, newItem];
     });
@@ -537,14 +520,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeFromQueue = (id: string) => {
     setQueue(prev => prev.filter(q => q.id !== id));
-    // 🟢 Send to Server
     syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`);
   };
 
   const callQueueItem = (id: string) => {
     setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
     addActivity('queue_called', `Called customer from queue to available table`);
-    // 🟢 Send to Server
     syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`);
   };
 
@@ -563,7 +544,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
     setFeedback(prev => [newFeedback, ...prev]);
-    
     syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback");
   };
 
@@ -614,7 +594,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`);
   };
   
-
   const deleteAnnouncement = (id: string) => {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
     syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`);
@@ -645,8 +624,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
   const deleteEvent = (id: string) => setEvents(prev => prev.filter(e => e.id !== id));
 
-  // 🟢 GLOBAL LOADING SCREEN
-  // If the SQLite database hasn't finished answering, display the dark mode spinner
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center">

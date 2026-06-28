@@ -6,6 +6,7 @@ import cors from 'cors';
 import sqlite3Pkg from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer'; // 🟢 NEW: File parser
 
 const sqlite3 = sqlite3Pkg.verbose();
 const __filename = fileURLToPath(import.meta.url);
@@ -13,6 +14,9 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3001;
+
+// 🟢 NEW: Store uploaded files in Node memory temporarily so we can save them as BLOBs
+const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors()); 
 app.use(express.json());
@@ -22,10 +26,9 @@ const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error('❌ Error connecting to SQLite database:', err.message);
   else {
     console.log('✅ Connected to local SQLite database (Direct Match Mode active).');
-    // 🟢 AUTO-MIGRATION: Automatically add the sessionData column to tables if it's missing!
-    db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, (err) => {
-      // If it throws an error, it just means the column already exists. Totally safe!
-    });
+    db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, () => {});
+    // 🟢 NEW: Create a dedicated table to hold binary BLOB images
+    db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
   }
 });
 
@@ -33,10 +36,21 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // 🚀 READ ROUTES (GET) 
 // ==========================================
 
+// 🟢 NEW: Image serving route. This reads the BLOB and serves it as a real image file!
+app.get('/api/images/:id', (req, res) => {
+  db.get(`SELECT mimeType, data FROM images WHERE id = ?`, [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).send('Image not found');
+    
+    res.setHeader('Content-Type', row.mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for fast loading
+    res.send(row.data); // Serve the raw binary BLOB
+  });
+});
+
 app.get('/api/tables', (req, res) => {
   db.all(`SELECT * FROM tables`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    // 🟢 Parse the sessionData JSON string back into an object for React!
     res.json(rows.map(r => ({ 
       ...r, 
       isActive: r.isActive === 1,
@@ -117,7 +131,23 @@ app.get('/api/cms', (req, res) => {
 // 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
 
-// 🟢 NEW: Update Table Status & Save Live Session Timer Data
+// 🟢 NEW: Upload Binary Image to BLOB
+app.post('/api/images', upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+  
+  const id = 'img_' + Date.now() + '_' + Math.round(Math.random() * 1000);
+  
+  db.run(
+    `INSERT INTO images (id, mimeType, data) VALUES (?, ?, ?)`, 
+    [id, req.file.mimetype, req.file.buffer], 
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      // Return the new URL back to the frontend so it can save it in the CMS table
+      res.status(201).json({ url: `http://localhost:3001/api/images/${id}` });
+    }
+  );
+});
+
 app.put('/api/tables/:id', (req, res) => {
   const { status, session } = req.body;
   const sessionData = session ? JSON.stringify(session) : null;
@@ -131,7 +161,6 @@ app.put('/api/tables/:id', (req, res) => {
   );
 });
 
-// 🟢 NEW: Queue Management Routes
 app.post('/api/queue', (req, res) => {
   const { id, customerName, contactNumber, partySize, status, queueNumber, notes } = req.body;
   const sql = `INSERT INTO queue (id, customerName, contactNumber, partySize, status, queueNumber, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`;
@@ -155,8 +184,6 @@ app.delete('/api/queue/:id', (req, res) => {
     res.json({ message: "Removed from queue." });
   });
 });
-
-// -- (All existing POST/PUT routes remain unchanged below) --
 
 app.post('/api/reservations', (req, res) => {
   const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;

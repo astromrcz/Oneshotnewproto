@@ -3,29 +3,17 @@ import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay } from 'date-fns';
 import {
-  ChevronLeft, ChevronRight, X, Star, Phone, MapPin,
+  ChevronLeft, ChevronRight, X, Phone, MapPin,
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  Sparkles, Upload, Search, Copy, ExternalLink, ImageIcon, AlertTriangle
+  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle
 } from 'lucide-react';
-import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, generateReferralCode } from '../context/AppContext';
+import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
-import heroImg2 from 'figma:asset/f80be24577ead53e120a2e3792c660d627f94c6f.png';
-import heroImg3 from 'figma:asset/622002b1a57eb609a09cacd650764fb95c911672.png';
-import heroImg4 from 'figma:asset/759b04149309a4f38a99d59a2ef822b4e59fd5d3.png';
-import heroImg5 from 'figma:asset/0784e9fa4728a17ea332ccf7dd013e304884f734.png';
-
-const HERO_SLIDES = [
-  { src: heroImg1, alt: 'One Shot Bar & Billiards – All It Takes Is One Shot' },
-  { src: heroImg2, alt: 'One Shot Bar and Billiards' },
-  { src: heroImg3, alt: 'One Shot Billiards Hall' },
-  { src: heroImg4, alt: 'Tournament Play' },
-  { src: heroImg5, alt: 'Precision Billiards' },
-];
 
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -58,10 +46,7 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${pattern[0].length}, 1fr)`, gap: '1px', width: 136, height: 136 }}>
         {pattern.flatMap((row, ri) =>
           row.map((cell, ci) => (
-            <div
-              key={`${ri}-${ci}`}
-              style={{ backgroundColor: cell ? color : 'white', borderRadius: 1 }}
-            />
+            <div key={`${ri}-${ci}`} style={{ backgroundColor: cell ? color : 'white', borderRadius: 1 }} />
           ))
         )}
       </div>
@@ -69,23 +54,10 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
   );
 }
 
-// ─── Custom Mini Calendar Component ───────────────────────────
-function MiniCalendar({
-  selectedDate, onSelect, reservedDates, closedDates
-}: {
-  selectedDate: Date | null;
-  onSelect: (d: Date) => void;
-  reservedDates: Date[];
-  closedDates: Date[];
-}) {
+function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: Date[]; }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const [viewDate, setViewDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
+  const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -94,131 +66,42 @@ function MiniCalendar({
   const daysInPrevMonth = new Date(year, month, 0).getDate();
 
   const cells: Array<{ day: number; currentMonth: boolean; date: Date }> = [];
-  for (let i = firstDayOfMonth - 1; i >= 0; i--) {
-    const d = new Date(year, month - 1, daysInPrevMonth - i);
-    cells.push({ day: daysInPrevMonth - i, currentMonth: false, date: d });
-  }
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push({ day: d, currentMonth: true, date: new Date(year, month, d) });
-  }
+  for (let i = firstDayOfMonth - 1; i >= 0; i--) { const d = new Date(year, month - 1, daysInPrevMonth - i); cells.push({ day: daysInPrevMonth - i, currentMonth: false, date: d }); }
+  for (let d = 1; d <= daysInMonth; d++) { cells.push({ day: d, currentMonth: true, date: new Date(year, month, d) }); }
   const remaining = 42 - cells.length;
-  for (let d = 1; d <= remaining; d++) {
-    cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) });
-  }
+  for (let d = 1; d <= remaining; d++) { cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) }); }
 
-  const isReserved = (date: Date) =>
-    reservedDates.some(rd => {
-      const d = new Date(rd);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime() === date.getTime();
-    });
-
-  const isClosed = (date: Date) =>
-    closedDates.some(cd => {
-      const d = new Date(cd);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime() === date.getTime();
-    });
-
+  const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
+  const isClosed = (date: Date) => closedDates.some(cd => { const d = new Date(cd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
   const isPast = (date: Date) => date < today;
-  const isSelected = (date: Date) =>
-    selectedDate
-      ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })()
-      : false;
+  const isSelected = (date: Date) => selectedDate ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })() : false;
   const isTodayDate = (date: Date) => date.getTime() === today.getTime();
-
-  const prevMonth = () => {
-    const d = new Date(viewDate);
-    d.setMonth(d.getMonth() - 1);
-    setViewDate(d);
-  };
-  const nextMonth = () => {
-    const d = new Date(viewDate);
-    d.setMonth(d.getMonth() + 1);
-    setViewDate(d);
-  };
 
   return (
     <div className="bg-[#111111] rounded-2xl border border-neutral-800/80 p-5 pb-6 shadow-xl select-none">
-      {/* Month Nav */}
       <div className="flex items-center justify-between mb-6 px-2">
-        <button
-          type="button"
-          onClick={prevMonth}
-          className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <span className="text-sm font-semibold text-white">
-          {MONTHS[month]} {year}
-        </span>
-        <button
-          type="button"
-          onClick={nextMonth}
-          className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-        >
-          <ChevronRight size={16} />
-        </button>
+        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1))} className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronLeft size={16} /></button>
+        <span className="text-sm font-semibold text-white">{MONTHS[month]} {year}</span>
+        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1))} className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronRight size={16} /></button>
       </div>
-      {/* Day Headers */}
       <div className="grid grid-cols-7 mb-4">
-        {DAYS_OF_WEEK.map(d => (
-          <div key={d} className="text-center text-[9px] text-neutral-500 font-medium uppercase tracking-widest">
-            {d}
-          </div>
-        ))}
+        {DAYS_OF_WEEK.map(d => <div key={d} className="text-center text-[9px] text-neutral-500 font-medium uppercase tracking-widest">{d}</div>)}
       </div>
-      {/* Day Grid */}
       <div className="grid grid-cols-7 gap-y-3">
         {cells.map(({ day, currentMonth, date }, idx) => {
-          const past = isPast(date);
-          const selected = isSelected(date);
-          const today_ = isTodayDate(date);
-          const reserved = isReserved(date) && currentMonth;
-          const closed = isClosed(date) && currentMonth;
+          const past = isPast(date); const selected = isSelected(date); const today_ = isTodayDate(date);
+          const reserved = isReserved(date) && currentMonth; const closed = isClosed(date) && currentMonth;
           const clickable = currentMonth && !past && !closed;
-          
           return (
             <div key={idx} className="flex justify-center">
-              <button
-                type="button"
-                disabled={!clickable}
-                onClick={() => clickable && onSelect(date)}
-                className={`
-                  relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all
-                  ${!currentMonth ? 'opacity-20 cursor-default' : ''}
-                  ${past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''}
-                  ${closed && !past && currentMonth ? 'opacity-50 cursor-not-allowed text-rose-500' : ''}
-                  ${selected ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5' : ''}
-                  ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400' : ''}
-                  ${!selected && clickable && !today_ ? 'text-neutral-300 hover:bg-neutral-800' : ''}
-                `}
-              >
+              <button type="button" disabled={!clickable} onClick={() => clickable && onSelect(date)} className={`relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all ${!currentMonth ? 'opacity-20 cursor-default' : ''} ${past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''} ${closed && !past && currentMonth ? 'opacity-50 cursor-not-allowed text-rose-500' : ''} ${selected ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5' : ''} ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400' : ''} ${!selected && clickable && !today_ ? 'text-neutral-300 hover:bg-neutral-800' : ''}`}>
                 <span className={selected ? 'font-bold' : 'font-medium'}>{day}</span>
-                {reserved && !selected && !closed && (
-                  <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-amber-500" />
-                )}
-                {selected && (
-                  <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-emerald-500" />
-                )}
+                {reserved && !selected && !closed && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-amber-500" />}
+                {selected && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-emerald-500" />}
               </button>
             </div>
           );
         })}
-      </div>
-      <div className="mt-8 flex flex-wrap items-center gap-4 px-2">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span className="text-[10px] text-neutral-500">Selected</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-          <span className="text-[10px] text-neutral-500">Has reservations</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-          <span className="text-[10px] text-neutral-500">Closed</span>
-        </div>
       </div>
     </div>
   );
@@ -226,35 +109,26 @@ function MiniCalendar({
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
-
-  // Filter live announcements dynamically from database
-  const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
-  const displayAnnouncements = activeAnnouncements.length > 0 
-    ? activeAnnouncements.map((a: any) => a.content) 
-    : ["🎱 Welcome to One Shot Bar & Billiards!"];
+  const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
 
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
 
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
-  
   const [now, setNow] = useState(new Date());
-
   const [activeSection, setActiveSection] = useState<Section>('home');
 
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
-
-  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; referralCode: string } | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '', showPw: false, error: '' });
-  const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', referralCode: '', showPw: false, error: '' });
+  const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '' });
 
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0);
-  const [resTab, setResTab] = useState<'new' | 'my-bookings'>('new');
+  const [resTab, setResTab] = useState<'new' | 'track'>('new');
   const [trackForm, setTrackForm] = useState({ reservationId: '' });
   const [trackedReservations, setTrackedReservations] = useState<any[] | null>(null);
   const [generatedResId, setGeneratedResId] = useState('');
@@ -263,24 +137,50 @@ export function HomePage() {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isLiveMonitorOpen, setIsLiveMonitorOpen] = useState(false);
   
-  const [resForm, setResForm] = useState({
-    name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2,
-  });
-  
-  // Reschedule State
+  const [resForm, setResForm] = useState({ name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2 });
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   const [rescheduleData, setRescheduleData] = useState<{ date: Date | null; timeSlot: string }>({ date: null, timeSlot: '' });
 
   const [confirmingPayment, setConfirmingPayment] = useState(false);
   const [paymentRef, setPaymentRef] = useState('');
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
-
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPercent: number } | null>(null);
   const [promoError, setPromoError] = useState('');
-
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', message: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
+
+  // 🟢 CMS DYNAMIC MAPPING 
+  const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
+  const displayAnnouncements = activeAnnouncements.length > 0 
+    ? activeAnnouncements.map((a: any) => a.content) 
+    : ["🎱 Welcome to One Shot Bar & Billiards! Book your favorite table now!"];
+
+  // Safely parse hero images from the siteConfig
+  let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
+  try {
+    const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
+    if (Array.isArray(parsedImages) && parsedImages.length > 0) {
+      heroSlides = parsedImages.map((url: string) => ({ src: url, alt: 'One Shot Facility View' }));
+    }
+  } catch (e) {}
+
+  const cms = {
+    heroTitle: siteConfig?.heroTitle || 'One Shot',
+    heroSubtitle: siteConfig?.heroSubtitle || 'Bar & Billiards',
+    heroDescription: siteConfig?.heroDescription || 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
+    aboutTitle: siteConfig?.aboutTitle || 'A Passion for the Game',
+    aboutP1: siteConfig?.aboutP1 || 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
+    aboutP2: siteConfig?.aboutP2 || 'Our 10 tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
+    aboutP3: siteConfig?.aboutP3 || 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
+    aboutImage: siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80",
+    address: siteConfig?.address || 'Autobase OAX, San Juan, Cainta, Rizal 1900',
+    phone: siteConfig?.phone || '0917-123-4567 | 0998-765-4321',
+    email: siteConfig?.email || 'oneshot.billiards@gmail.com',
+    facebook: siteConfig?.facebook || '@OneShotBilliards',
+    instagram: siteConfig?.instagram || '@oneshot_billiards',
+    tiktok: siteConfig?.tiktok || '@oneshotbilliards',
+  };
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -291,12 +191,14 @@ export function HomePage() {
   }, [displayAnnouncements.length]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setHeroSlideDir(1);
-      setHeroSlideIdx(prev => (prev + 1) % HERO_SLIDES.length);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    if (heroSlides.length > 0) {
+      const interval = setInterval(() => {
+        setHeroSlideDir(1);
+        setHeroSlideIdx(prev => (prev + 1) % heroSlides.length);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [heroSlides.length]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
@@ -306,13 +208,14 @@ export function HomePage() {
   useEffect(() => {
     if (currentUser) {
       setResForm(f => ({ ...f, name: currentUser.name, email: currentUser.email }));
+      setResTab('track'); // Auto-switch to track tab when logged in
     }
   }, [currentUser]);
 
-  const baseAmount = resForm.duration * HOURLY_RATE;
+  const baseAmount = resForm.duration * (rates?.hourlyRate || HOURLY_RATE);
   const discountAmount = appliedPromo ? Math.floor(baseAmount * appliedPromo.discountPercent / 100) : 0;
   const totalAmount = baseAmount - discountAmount;
-  const downPayment = Math.ceil(totalAmount * DOWN_PAYMENT_RATE);
+  const downPayment = Math.ceil(totalAmount * (rates?.downPaymentPercent ? rates.downPaymentPercent / 100 : DOWN_PAYMENT_RATE));
 
   const handleLoginSubmit = () => {
     if (!loginForm.email || !loginForm.password) {
@@ -320,7 +223,7 @@ export function HomePage() {
       return;
     }
     const name = loginForm.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    setCurrentUser({ name, email: loginForm.email, referralCode: generateReferralCode(name) });
+    setCurrentUser({ name, email: loginForm.email });
     setShowLoginModal(false);
     setLoginForm({ email: '', password: '', showPw: false, error: '' });
   };
@@ -334,10 +237,9 @@ export function HomePage() {
       setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
       return;
     }
-    const myReferralCode = generateReferralCode(registerForm.name);
-    setCurrentUser({ name: registerForm.name, email: registerForm.email, referralCode: myReferralCode });
+    setCurrentUser({ name: registerForm.name, email: registerForm.email });
     setShowRegisterModal(false);
-    setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', referralCode: '', showPw: false, error: '' });
+    setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '' });
   };
 
   const handleApplyPromo = () => {
@@ -384,7 +286,7 @@ export function HomePage() {
   const timeValidation = validateTimeSlot(resForm.timeSlot);
 
   const handleReservationSubmit = () => {
-    if (!resForm.name || !resForm.email || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
+    if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
     setReservationStep(2);
   };
 
@@ -412,7 +314,7 @@ export function HomePage() {
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
         paymentRef: paymentRef,
-        receiptImg: receiptImg, // Mandatory GCash Receipt
+        receiptImg: receiptImg, 
       });
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
@@ -431,22 +333,20 @@ export function HomePage() {
     setPaymentRef('');
     setReceiptImg(null);
     setGeneratedResId('');
-    if (currentUser) setResTab('my-bookings');
+    if (currentUser) setResTab('track');
   };
 
   const handleCancelBooking = (id: string) => {
     if(window.confirm("Are you sure you want to cancel this booking?")) {
        cancelReservation(id, "Cancelled by user");
-       if (!currentUser && trackForm.reservationId) {
-         setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId));
+       if (trackForm.reservationId || currentUser) {
+         setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId || r.email === currentUser?.email));
        }
     }
   };
 
   const handleRescheduleSubmit = (id: string) => {
     if (!rescheduleData.date || !rescheduleData.timeSlot) return;
-    
-    // Quick validation check
     const val = validateTimeSlot(rescheduleData.timeSlot);
     if (val !== 'valid') {
       alert(`Invalid time selected: ${val === 'closed' ? 'Outside of reservation hours' : 'Walk-in only happy hour'}`);
@@ -457,12 +357,7 @@ export function HomePage() {
     const [hours, minutes] = rescheduleData.timeSlot.split(':').map(Number);
     reservationDate.setHours(hours, minutes, 0, 0);
 
-    updateReservation(id, {
-      date: reservationDate,
-      timeSlot: rescheduleData.timeSlot,
-      status: 'pending' // Setting back to pending requires staff re-approval
-    });
-    
+    updateReservation(id, { date: reservationDate, timeSlot: rescheduleData.timeSlot, status: 'pending' });
     setReschedulingId(null);
     alert('Reservation successfully rescheduled! Staff will review and confirm your new time.');
   };
@@ -471,24 +366,13 @@ export function HomePage() {
     if (e) e.preventDefault();
     if (!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || !feedbackForm.message) return;
     
-    addFeedback({
-      customerName: feedbackForm.name,
-      contactInfo: feedbackForm.contact,
-      rating: 0, 
-      feedbackType: feedbackForm.type as any,
-      comment: feedbackForm.message,
-      tags: [],
-    });
-    
+    addFeedback({ customerName: feedbackForm.name, contactInfo: feedbackForm.contact, rating: 0, feedbackType: feedbackForm.type as any, comment: feedbackForm.message, tags: [] });
     setFeedbackSent(true);
-    setTimeout(() => {
-      setFeedbackSent(false);
-      setFeedbackForm({ name: '', contact: '', type: '', message: '' });
-    }, 3000);
+    setTimeout(() => { setFeedbackSent(false); setFeedbackForm({ name: '', contact: '', type: '', message: '' }); }, 3000);
   };
 
-  const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + HERO_SLIDES.length) % HERO_SLIDES.length); };
-  const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % HERO_SLIDES.length); };
+  const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
+  const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
 
   const calculateAIWaitTime = () => {
     const waitingCustomers = queue.filter((q: any) => q.status === 'waiting').length;
@@ -498,7 +382,7 @@ export function HomePage() {
     if (activeTables.length === 0) return "Available immediately";
 
     const remainingTimes = activeTables.map((t: any) => {
-      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0); // Handle null duration
+      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0); 
       return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
     }).sort((a: any, b: any) => a - b); 
 
@@ -512,11 +396,10 @@ export function HomePage() {
   };
 
   const publicEvents = events.filter((e: any) => e.type !== 'Holiday');
-  const safeEventDates = publicEvents.map((e: any) => new Date(e.date));
   const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
   const reservedDates = reservations.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date));
 
-  const allNavSections: { id: Section; label: string; requiresAuth?: boolean }[] = [
+  const allNavSections: { id: Section; label: string }[] = [
     { id: 'home', label: 'Home' },
     { id: 'reservations', label: 'Reservations' },
     { id: 'rates', label: 'Rates' },
@@ -524,7 +407,6 @@ export function HomePage() {
     { id: 'about', label: 'About Us' },
     { id: 'feedback', label: 'Feedback' },
   ];
-  const navSections = allNavSections.filter(s => !s.requiresAuth || currentUser !== null);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col">
@@ -563,8 +445,8 @@ export function HomePage() {
                 </motion.p>
               </AnimatePresence>
             </div>
-            <div className="flex gap-1 flex-shrink-0">
-              {displayAnnouncements.map((_: any, i: number) => (
+            <div className="flex gap-1 flex-shrink-0 hidden sm:flex">
+              {displayAnnouncements.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => { setAnnouncementDir(i > announcementIdx ? 1 : -1); setAnnouncementIdx(i); }}
@@ -582,7 +464,7 @@ export function HomePage() {
                 <div className="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[9px] font-black text-white">{currentUser.name[0]}</div>
                 <span className="text-xs text-emerald-300 font-medium hidden sm:block">{currentUser.name}</span>
               </button>
-              <button onClick={() => setCurrentUser(null)} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-2 py-1.5 transition-colors">Logout</button>
+              <button onClick={() => { setCurrentUser(null); setTrackedReservations(null); }} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-2 py-1.5 transition-colors">Logout</button>
             </div>
           ) : (
             <>
@@ -599,7 +481,7 @@ export function HomePage() {
 
       {/* ── Section Navigation ── */}
       <nav className="fixed top-16 left-0 right-0 z-40 bg-neutral-900/95 backdrop-blur-sm border-b border-neutral-800/60 flex items-center justify-center gap-1 px-4 overflow-x-auto">
-        {navSections.map(({ id, label }) => (
+        {allNavSections.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setActiveSection(id)}
@@ -633,7 +515,7 @@ export function HomePage() {
                     transition={{ duration: 0.9 }}
                     className="absolute inset-0"
                   >
-                    <img src={HERO_SLIDES[heroSlideIdx].src} alt={HERO_SLIDES[heroSlideIdx].alt} className="w-full h-full object-cover" />
+                    <ImageWithFallback src={heroSlides[heroSlideIdx].src} alt={heroSlides[heroSlideIdx].alt} className="w-full h-full object-cover" />
                   </motion.div>
                 </AnimatePresence>
                 <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/55 to-transparent" />
@@ -643,16 +525,16 @@ export function HomePage() {
 
                 <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 px-6 text-center z-10">
                   <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center">
-                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">Welcome to</p>
-                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight">One Shot</h1>
-                    <p className="text-emerald-300 text-xl font-light mb-5">Bar & Billiards</p>
-                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed">Your premier billiard destination at Autobase OAX, Cainta, Rizal. 10 world-class tables, refreshing drinks, and an unbeatable atmosphere.</p>
+                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">{cms.heroTitle}</p>
+                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight">{cms.heroTitle}</h1>
+                    <p className="text-emerald-300 text-xl font-light mb-5">{cms.heroSubtitle}</p>
+                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed">{cms.heroDescription}</p>
                     <div className="flex flex-wrap justify-center gap-3 mb-6">
                       <button onClick={() => setActiveSection('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-900/40 hover:shadow-emerald-800/60"><Calendar size={15} /> Book a Table</button>
                       <button onClick={() => setActiveSection('about')} className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 px-6 py-3 rounded-full text-sm font-semibold transition-all border border-neutral-700"><Info size={15} /> Learn More</button>
                     </div>
                     <div className="flex gap-2">
-                      {HERO_SLIDES.map((_, i) => (
+                      {heroSlides.map((_, i) => (
                         <button key={i} onClick={() => { setHeroSlideDir(i > heroSlideIdx ? 1 : -1); setHeroSlideIdx(i); }} className={`h-1.5 rounded-full transition-all ${i === heroSlideIdx ? 'bg-emerald-400 w-5' : 'bg-white/35 w-1.5 hover:bg-white/60'}`} />
                       ))}
                     </div>
@@ -694,16 +576,6 @@ export function HomePage() {
                   ))}
                 </div>
               </div>
-
-              <div className="relative h-72 overflow-hidden">
-                <ImageWithFallback src="https://images.unsplash.com/photo-1741397112651-ee14e18f6b41?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiaWxsaWFyZHMlMjBoYWxsJTIwaW50ZXJpb3IlMjBuZW9uJTIwbGlnaHRzfGVufDF8fHx8MTc3NDk1MTMxNXww&ixlib=rb-4.1.0&q=80&w=1080" alt="One Shot Billiards Hall" className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-neutral-950/60 flex items-center justify-center">
-                  <div className="text-center">
-                    <p className="text-white text-2xl font-black mb-3">Ready for a Game?</p>
-                    <button onClick={() => setActiveSection('reservations')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-full text-sm font-semibold transition-all inline-flex items-center gap-2">Reserve Now <ArrowRight size={14} /></button>
-                  </div>
-                </div>
-              </div>
             </motion.div>
           )}
 
@@ -711,15 +583,20 @@ export function HomePage() {
           {activeSection === 'reservations' && (
             <motion.div key="reservations" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-5xl mx-auto px-6 py-10">
               <div className="text-center mb-8">
-                <h2 className="text-3xl font-black text-white mb-2">Reservations</h2>
-                <p className="text-neutral-400 text-sm">Secure your spot or view your booking history.</p>
+                <h2 className="text-3xl font-black text-white mb-2">{currentUser ? `Welcome back, ${currentUser.name.split(' ')[0]}!` : 'Reservations'}</h2>
+                <p className="text-neutral-400 text-sm">Secure your spot or track your booking.</p>
               </div>
 
               <div className="flex gap-1 bg-neutral-900 border border-neutral-800 rounded-xl p-1 mb-8 max-w-sm mx-auto">
                 <button onClick={() => setResTab('new')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${resTab === 'new' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'}`}>
                   <Calendar size={14} /> New Booking
                 </button>
-                <button onClick={() => setResTab('my-bookings')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${resTab === 'my-bookings' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                <button onClick={() => {
+                  setResTab('track');
+                  if (currentUser) {
+                    setTrackedReservations(reservations.filter((r: any) => r.email === currentUser.email).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+                  }
+                }} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${resTab === 'track' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'}`}>
                   {currentUser ? <BookOpen size={14} /> : <Search size={14} />} 
                   {currentUser ? 'My Bookings' : 'Track Booking'}
                 </button>
@@ -737,11 +614,7 @@ export function HomePage() {
                       closedDates={safeClosedDates}
                     />
                     {selectedDate && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mt-4 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2"
-                      >
+                      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
                         <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
                         <span className="text-xs text-emerald-300">
                           Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
@@ -765,7 +638,7 @@ export function HomePage() {
                             <input type="text" value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
                           </div>
                           <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Email Address <span className="text-rose-500">*</span></label>
+                            <label className="block text-xs text-neutral-400 mb-1.5">Email Address {currentUser ? '' : <span className="text-neutral-600">(Optional)</span>}</label>
                             <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
                           </div>
                           <div>
@@ -881,7 +754,7 @@ export function HomePage() {
 
                           <button 
                             onClick={handleReservationSubmit} 
-                            disabled={!resForm.name || !resForm.email || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid'} 
+                            disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid'} 
                             className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
                           >
                             Proceed to Payment <ArrowRight size={14} />
@@ -893,164 +766,90 @@ export function HomePage() {
                 </div>
               )}
 
-              {resTab === 'my-bookings' && (
+              {/* Guest Tracking View */}
+              {resTab === 'track' && (
                 <div className="max-w-3xl mx-auto">
                   {!currentUser && !trackedReservations ? (
                     <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 max-w-md mx-auto">
                       <div className="text-center mb-6">
                         <Search size={32} className="text-emerald-500 mx-auto mb-3" />
                         <h3 className="text-lg font-bold text-white mb-1">Track Reservation</h3>
-                        <p className="text-xs text-neutral-400">Enter your details to find your booking, or <button onClick={() => setShowLoginModal(true)} className="text-emerald-400 hover:underline font-semibold">log in</button>.</p>
+                        <p className="text-xs text-neutral-400">Enter your 6-character Reservation ID below or <button onClick={() => setShowLoginModal(true)} className="text-emerald-400 hover:underline font-semibold">log in</button>.</p>
                       </div>
                       <form onSubmit={(e) => {
                         e.preventDefault();
-                        const found = reservations.filter((r: any) => 
-                          r.id.toUpperCase() === trackForm.reservationId.toUpperCase()
-                        ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        const found = reservations.filter((r: any) => r.id.toUpperCase() === trackForm.reservationId.toUpperCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                         setTrackedReservations(found);
                       }} className="space-y-4">
                         <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-rose-500">*</span></label>
-                          <input type="text" required value={trackForm.reservationId} onChange={e => setTrackForm({ reservationId: e.target.value.toUpperCase() })} placeholder="e.g. TEST" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors font-mono tracking-widest uppercase" />
+                          <input type="text" required value={trackForm.reservationId} onChange={e => setTrackForm({ reservationId: e.target.value.toUpperCase() })} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-center text-lg text-neutral-100 focus:border-emerald-500 font-mono tracking-[0.2em] uppercase" />
                         </div>
-                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">
-                          Find Booking
-                        </button>
+                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">Find Booking</button>
                       </form>
                     </div>
                   ) : (() => {
+                    const statusColors: Record<string, string> = { pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25', confirmed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', 'checked-in': 'bg-sky-500/15 text-sky-400 border-sky-500/25', completed: 'bg-neutral-700/50 text-neutral-400 border-neutral-700', cancelled: 'bg-rose-500/15 text-rose-400 border-rose-500/25' };
                     const myBookings = currentUser 
                       ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                       : (trackedReservations || []);
 
-                    const statusColors: Record<string, string> = {
-                      pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
-                      confirmed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-                      'checked-in': 'bg-sky-500/15 text-sky-400 border-sky-500/25',
-                      completed: 'bg-neutral-700/50 text-neutral-400 border-neutral-700',
-                      cancelled: 'bg-rose-500/15 text-rose-400 border-rose-500/25',
-                    };
-
                     if (myBookings.length === 0) {
                       return (
                         <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-12 text-center">
-                          <BookOpen size={36} className="text-neutral-700 mx-auto mb-3" />
-                          <p className="text-neutral-400 font-semibold mb-1">No bookings found</p>
-                          <p className="text-neutral-600 text-sm mb-5">We couldn't find any reservations matching those details.</p>
-                          <div className="flex justify-center gap-3">
-                            {!currentUser && (
-                              <button onClick={() => setTrackedReservations(null)} className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all border border-neutral-700">
-                                Try Again
-                              </button>
-                            )}
-                            <button
-                              onClick={() => setResTab('new')}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all inline-flex items-center gap-2"
-                            >
-                              <Calendar size={14} /> Book Now
-                            </button>
-                          </div>
+                          <AlertTriangle size={36} className="text-rose-500 mx-auto mb-3" />
+                          <p className="text-neutral-200 font-semibold mb-1">No Bookings Found</p>
+                          <p className="text-neutral-500 text-sm mb-5">We couldn't find any reservations matching those details.</p>
+                          <button onClick={() => setTrackedReservations(null)} className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all border border-neutral-700">Try Again</button>
                         </div>
                       );
                     }
 
                     return (
                       <div className="space-y-3">
-                        {!currentUser && trackedReservations && (
-                          <div className="flex justify-between items-center mb-2 px-1">
-                            <p className="text-xs text-neutral-400">Showing results for ID: <strong className="text-neutral-200">{trackForm.reservationId}</strong></p>
-                            <button onClick={() => setTrackedReservations(null)} className="text-xs text-emerald-400 hover:underline">New Search</button>
-                          </div>
-                        )}
+                        <div className="flex justify-between items-center mb-2 px-1">
+                          <p className="text-xs text-neutral-400">Showing results for: <strong className="text-neutral-200">{currentUser ? currentUser.email : trackForm.reservationId}</strong></p>
+                          {!currentUser && <button onClick={() => setTrackedReservations(null)} className="text-xs text-emerald-400 hover:underline">New Search</button>}
+                        </div>
                         {myBookings.map((r: any) => (
                           <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4">
                             <div className="flex flex-wrap items-start justify-between gap-4">
                               <div className="flex-1 min-w-0 space-y-1">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="text-sm font-semibold text-neutral-200">
-                                    {new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                  </p>
-                                  <span className="text-neutral-600">·</span>
-                                  <p className="text-sm text-neutral-400">{r.timeSlot}</p>
-                                  <span className="text-neutral-600">·</span>
-                                  <p className="text-sm text-neutral-400">{r.durationHours}h</p>
+                                  <p className="text-sm font-semibold text-neutral-200">{new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                                  <span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.timeSlot}</p>
+                                  <span className="text-neutral-600">·</span><p className="text-sm text-neutral-400">{r.durationHours}h</p>
                                 </div>
-                                <div className="flex items-center gap-3 text-xs text-neutral-500 flex-wrap">
-                                  <span>{r.partySize} person{r.partySize > 1 ? 's' : ''}</span>
-                                  {r.promoCode && (
-                                    <span className="flex items-center gap-1 text-emerald-500">
-                                      <Tag size={9} /> {r.promoCode}
-                                    </span>
-                                  )}
-                                </div>
+                                <div className="flex items-center gap-3 text-xs text-neutral-500 flex-wrap"><span>{r.partySize} person{r.partySize > 1 ? 's' : ''}</span></div>
                               </div>
                               <div className="flex flex-col items-end gap-1.5">
-                                <div className="text-right">
-                                  <p className="text-sm font-bold text-white">₱{r.totalAmount.toLocaleString()}</p>
-                                  <p className="text-[10px] text-neutral-600">Total</p>
-                                </div>
-                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>
-                                  {r.status.replace('-', ' ')}
-                                </span>
+                                <div className="text-right"><p className="text-sm font-bold text-white">₱{r.totalAmount.toLocaleString()}</p><p className="text-[10px] text-neutral-600">Total</p></div>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusColors[r.status] || statusColors.pending}`}>{r.status.replace('-', ' ')}</span>
                               </div>
                             </div>
                             
-                            {/* Actions Panel */}
                             {(r.status === 'pending' || r.status === 'confirmed') && (
                               <div className="border-t border-neutral-800/60 pt-3 flex justify-end gap-2">
-                                <button 
-                                  onClick={() => {
-                                    setReschedulingId(r.id);
-                                    setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot });
-                                  }} 
-                                  className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors"
-                                >
-                                  Reschedule
-                                </button>
-                                <button 
-                                  onClick={() => handleCancelBooking(r.id)} 
-                                  className="text-[10px] font-semibold text-rose-400 hover:text-white bg-rose-950/30 border border-rose-900/50 hover:bg-rose-900/50 px-3 py-1.5 rounded transition-colors"
-                                >
-                                  Cancel Booking
-                                </button>
+                                <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors">Reschedule</button>
+                                <button onClick={() => handleCancelBooking(r.id)} className="text-[10px] font-semibold text-rose-400 hover:text-white bg-rose-950/30 border border-rose-900/50 hover:bg-rose-900/50 px-3 py-1.5 rounded transition-colors">Cancel Booking</button>
                               </div>
                             )}
 
-                            {/* Reschedule Dropdown */}
                             {reschedulingId === r.id && (
-                              <div className="mt-2 p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                              <div className="mt-2 p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-4">
                                 <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Select New Date & Time</h4>
-                                
-                                <MiniCalendar
-                                  selectedDate={rescheduleData.date}
-                                  onSelect={(d) => setRescheduleData(prev => ({ ...prev, date: d }))}
-                                  reservedDates={reservedDates}
-                                  closedDates={safeClosedDates}
-                                />
-                                
+                                <MiniCalendar selectedDate={rescheduleData.date} onSelect={(d) => setRescheduleData(prev => ({ ...prev, date: d }))} reservedDates={reservedDates} closedDates={safeClosedDates} />
                                 <div>
                                    <label className="block text-xs text-neutral-400 mb-1.5">New Time</label>
-                                   <input
-                                     type="time"
-                                     value={rescheduleData.timeSlot}
-                                     onChange={e => setRescheduleData(prev => ({ ...prev, timeSlot: e.target.value }))}
-                                     className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors"
-                                   />
+                                   <input type="time" value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => ({ ...prev, timeSlot: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
                                 </div>
                                 <div className="flex gap-2 justify-end pt-2 border-t border-neutral-800/60">
                                    <button onClick={() => setReschedulingId(null)} className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors">Cancel</button>
-                                   <button onClick={() => handleRescheduleSubmit(r.id)} disabled={!rescheduleData.date || !rescheduleData.timeSlot} className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white rounded-lg transition-colors shadow-md shadow-emerald-900/20">Confirm Reschedule</button>
+                                   <button onClick={() => handleRescheduleSubmit(r.id)} disabled={!rescheduleData.date || !rescheduleData.timeSlot} className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 text-white rounded-lg transition-colors">Confirm Reschedule</button>
                                 </div>
                               </div>
                             )}
                           </div>
                         ))}
-                        <button
-                          onClick={() => setResTab('new')}
-                          className="w-full py-2.5 mt-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
-                        >
-                          <Calendar size={14} /> Make Another Booking
-                        </button>
                       </div>
                     );
                   })()}
@@ -1157,38 +956,44 @@ export function HomePage() {
           {/* ════ ABOUT SECTION ════ */}
           {activeSection === 'about' && (
             <motion.div key="about" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-5xl mx-auto px-6 py-10">
-              <div className="text-center mb-10"><h2 className="text-3xl font-black text-white mb-2">About One Shot</h2><p className="text-neutral-400 text-sm">The story behind your favorite billiards destination</p></div>
+              <div className="text-center mb-10"><h2 className="text-3xl font-black text-white mb-2">{cms.aboutTitle}</h2><p className="text-neutral-400 text-sm">The story behind your favorite billiards destination</p></div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-12">
                 <div>
                   <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold mb-3">Our Story</p><h3 className="text-2xl font-bold text-white mb-4">A Passion for the Game</h3>
-                  <p className="text-neutral-400 text-sm leading-relaxed mb-4">One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal. What started as a small hobby shop has grown into the premier billiards destination in Eastern Rizal.</p>
-                  <p className="text-neutral-400 text-sm leading-relaxed mb-4">Our 10 tournament-grade tables are maintained with precision, and our staff are passionate players themselves who understand what makes a great game environment.</p>
-                  <p className="text-neutral-400 text-sm leading-relaxed">Whether you're a seasoned champion or picking up a cue for the first time, One Shot welcomes you. Come in, relax, and take your shot!</p>
+                  <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP1}</p>
+                  <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
+                  <p className="text-neutral-400 text-sm leading-relaxed">{cms.aboutP3}</p>
                 </div>
-                <div className="rounded-2xl overflow-hidden h-72"><ImageWithFallback src="https://images.unsplash.com/photo-1761335633357-04fab36b333f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiYXIlMjBsb3VuZ2UlMjBkYXJrJTIwYW1iaWFuY2V8ZW58MXx8fHwxNzc0OTUxMzE1fDA&ixlib=rb-4.1.0&q=80&w=1080" alt="One Shot Bar & Billiards" className="w-full h-full object-cover" /></div>
+                <div className="rounded-2xl overflow-hidden h-72">
+                   <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover" />
+                </div>
               </div>
               <div className="mb-12">
                 <h3 className="text-center text-xl font-bold text-white mb-6">Our Location</h3>
                 <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-64 flex items-center justify-center relative">
                   <div className="absolute inset-0 bg-neutral-800/50" />
-                  <div className="relative z-10 text-center"><MapPin size={32} className="text-emerald-500 mx-auto mb-2" /><p className="text-white font-semibold text-sm">One Shot Bar & Billiards</p><p className="text-neutral-400 text-xs">Autobase OAX, San Juan, Cainta, Rizal 1900</p><a href="https://maps.google.com" target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-xs bg-emerald-600 text-white px-4 py-2 rounded-full hover:bg-emerald-500 transition-colors">Open in Google Maps</a></div>
+                  <div className="relative z-10 text-center"><MapPin size={32} className="text-emerald-500 mx-auto mb-2" /><p className="text-white font-semibold text-sm">One Shot Bar & Billiards</p><p className="text-neutral-400 text-xs">{cms.address}</p><a href="https://maps.google.com" target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-xs bg-emerald-600 text-white px-4 py-2 rounded-full hover:bg-emerald-500 transition-colors">Open in Google Maps</a></div>
                 </div>
               </div>
               <div className="border-t border-neutral-800 pt-10">
                 <div className="text-center mb-8"><h3 className="text-xl font-bold text-white mb-1">Contact Us</h3><p className="text-neutral-400 text-sm">We'd love to hear from you. Get in touch!</p></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-4">
-                    {[
-                      { icon: MapPin, label: 'Address', value: 'Autobase OAX\nSan Juan, Cainta, Rizal 1900', color: 'emerald' },
-                      { icon: Phone, label: 'Phone / Viber', value: '0917-123-4567\n0998-765-4321', color: 'sky' },
-                      { icon: Mail, label: 'Email', value: 'oneshot.billiards@gmail.com', color: 'violet' },
-                      { icon: Clock, label: 'Operating Hours', value: 'Mon – Sat: 12:00 PM – 3:00 AM\nSunday: 5:00 PM – 3:00 AM', color: 'amber' },
-                    ].map(({ icon: Icon, label, value, color }) => (
-                      <div key={label} className={`bg-neutral-900 border border-neutral-800 hover:border-${color}-600/30 rounded-xl p-5 transition-all flex gap-4`}><div className={`w-10 h-10 rounded-xl bg-${color}-600/10 border border-${color}-600/20 flex items-center justify-center flex-shrink-0`}><Icon size={16} className={`text-${color}-400`} /></div><div><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">{label}</p>{value.split('\n').map((line, i) => <p key={i} className="text-sm text-neutral-200">{line}</p>)}</div></div>
-                    ))}
+                    <div className="bg-neutral-900 border border-neutral-800 hover:border-emerald-600/30 rounded-xl p-5 transition-all flex gap-4">
+                       <div className="w-10 h-10 rounded-xl bg-emerald-600/10 border border-emerald-600/20 flex items-center justify-center flex-shrink-0"><MapPin size={16} className="text-emerald-400" /></div>
+                       <div><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Address</p><p className="text-sm text-neutral-200 whitespace-pre-line">{cms.address}</p></div>
+                    </div>
+                    <div className="bg-neutral-900 border border-neutral-800 hover:border-sky-600/30 rounded-xl p-5 transition-all flex gap-4">
+                       <div className="w-10 h-10 rounded-xl bg-sky-600/10 border border-sky-600/20 flex items-center justify-center flex-shrink-0"><Phone size={16} className="text-sky-400" /></div>
+                       <div><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Phone / Viber</p><p className="text-sm text-neutral-200 whitespace-pre-line">{cms.phone}</p></div>
+                    </div>
+                    <div className="bg-neutral-900 border border-neutral-800 hover:border-violet-600/30 rounded-xl p-5 transition-all flex gap-4">
+                       <div className="w-10 h-10 rounded-xl bg-violet-600/10 border border-violet-600/20 flex items-center justify-center flex-shrink-0"><Mail size={16} className="text-violet-400" /></div>
+                       <div><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Email</p><p className="text-sm text-neutral-200">{cms.email}</p></div>
+                    </div>
                   </div>
                   <div className="space-y-4">
-                    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-3">Follow Us</p><div className="grid grid-cols-2 gap-3">{[{ platform: 'Facebook', handle: '@OneShotBilliards', icon: '📘' }, { platform: 'Instagram', handle: '@oneshot_billiards', icon: '📸' }, { platform: 'TikTok', handle: '@oneshotbilliards', icon: '🎵' }, { platform: 'YouTube', handle: 'One Shot Billiards', icon: '📺' }].map(({ platform, handle, icon }) => (<div key={platform} className="flex items-center gap-2.5 bg-neutral-800/60 rounded-lg p-3"><span className="text-lg">{icon}</span><div><p className="text-[10px] text-neutral-500">{platform}</p><p className="text-xs text-neutral-300">{handle}</p></div></div>))}</div></div>
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-3">Follow Us</p><div className="grid grid-cols-2 gap-3">{[{ platform: 'Facebook', handle: cms.facebook, icon: '📘' }, { platform: 'Instagram', handle: cms.instagram, icon: '📸' }, { platform: 'TikTok', handle: cms.tiktok, icon: '🎵' }, { platform: 'YouTube', handle: 'One Shot Billiards', icon: '📺' }].map(({ platform, handle, icon }) => (<div key={platform} className="flex items-center gap-2.5 bg-neutral-800/60 rounded-lg p-3"><span className="text-lg">{icon}</span><div><p className="text-[10px] text-neutral-500">{platform}</p><p className="text-xs text-neutral-300 truncate">{handle}</p></div></div>))}</div></div>
                   </div>
                 </div>
               </div>
@@ -1219,9 +1024,13 @@ export function HomePage() {
         </AnimatePresence>
 
         <footer className="bg-neutral-900 border-t border-neutral-800 mt-10 py-8 px-6 text-center">
-          <div className="max-w-4xl mx-auto">
+          <div className="max-w-4xl mx-auto space-y-4">
             <div className="flex items-center justify-center gap-2.5 mb-3"><img src={logoImg} alt="One Shot Bar & Billiards" className="h-8 w-8 object-contain" /><span className="text-white font-bold text-sm">One Shot Bar & Billiards</span></div>
-            <p className="text-neutral-600 text-xs mb-2">Autobase OAX, Cainta, Rizal · Mon–Sat 12PM–3AM · Sun 5PM–3AM</p>
+            <p className="text-neutral-600 text-xs">Autobase OAX, Cainta, Rizal · Mon–Sat 12PM–3AM · Sun 5PM–3AM</p>
+            <div className="flex justify-center gap-4 border-t border-neutral-800/60 pt-4 mt-4">
+              <button onClick={() => { adminLogin('admin', 'admin123'); navigate('/admin'); }} className="text-[10px] text-neutral-600 hover:text-amber-400 transition-colors">Admin Login</button>
+              <button onClick={() => { staffLogin('staff', 'staff123'); navigate('/staff'); }} className="text-[10px] text-neutral-600 hover:text-emerald-400 transition-colors">Staff Login</button>
+            </div>
             <p className="text-neutral-700 text-[10px]">© 2026 One Shot Bar & Billiards. All rights reserved.</p>
           </div>
         </footer>
@@ -1240,10 +1049,6 @@ export function HomePage() {
               </div>
               <button onClick={handleLoginSubmit} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold">Login</button>
               <p className="text-center text-xs text-neutral-600 mt-4">Don't have an account? <button onClick={() => { setShowLoginModal(false); setShowRegisterModal(true); }} className="text-emerald-400 font-semibold">Register</button></p>
-              <div className="mt-6 pt-4 border-t border-neutral-800 flex justify-center gap-4">
-                <button onClick={() => { adminLogin('admin', 'admin123'); navigate('/admin'); }} className="text-xs text-neutral-400 hover:text-amber-400">Admin Prototype Login</button>
-                <button onClick={() => { staffLogin('staff', 'staff123'); navigate('/staff'); }} className="text-xs text-neutral-400 hover:text-emerald-400">Staff Prototype Login</button>
-              </div>
             </motion.div>
           </motion.div>
         )}
@@ -1280,7 +1085,6 @@ export function HomePage() {
                   <p className="text-xs text-neutral-500 mt-1">Remaining balance <span className="text-neutral-300 font-semibold">₱{totalAmount - downPayment}.00</span> must be paid on arrival</p>
                 </div>
                 
-                {/* File Upload Requirement */}
                 <div className="flex flex-col items-center gap-4">
                   <QRDisplay pattern={QR_GCASH} color="#1d4ed8" />
                   <div className="text-center"><p className="text-sm font-bold text-blue-400">GCash</p><p className="text-xs text-neutral-300 font-semibold">ONE SHOT BAR & BILLIARDS</p><p className="text-xs text-neutral-500">+63 917-123-4567</p></div>
@@ -1422,41 +1226,15 @@ export function HomePage() {
                     </div>
                     <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
                   </div>
-
-                  <p className="text-[9px] text-amber-500/80 font-semibold mb-2 flex items-center gap-1">
-                    <Info size={9} /> Reservations skip this queue
-                  </p>
-                  {queue.filter((q: any) => q.status === 'waiting').length === 0 ? (
-                    <div className="text-center py-4 border border-dashed border-neutral-800 rounded-lg">
-                      <p className="text-[10px] text-neutral-600">No one waiting</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {queue.filter((q: any) => q.status === 'waiting').slice(0, 5).map((q: any, i: number) => (
-                        <div key={q.id} className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-2">
-                          <span className="text-[9px] font-black text-neutral-500 w-3">{i + 1}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[10px] text-neutral-300 truncate">{q.customerName || 'Walk-in'}</p>
-                            <p className="text-[9px] text-neutral-600">{q.partySize} pax · {new Date(q.arrivalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                          </div>
-                        </div>
-                      ))}
-                      {queue.filter((q: any) => q.status === 'waiting').length > 5 && (
-                        <p className="text-[10px] text-neutral-600 text-center">+{queue.filter((q: any) => q.status === 'waiting').length - 5} more</p>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-
-        <button onClick={() => setIsLiveMonitorOpen(p => !p)} className="w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all bg-emerald-600 hover:bg-emerald-500 text-white">
-          {isLiveMonitorOpen ? <X size={18} /> : <Users size={18} />}
+        <button onClick={() => setIsLiveMonitorOpen(!isLiveMonitorOpen)} className="w-12 h-12 rounded-full bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 flex items-center justify-center text-white shadow-xl transition-all">
+          {isLiveMonitorOpen ? <X size={20} /> : <Users size={20} />}
         </button>
       </div>
-
     </div>
   );
 }

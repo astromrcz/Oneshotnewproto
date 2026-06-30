@@ -1,18 +1,25 @@
 import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { FileText, Save, CheckCircle, Info, AlertCircle, X, Calendar } from 'lucide-react';
+import { Save, CheckCircle, Info, AlertCircle, X, Calendar } from 'lucide-react';
 
 export function AdminReservationTerms() {
-  const { reservationTerms, updateReservationTerms } = useAppContext();
-  const [form, setForm] = useState({ ...reservationTerms });
+  const { reservationTerms, updateReservationTerms, rates, updateRates } = useAppContext();
+  
+  // Separate the form states to match the database context correctly
+  const [termsForm, setTermsForm] = useState({ ...reservationTerms });
+  const [ratesForm, setRatesForm] = useState({ 
+    reservationStartTime: rates.reservationStartTime, 
+    reservationEndTime: rates.reservationEndTime 
+  });
+  
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'rules' | 'policy' | 'tnc'>('rules');
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // 🟢 ADDED: Sync form state when database data arrives
   useEffect(() => {
-    setForm({ ...reservationTerms });
-  }, [reservationTerms]);
+    setTermsForm({ ...reservationTerms });
+    setRatesForm({ reservationStartTime: rates.reservationStartTime, reservationEndTime: rates.reservationEndTime });
+  }, [reservationTerms, rates]);
 
   const handleSaveClick = (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,26 +27,14 @@ export function AdminReservationTerms() {
   };
 
   const handleConfirmSave = () => {
-    updateReservationTerms(form);
+    // Save both contexts properly
+    updateReservationTerms(termsForm);
+    updateRates({ reservationStartTime: ratesForm.reservationStartTime, reservationEndTime: ratesForm.reservationEndTime });
+    
     setSaved(true);
     setShowConfirm(false);
     setTimeout(() => setSaved(false), 2500);
   };
-
-  // Reusable TimeField component for the reservation hours
-  const TimeField = ({ label, field, hint }: { label: string; field: string; hint?: string }) => (
-    <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-      <label className="block text-xs text-neutral-400 font-medium uppercase tracking-wider mb-3">{label}</label>
-      <input
-        type="time" 
-        value={(form as any)[field] || '12:00'}
-        onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors"
-      />
-      {hint && <p className="text-[10px] text-neutral-600 mt-2">{hint}</p>}
-      <p className="text-lg font-black text-amber-400 mt-2">{(form as any)[field] || '12:00'}</p>
-    </div>
-  );
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -75,14 +70,20 @@ export function AdminReservationTerms() {
         {activeTab === 'rules' && (
           <div className="space-y-4">
             
-            {/* Online Reservation Hours */}
+            {/* Online Reservation Hours (Connected to RatesContext) */}
             <div>
               <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3 flex items-center gap-2">
                 <Calendar size={12} className="text-amber-500" /> Online Reservation Hours
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <TimeField label="Start Accepting At" field="reservationStartTime" hint="Earliest time a user can book" />
-                <TimeField label="Stop Accepting At" field="reservationEndTime" hint="Cut-off time for bookings" />
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                  <label className="block text-xs text-neutral-400 font-medium uppercase tracking-wider mb-3">Start Accepting At</label>
+                  <input type="time" value={ratesForm.reservationStartTime} onChange={e => setRatesForm(f => ({ ...f, reservationStartTime: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50" />
+                </div>
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                  <label className="block text-xs text-neutral-400 font-medium uppercase tracking-wider mb-3">Stop Accepting At</label>
+                  <input type="time" value={ratesForm.reservationEndTime} onChange={e => setRatesForm(f => ({ ...f, reservationEndTime: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50" />
+                </div>
               </div>
             </div>
 
@@ -98,10 +99,10 @@ export function AdminReservationTerms() {
                   <input 
                     type="text" 
                     inputMode="numeric"
-                    value={form[f.field] === 0 ? '' : form[f.field]}
+                    value={termsForm[f.field] === 0 ? '' : termsForm[f.field]}
                     onChange={e => {
                       const val = e.target.value.replace(/[^0-9]/g, '');
-                      setForm(prev => ({ ...prev, [f.field]: val ? parseInt(val, 10) : 0 }));
+                      setTermsForm(prev => ({ ...prev, [f.field]: val ? parseInt(val, 10) : 0 }));
                     }}
                     placeholder="0"
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" 
@@ -117,36 +118,17 @@ export function AdminReservationTerms() {
               <input 
                 type="text" 
                 inputMode="numeric"
-                value={form.cancellationHours === 0 ? '' : form.cancellationHours}
+                value={termsForm.cancellationHours === 0 ? '' : termsForm.cancellationHours}
                 onChange={e => {
                   const val = e.target.value.replace(/[^0-9]/g, '');
-                  setForm(prev => ({ ...prev, cancellationHours: val ? parseInt(val, 10) : 0 }));
+                  setTermsForm(prev => ({ ...prev, cancellationHours: val ? parseInt(val, 10) : 0 }));
                 }}
                 placeholder="0"
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" 
               />
               <p className="text-[11px] text-neutral-600 mt-2">
-                Customers can cancel their reservation at any time, but down payments are only refundable if canceled at least <strong>{form.cancellationHours} hours</strong> before the scheduled time.
+                Customers can cancel their reservation at any time, but down payments are only refundable if canceled at least <strong>{termsForm.cancellationHours} hours</strong> before the scheduled time.
               </p>
-            </div>
-
-            {/* Preview */}
-            <div className="bg-neutral-950 border border-amber-900/30 rounded-xl p-4">
-              <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Preview (shown to customers)</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                <div className="bg-neutral-900 rounded-lg p-2 text-center">
-                  <p className="text-amber-400 font-black">{form.minHours}–{form.maxHours} hrs</p>
-                  <p className="text-neutral-600">Duration range</p>
-                </div>
-                <div className="bg-neutral-900 rounded-lg p-2 text-center">
-                  <p className="text-amber-400 font-black">{form.minPartySize}–{form.maxPartySize}</p>
-                  <p className="text-neutral-600">Party size</p>
-                </div>
-                <div className="bg-neutral-900 rounded-lg p-2 text-center">
-                  <p className="text-amber-400 font-black">{form.cancellationHours}hrs</p>
-                  <p className="text-neutral-600">Refund window</p>
-                </div>
-              </div>
             </div>
           </div>
         )}
@@ -158,13 +140,12 @@ export function AdminReservationTerms() {
               Cancellation & Refund Policy Text
             </label>
             <textarea
-              value={form.cancellationPolicy}
-              onChange={e => setForm(prev => ({ ...prev, cancellationPolicy: e.target.value }))}
+              value={termsForm.cancellationPolicy}
+              onChange={e => setTermsForm(prev => ({ ...prev, cancellationPolicy: e.target.value }))}
               rows={6}
-              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors resize-none"
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors resize-none"
               placeholder="Describe the cancellation policy..."
             />
-            <p className="text-[10px] text-neutral-600 mt-2">This text is shown in the reservation summary and confirmation emails to explain the refund forfeiture rules.</p>
           </div>
         )}
 
@@ -175,18 +156,16 @@ export function AdminReservationTerms() {
               Terms & Conditions
             </label>
             <textarea
-              value={form.termsAndConditions}
-              onChange={e => setForm(prev => ({ ...prev, termsAndConditions: e.target.value }))}
+              value={termsForm.termsAndConditions}
+              onChange={e => setTermsForm(prev => ({ ...prev, termsAndConditions: e.target.value }))}
               rows={12}
-              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 focus:ring-1 focus:ring-amber-600/20 transition-colors resize-none font-mono text-xs leading-relaxed"
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors resize-none font-mono text-xs leading-relaxed"
               placeholder="Enter full terms and conditions..."
             />
-            <p className="text-[10px] text-neutral-600 mt-2">Customers must agree to these terms during the reservation process. Use numbered lines for clarity.</p>
           </div>
         )}
 
-        <button type="submit"
-          className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-amber-900/30">
+        <button type="submit" className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-amber-900/30">
           <Save size={15} /> Save Terms
         </button>
       </form>
@@ -206,77 +185,19 @@ export function AdminReservationTerms() {
             </div>
             <div className="p-6 space-y-4 overflow-y-auto flex-1">
               <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 space-y-3">
-                <p className="text-sm text-neutral-400 font-semibold">Summary of Changes:</p>
-                {reservationTerms.minHours !== form.minHours && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Min Hours:</span>
-                    <span><span className="text-rose-400 line-through">{reservationTerms.minHours}</span> → <span className="text-emerald-400 font-semibold">{form.minHours}</span></span>
-                  </div>
-                )}
-                {reservationTerms.maxHours !== form.maxHours && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Max Hours:</span>
-                    <span><span className="text-rose-400 line-through">{reservationTerms.maxHours}</span> → <span className="text-emerald-400 font-semibold">{form.maxHours}</span></span>
-                  </div>
-                )}
-                {reservationTerms.minPartySize !== form.minPartySize && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Min Party Size:</span>
-                    <span><span className="text-rose-400 line-through">{reservationTerms.minPartySize}</span> → <span className="text-emerald-400 font-semibold">{form.minPartySize}</span></span>
-                  </div>
-                )}
-                {reservationTerms.maxPartySize !== form.maxPartySize && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Max Party Size:</span>
-                    <span><span className="text-rose-400 line-through">{reservationTerms.maxPartySize}</span> → <span className="text-emerald-400 font-semibold">{form.maxPartySize}</span></span>
-                  </div>
-                )}
-                {reservationTerms.cancellationHours !== form.cancellationHours && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Cancellation Hours:</span>
-                    <span><span className="text-rose-400 line-through">{reservationTerms.cancellationHours}h</span> → <span className="text-emerald-400 font-semibold">{form.cancellationHours}h</span></span>
-                  </div>
-                )}
-                {(reservationTerms as any).reservationStartTime !== (form as any).reservationStartTime && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Reservation Start:</span>
-                    <span><span className="text-rose-400 line-through">{(reservationTerms as any).reservationStartTime}</span> → <span className="text-emerald-400 font-semibold">{(form as any).reservationStartTime}</span></span>
-                  </div>
-                )}
-                {(reservationTerms as any).reservationEndTime !== (form as any).reservationEndTime && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Reservation End:</span>
-                    <span><span className="text-rose-400 line-through">{(reservationTerms as any).reservationEndTime}</span> → <span className="text-emerald-400 font-semibold">{(form as any).reservationEndTime}</span></span>
-                  </div>
-                )}
-                {reservationTerms.cancellationPolicy !== form.cancellationPolicy && (
-                  <div className="text-sm border-t border-neutral-800 pt-2">
-                    <span className="text-neutral-500">Cancellation Policy Updated</span>
-                  </div>
-                )}
-                {reservationTerms.termsAndConditions !== form.termsAndConditions && (
-                  <div className="text-sm border-t border-neutral-800 pt-2">
-                    <span className="text-neutral-500">Terms & Conditions Updated</span>
-                  </div>
-                )}
-              </div>
-              <div className="bg-amber-950/20 border border-amber-900/30 rounded-lg p-3">
-                <p className="text-xs text-amber-600/80">These changes will be displayed to customers during the reservation booking process.</p>
+                <p className="text-sm text-neutral-400 font-semibold">Summary of Updates:</p>
+                {reservationTerms.minHours !== termsForm.minHours && <div className="text-sm"><span className="text-neutral-500">Min Hours updated</span></div>}
+                {reservationTerms.maxHours !== termsForm.maxHours && <div className="text-sm"><span className="text-neutral-500">Max Hours updated</span></div>}
+                {rates.reservationStartTime !== ratesForm.reservationStartTime && <div className="text-sm"><span className="text-neutral-500">Reservation Start Time updated to: <span className="text-emerald-400">{ratesForm.reservationStartTime}</span></span></div>}
+                {rates.reservationEndTime !== ratesForm.reservationEndTime && <div className="text-sm"><span className="text-neutral-500">Reservation End Time updated to: <span className="text-emerald-400">{ratesForm.reservationEndTime}</span></span></div>}
+                <div className="bg-amber-950/20 border border-amber-900/30 rounded-lg p-3 mt-3">
+                  <p className="text-[10px] text-amber-600/80">These changes will immediately reflect on the customer booking portal.</p>
+                </div>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-neutral-800 flex gap-3 flex-none">
-              <button
-                onClick={() => setShowConfirm(false)}
-                className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmSave}
-                className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
-              >
-                <CheckCircle size={14} /> Confirm & Save
-              </button>
+              <button onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2.5 bg-neutral-800 text-neutral-300 text-sm rounded-xl">Cancel</button>
+              <button onClick={handleConfirmSave} className="flex-1 px-4 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2"><CheckCircle size={14} /> Confirm</button>
             </div>
           </div>
         </div>

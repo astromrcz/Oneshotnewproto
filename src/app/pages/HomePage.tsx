@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay } from 'date-fns';
+import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay, isSameDay } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle
+  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle, XCircle
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -260,8 +260,36 @@ export function HomePage() {
     setPromoError('');
   };
 
-  const validateTimeSlot = (time: string) => {
-    if(!time) return 'invalid';
+  // 🟢 NEW: Dynamic Duration & Capacity Logic
+  const getMaxDuration = () => {
+    if (!resForm.timeSlot) return reservationTerms?.maxHours || 6;
+    
+    const slotHour = parseInt(resForm.timeSlot.split(':')[0]);
+    let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
+    
+    // Handle overnight hours (e.g., 2 AM becomes 26 for math)
+    if (endReserveHour < 12) endReserveHour += 24; 
+    let normalizedSlotHour = slotHour;
+    if (slotHour < 12) normalizedSlotHour += 24;
+
+    const hoursUntilClose = endReserveHour - normalizedSlotHour;
+    const maxAllowed = reservationTerms?.maxHours || 6;
+    
+    return Math.max(1, Math.min(hoursUntilClose, maxAllowed));
+  };
+
+  const maxAllowedDuration = getMaxDuration();
+
+  // Auto-shrink the duration if they select a late time
+  useEffect(() => {
+    if (resForm.duration > maxAllowedDuration) {
+      setResForm(f => ({ ...f, duration: maxAllowedDuration }));
+    }
+  }, [maxAllowedDuration, resForm.timeSlot]);
+
+  const validateTimeSlot = (time: string, duration: number) => {
+    if(!time || !selectedDate) return 'invalid';
+    
     const slotHour = parseInt(time.split(':')[0]);
     const startReserveHour = parseInt(rates?.reservationStartTime?.split(':')[0] || '12');
     let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
@@ -269,21 +297,44 @@ export function HomePage() {
     if (endReserveHour < startReserveHour) endReserveHour += 24;
     const normalizedSlotHour = slotHour < startReserveHour && slotHour <= endReserveHour % 24 ? slotHour + 24 : slotHour;
 
-    if (normalizedSlotHour < startReserveHour || normalizedSlotHour >= endReserveHour) {
-      return 'closed';
-    }
+    if (normalizedSlotHour < startReserveHour || normalizedSlotHour >= endReserveHour) return 'closed';
 
     if (rates?.isHappyHourActive) {
       const startHour = parseInt(rates.happyHourStart?.split(':')[0] || '18');
       const endHour = parseInt(rates.happyHourEnd?.split(':')[0] || '19');
-      if (slotHour >= startHour && slotHour < endHour) {
-        return 'happyhour';
-      }
+      if (slotHour >= startHour && slotHour < endHour) return 'happyhour';
     }
+
+    // 🟢 NEW: 70/30 Rule Overlap Checker
+    const requestedStart = new Date(selectedDate);
+    const [h, m] = time.split(':').map(Number);
+    requestedStart.setHours(h, m, 0, 0);
+    const requestedEnd = addMinutes(requestedStart, duration * 60);
+
+    let overlapCount = 0;
+    const sameDayRes = reservations.filter((r: any) => 
+      r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), requestedStart)
+    );
+
+    sameDayRes.forEach((r: any) => {
+      const rStart = new Date(r.date);
+      const rEnd = addMinutes(rStart, r.durationHours * 60);
+      // Overlap math: Does the new request start before the existing ends, AND end after the existing starts?
+      if (requestedStart < rEnd && requestedEnd > rStart) {
+        overlapCount++;
+      }
+    });
+
+    // Hard cap at 70% of total tables (e.g., 7 tables if 10 total)
+    const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * 0.7));
+    if (overlapCount >= maxOnlineCapacity) return 'full';
+
     return 'valid';
   };
 
-  const timeValidation = validateTimeSlot(resForm.timeSlot);
+  const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
+
+
 
   const handleReservationSubmit = () => {
     if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
@@ -651,35 +702,80 @@ export function HomePage() {
                               <input type="number" min={1} max={20} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
                             </div>
                             <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5">Duration (hours)</label>
-                              <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
-                                {[1, 2, 3, 4, 5, 6].map(h => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}
-                              </select>
-                            </div>
+                          <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between">
+                            <span>Duration (hours)</span>
+                            {resForm.timeSlot && <span className="text-[9px] text-amber-500">Max {maxAllowedDuration}h based on cut-off</span>}
+                          </label>
+                          <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
+                            {/* Dynamically render options up to the max allowed */}
+                            {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                              <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
+                            ))}
+                          </select>
+                          </div>
                           </div>
                           
                           {/* FLEXIBLE TIME INPUT */}
                           <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Preferred Time</label>
-                            <input
-                              type="time"
-                              value={resForm.timeSlot}
-                              onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
-                              className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
-                                timeValidation === 'closed' || timeValidation === 'happyhour' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
-                              }`}
-                            />
-                            {timeValidation === 'closed' && (
-                              <p className="text-[10px] text-rose-400 mt-2 font-semibold">
-                                * The establishment is closed or not accepting bookings at this hour. Please choose a time between {rates?.reservationStartTime || '12:00'} and {rates?.reservationEndTime || '02:00'}.
-                              </p>
-                            )}
-                            {timeValidation === 'happyhour' && (
-                              <p className="text-[10px] text-amber-500 mt-2 font-semibold">
-                                * Happy Hour ({rates.happyHourStart} - {rates.happyHourEnd}) is strictly walk-in only. Online booking is unavailable for this time.
-                              </p>
-                            )}
-                          </div>
+  <label className="block text-xs text-neutral-400 mb-1.5">Preferred Time</label>
+  <input
+    type="time"
+    value={resForm.timeSlot}
+    onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
+    className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
+      timeValidation === 'closed' || timeValidation === 'happyhour' || timeValidation === 'full' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
+    }`}
+  />
+  
+  <p className="text-[10px] text-amber-500/80 mt-2 font-semibold flex items-start gap-1">
+    <AlertTriangle size={12} className="flex-shrink-0" />
+    <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
+  </p>
+
+  {timeValidation === 'closed' && (
+    <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+      <XCircle size={10} /> The establishment is not accepting bookings at this hour.
+    </p>
+  )}
+  {timeValidation === 'happyhour' && (
+    <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
+      <AlertTriangle size={10} /> Happy Hour is strictly walk-in only.
+    </p>
+  )}
+  {timeValidation === 'full' && (
+    <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+      <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
+    </p>
+  )}
+
+  {/* 🟢 NEW: Day Availability Visualizer */}
+  {selectedDate && (
+    <div className="mt-4 bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+      <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2 flex items-center justify-between">
+        <span>Today's Activity Guide</span>
+        <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max 70% Online Limit</span>
+      </p>
+      <div className="space-y-1.5">
+        {reservations
+          .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), new Date(selectedDate)))
+          .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+          .map((r: any) => (
+            <div key={r.id} className="flex items-center gap-2 text-[10px]">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+              <span className="text-neutral-400 w-24 flex-shrink-0">{r.timeSlot} — {format(addMinutes(new Date(`2000/01/01 ${r.timeSlot}`), r.durationHours * 60), 'HH:mm')}</span>
+              <span className="text-neutral-600 truncate">{r.partySize} pax booking</span>
+            </div>
+          ))
+        }
+        {reservations.filter((r: any) => r.status !== 'cancelled' && isSameDay(new Date(r.date), new Date(selectedDate))).length === 0 && (
+          <p className="text-[10px] text-emerald-500 italic flex items-center gap-1">
+            <CheckCircle size={10} /> Wide open! Plenty of tables available today.
+          </p>
+        )}
+      </div>
+    </div>
+  )}
+</div>
 
                           <div>
                             <label className="block text-xs text-neutral-400 mb-2">Preferred Table <span className="text-neutral-600">(optional)</span></label>
@@ -751,6 +847,17 @@ export function HomePage() {
                               </div>
                             </div>
                           </div>
+                                {/* 🟢 NEW: Compact Policies in Step 2 */}
+                              <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 mb-4">
+                                  <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-wider flex items-center gap-1.5">
+                             <Info size={14} className="text-emerald-500" /> Booking Policies
+                                  </h4>
+                                    <ul className="space-y-1.5 text-[10px] text-neutral-400">
+                                       <li>• Minimum {reservationTerms.minHours} hour(s) per booking.</li>
+                                       <li>• {reservationTerms.cancellationPolicy}</li>
+                                      <li>• A {rates?.downPaymentPercent || 25}% down payment is required to secure your slot.</li>
+                                    </ul>
+                                </div>
 
                           <button 
                             onClick={handleReservationSubmit} 
@@ -1106,6 +1213,15 @@ export function HomePage() {
                     </div>
                   </div>
                 </div>
+
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mt-2 mb-5 h-32 overflow-y-auto">
+                    <p className="text-xs font-bold text-white mb-2 flex items-center gap-1.5">
+                      <BookOpen size={12} className="text-emerald-500" /> Terms & Conditions
+                    </p>
+                       <p className="text-[10px] text-neutral-400 whitespace-pre-line leading-relaxed">
+                         {reservationTerms.termsAndConditions}
+                    </p>
+                  </div>
 
                 <button onClick={handlePaymentConfirm} disabled={confirmingPayment || !paymentRef || paymentRef.length < 13 || !receiptImg} className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
                   {confirmingPayment ? 'Processing...' : <><CheckCircle size={15} /> I've Sent the Payment</>}

@@ -227,7 +227,7 @@ type AppContextType = {
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => void; toggleStaffUserActive: (id: string) => void;
-  updateRates: (r: Partial<RatesConfig>) => void; updateReservationTerms: (t: Partial<ReservationTerms>) => void; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
+  updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
   siteConfig: any;
   updateSiteConfig: (config: any) => void;
   refreshLiveMonitor: () => void;
@@ -396,15 +396,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      const text = await res.text();
+      let json: any = null;
+      try { json = text ? JSON.parse(text) : null; } catch (e) { json = text; }
       if (res.ok) {
         console.log(`💾 [DB SAVED]: ${successMsg} fully inputted into SQLite Database.`);
+        return json;
       } else {
-        console.error(`❌ [DB ERROR]: Failed to save ${endpoint}`);
+        console.error(`❌ [DB ERROR]: Failed to save ${endpoint}`, text);
         toast.error("Database sync failed. Check server.js");
+        throw new Error(`DB error: ${res.status} ${text}`);
       }
     } catch (e) {
       console.error("Network error. Is server.js running?", e);
       toast.error("Offline Mode: Changes saved to RAM, but database server is unreachable.");
+      throw e;
     }
   };
 
@@ -577,16 +583,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const resetStaffUserPassword = (id: string) => setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: 'password123' } : u));
   const toggleStaffUserActive = (id: string) => setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
 
-  const updateRates = (r: Partial<RatesConfig>) => {
-    setRates(prev => ({ ...prev, ...r }));
-    syncToDB('/api/settings/rates', 'PUT', r, `Updated System Rates`);
-    addActivity('admin_action', 'System rates updated');
+  const updateRates = async (r: Partial<RatesConfig>) => {
+    // sanitize downPaymentPercent to be within 0-100
+    const sanitized = { ...r } as Partial<RatesConfig>;
+    // Coerce numeric fields to numbers and clamp where needed
+    if (sanitized.hourlyRate !== undefined) {
+      const hr = Number(sanitized.hourlyRate) || 0;
+      sanitized.hourlyRate = hr;
+    }
+    if (sanitized.happyHourRate !== undefined) {
+      const hh = Number(sanitized.happyHourRate) || 0;
+      sanitized.happyHourRate = hh;
+    }
+    if (sanitized.overtimeRate !== undefined) {
+      const ot = Number(sanitized.overtimeRate) || 0;
+      sanitized.overtimeRate = ot;
+    }
+    if (sanitized.downPaymentPercent !== undefined && sanitized.downPaymentPercent !== null) {
+      let dp = Number(sanitized.downPaymentPercent) || 0;
+      dp = Math.max(0, Math.min(100, dp));
+      sanitized.downPaymentPercent = dp;
+    }
+
+    setRates(prev => ({ ...prev, ...sanitized }));
+    try {
+      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
+      addActivity('admin_action', 'System rates updated');
+      return res;
+    } catch (e) {
+      console.error('Failed to sync rates to DB', e);
+      throw e;
+    }
   };
 
-  const updateReservationTerms = (t: Partial<ReservationTerms>) => {
+  const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
     setReservationTerms(prev => ({ ...prev, ...t }));
-    syncToDB('/api/settings/rates', 'PUT', t, `Updated Reservation Terms`); // 🟢 NEW: Push to DB
-    addActivity('admin_action', 'Reservation terms updated');
+    try {
+      const res = await syncToDB('/api/settings/rates', 'PUT', t, `Updated Reservation Terms`); // 🟢 NEW: Push to DB
+      addActivity('admin_action', 'Reservation terms updated');
+      return res;
+    } catch (e) {
+      console.error('Failed to sync reservation terms to DB', e);
+      throw e;
+    }
   };
 
  const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {

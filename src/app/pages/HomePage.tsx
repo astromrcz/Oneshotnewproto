@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay, isSameDay } from 'date-fns';
@@ -218,16 +218,63 @@ export function HomePage() {
     setAgreedToTerms(false);
   }, [selectedDate]);
 
+  // Persist reservation draft to localStorage so closing dialogs doesn't lose input
+  const RES_DRAFT_KEY = 'oneshot_reservation_draft_v1';
+
+  const saveReservationDraft = useCallback(() => {
+    try {
+      const draft = {
+        selectedDate: selectedDate ? selectedDate.toISOString() : null,
+        selectedTableId,
+        resForm,
+        promoCodeInput,
+        appliedPromo,
+        paymentRef,
+        receiptImg,
+        resTab,
+        reservationStep
+      };
+      localStorage.setItem(RES_DRAFT_KEY, JSON.stringify(draft));
+    } catch (e) { console.warn('Failed to save draft', e); }
+  }, [selectedDate, selectedTableId, resForm, promoCodeInput, appliedPromo, paymentRef, receiptImg, resTab, reservationStep]);
+
+  const loadReservationDraft = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(RES_DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d.selectedDate) setSelectedDate(new Date(d.selectedDate));
+      if (d.selectedTableId) setSelectedTableId(d.selectedTableId);
+      if (d.resForm) setResForm(prev => ({ ...prev, ...(d.resForm || {}) }));
+      if (d.promoCodeInput) setPromoCodeInput(d.promoCodeInput);
+      if (d.appliedPromo) setAppliedPromo(d.appliedPromo);
+      if (d.paymentRef) setPaymentRef(d.paymentRef);
+      if (d.receiptImg) setReceiptImg(d.receiptImg);
+      if (d.resTab) setResTab(d.resTab);
+    } catch (e) { console.warn('Failed to load draft', e); }
+  }, []);
+
+  useEffect(() => {
+    loadReservationDraft();
+  }, [loadReservationDraft]);
+
+  // Save draft on significant changes
+  useEffect(() => {
+    saveReservationDraft();
+  }, [saveReservationDraft]);
+
   useEffect(() => {
     if (selectedTableId) {
       setIsPreferredTableExpanded(false);
     }
   }, [selectedTableId]);
 
-  const baseAmount = resForm.duration * (rates?.hourlyRate || HOURLY_RATE);
+  const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
+  const baseAmount = Number(resForm.duration) * effectiveHourly;
   const discountAmount = appliedPromo ? Math.floor(baseAmount * appliedPromo.discountPercent / 100) : 0;
   const totalAmount = baseAmount - discountAmount;
-  const downPayment = Math.ceil(totalAmount * (rates?.downPaymentPercent ? rates.downPaymentPercent / 100 : DOWN_PAYMENT_RATE));
+  const downPaymentPercentVal = rates && Number(rates.downPaymentPercent) >= 0 ? Number(rates.downPaymentPercent) : DOWN_PAYMENT_RATE * 100;
+  const downPayment = Math.ceil(totalAmount * (downPaymentPercentVal ? downPaymentPercentVal / 100 : DOWN_PAYMENT_RATE));
 
   const handleLoginSubmit = () => {
     if (!loginForm.email || !loginForm.password) {
@@ -273,24 +320,78 @@ export function HomePage() {
   };
 
   // 🟢 NEW: Dynamic Duration & Capacity Logic
+ // 🟢 NEW: Precise Minute-Based Duration & Capacity Logic
   const getMaxDuration = () => {
     if (!resForm.timeSlot) return reservationTerms?.maxHours || 6;
-    
-    const slotHour = parseInt(resForm.timeSlot.split(':')[0]);
-    let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
-    
-    // Handle overnight hours (e.g., 2 AM becomes 26 for math)
-    if (endReserveHour < 12) endReserveHour += 24; 
-    let normalizedSlotHour = slotHour;
-    if (slotHour < 12) normalizedSlotHour += 24;
 
-    const hoursUntilClose = endReserveHour - normalizedSlotHour;
+    const parseToMins = (t: string) => {
+      const [hh = '0', mm = '0'] = (t || '').split(':');
+      const h = Number(hh);
+      const m = Number(mm || 0);
+      return h * 60 + m;
+    };
+
+    const slotMins = parseToMins(resForm.timeSlot);
+    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
+    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
+
+    // treat end as next day if it's earlier or equal to start
+    if (endMins <= startMins) endMins += 24 * 60;
+
+    // if slot is before start (unlikely) normalize to same day
+    let normalizedSlotMins = slotMins;
+    if (slotMins < startMins) normalizedSlotMins += 24 * 60;
+
+    const minsUntilClose = endMins - normalizedSlotMins;
+    const hoursUntilClose = Math.floor(minsUntilClose / 60);
     const maxAllowed = reservationTerms?.maxHours || 6;
-    
+
     return Math.max(1, Math.min(hoursUntilClose, maxAllowed));
   };
 
   const maxAllowedDuration = getMaxDuration();
+
+  const fmt12 = (tOrMins: string | number) => {
+    try {
+      let mins: number;
+      if (typeof tOrMins === 'number') mins = tOrMins;
+      else {
+        const [hh = '0', mm = '0'] = (tOrMins || '').split(':');
+        mins = Number(hh) * 60 + Number(mm || 0);
+      }
+      const m = ((mins % (24 * 60)) + (24 * 60)) % (24 * 60);
+      let hh = Math.floor(m / 60);
+      const mm = m % 60;
+      const period = hh >= 12 ? 'PM' : 'AM';
+      hh = hh % 12;
+      if (hh === 0) hh = 12;
+      return `${hh}:${String(mm).padStart(2, '0')} ${period}`;
+    } catch (e) { return String(tOrMins); }
+  };
+
+  // Compute online booking display hours with a cutoff 1 hour before closing
+  const bookingHoursDisplay = (() => {
+    try {
+      const start = rates?.reservationStartTime || '12:00';
+      const end = rates?.reservationEndTime || '02:00';
+      const [sh, sm] = start.split(':').map(Number);
+      const [eh, em] = end.split(':').map(Number);
+
+      let startMins = sh * 60 + (sm || 0);
+      let endMins = eh * 60 + (em || 0);
+      // If end <= start, treat end as next day
+      if (endMins <= startMins) endMins += 24 * 60;
+
+      const cutoffMins = endMins - 60; // 1 hour before closing
+      if (cutoffMins <= startMins) return 'No online bookings';
+
+      // format provided start time into 12-hour display as well
+      const startDisplay = fmt12(start);
+      return `${startDisplay} to ${fmt12(cutoffMins)}`;
+    } catch (e) {
+      return `${rates?.reservationStartTime || '12:00'} to ${rates?.reservationEndTime || '02:00'}`;
+    }
+  })();
 
   // Auto-shrink the duration if they select a late time
   useEffect(() => {
@@ -301,20 +402,30 @@ export function HomePage() {
 
   const validateTimeSlot = (time: string, duration: number) => {
     if(!time || !selectedDate) return 'invalid';
-    
-    const slotHour = parseInt(time.split(':')[0]);
-    const startReserveHour = parseInt(rates?.reservationStartTime?.split(':')[0] || '12');
-    let endReserveHour = parseInt(rates?.reservationEndTime?.split(':')[0] || '2');
-    
-    if (endReserveHour < startReserveHour) endReserveHour += 24;
-    const normalizedSlotHour = slotHour < startReserveHour && slotHour <= endReserveHour % 24 ? slotHour + 24 : slotHour;
 
-    if (normalizedSlotHour < startReserveHour || normalizedSlotHour >= endReserveHour) return 'closed';
+    const parseToMins = (t: string) => {
+      const [hh = '0', mm = '0'] = (t || '').split(':');
+      return Number(hh) * 60 + Number(mm || 0);
+    };
+
+    const slotMins = parseToMins(time);
+    const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
+    let endReserveMins = parseToMins(rates?.reservationEndTime || '02:00');
+    if (endReserveMins <= startReserveMins) endReserveMins += 24 * 60;
+
+    let normalizedSlot = slotMins;
+    if (slotMins < startReserveMins) normalizedSlot += 24 * 60;
+
+    if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
     if (rates?.isHappyHourActive) {
-      const startHour = parseInt(rates.happyHourStart?.split(':')[0] || '18');
-      const endHour = parseInt(rates.happyHourEnd?.split(':')[0] || '19');
-      if (slotHour >= startHour && slotHour < endHour) return 'happyhour';
+      const startHour = parseToMins(rates.happyHourStart || '18:00');
+      const endHour = parseToMins(rates.happyHourEnd || '19:00');
+      let s = startHour; let e = endHour;
+      if (e <= s) e += 24 * 60;
+      let slotNorm = slotMins;
+      if (slotMins < s) slotNorm += 24 * 60;
+      if (slotNorm >= s && slotNorm < e) return 'happyhour';
     }
 
     // 🟢 NEW: 70/30 Rule Overlap Checker
@@ -350,7 +461,7 @@ export function HomePage() {
 
 
   const handleReservationSubmit = () => {
-    if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid' || !agreedToTerms) return;
+    if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
     setReservationStep(2);
   };
 
@@ -383,20 +494,17 @@ export function HomePage() {
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
       setConfirmingPayment(false);
+      // Clear saved draft since reservation is completed
+      try { localStorage.removeItem(RES_DRAFT_KEY); } catch (e) {}
       setReservationStep(3);
     }, 1500);
   };
 
   const closeReservation = () => {
+    // Persist current draft and simply close the modal so user inputs are preserved
+    saveReservationDraft();
     setReservationStep(0);
-    setSelectedDate(null);
     setAgreedToTerms(false);
-    setResForm({ name: currentUser?.name || '', email: currentUser?.email || '', phone: '', pax: 2, timeSlot: '', duration: 2 });
-    setPromoCodeInput('');
-    setAppliedPromo(null);
-    setPromoError('');
-    setPaymentRef('');
-    setReceiptImg(null);
     setGeneratedResId('');
     if (currentUser) setResTab('track');
   };
@@ -611,7 +719,7 @@ export function HomePage() {
                 <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
                   {[
                     { value: '10', label: 'Billiard Tables', color: 'text-emerald-400' },
-                    { value: `₱${rates?.hourlyRate || HOURLY_RATE}`, label: 'Per Hour', color: 'text-amber-400' },
+                    { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
                     { value: '15+', label: 'Hours Open Daily', color: 'text-sky-400' },
                     { value: 'A+', label: 'Top Tier Facility', color: 'text-rose-400' },
                   ].map(({ value, label, color }) => (
@@ -745,7 +853,7 @@ export function HomePage() {
                             <div>
                           <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between">
                             <span>Duration (hours)</span>
-                            {resForm.timeSlot && <span className="text-[9px] text-amber-500">Max {maxAllowedDuration}h based on cut-off</span>}
+                            {resForm.timeSlot && <span className="text-[9px] text-amber-500">Max ~{maxAllowedDuration}h based on cut-off</span>}
                           </label>
                           <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
                             {/* Dynamically render options up to the max allowed */}
@@ -870,7 +978,7 @@ export function HomePage() {
                             <div className="space-y-1.5 text-xs">
                               <div className="flex justify-between"><span className="text-neutral-400">Date</span><span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
                               <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot || '—'}</span></div>
-                              <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{rates?.hourlyRate || HOURLY_RATE}/hr</span></div>
+                              <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{effectiveHourly}/hr</span></div>
                               {appliedPromo && (
                                 <div className="flex justify-between text-emerald-400"><span>Promo ({appliedPromo.code})</span><span>−₱{discountAmount}.00</span></div>
                               )}
@@ -882,21 +990,9 @@ export function HomePage() {
                               </div>
                             </div>
                           </div>
-                                <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 mb-4">
-                                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                                    <Info size={14} className="text-emerald-500" /> Booking Policies
-                                  </h4>
-                                  <p className="text-[10px] text-neutral-400 mt-1">The full reservation terms and conditions will be shown in the payment step before you confirm.</p>
-                                </div>
-
-                                <label className="flex items-start gap-2 text-[11px] text-neutral-400 cursor-pointer">
-                                  <input type="checkbox" checked={agreedToTerms} onChange={() => setAgreedToTerms(prev => !prev)} className="mt-0.5 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500" />
-                                  <span>I have read and agree to the reservation terms and conditions before proceeding to payment.</span>
-                                </label>
-
                           <button 
                             onClick={handleReservationSubmit} 
-                            disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || !agreedToTerms} 
+                            disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid'} 
                             className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
                           >
                             Proceed to Payment <ArrowRight size={14} />
@@ -1009,8 +1105,8 @@ export function HomePage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                 {[
-                  { name: 'Standard Play', rate: `₱${rates?.hourlyRate || HOURLY_RATE}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
-                  { name: 'Reserved Table', rate: `₱${rates?.hourlyRate || HOURLY_RATE}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', '25% down payment', 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
+                  { name: 'Standard Play', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
+                  { name: 'Reserved Table', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', '25% down payment', 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
                   { name: 'Happy Hour', rate: `₱${rates?.happyHourRate || 200}`, unit: '/ hour', desc: `Discounted walk-in rate every weekday ${rates?.happyHourStart || '18:00'}–${rates?.happyHourEnd || '19:00'}.`, features: ['Weekdays only', 'Walk-in ONLY - No reservations', 'Discounted standard rate', 'Subject to availability'], badge: 'Limited', color: 'amber' },
                 ]
                 .filter(card => card.name !== 'Happy Hour' || rates?.isHappyHourActive) // 🟢 NEW: Hides Happy Hour entirely if toggled off
@@ -1044,7 +1140,7 @@ export function HomePage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   {[
                     { label: 'Booking Cut-off', value: `Requires at least ${reservationTerms.cancellationHours} hours notice.` },
-                    { label: 'Online Booking Hours', value: `${rates?.reservationStartTime || '12:00'} to ${rates?.reservationEndTime || '02:00'}` },
+                    { label: 'Online Booking Hours', value: bookingHoursDisplay },
                     { label: 'Minimum Booking', value: `${reservationTerms.minHours} hour(s)` },
                     { label: 'Maximum Booking', value: `${reservationTerms.maxHours} hour(s)` },
                     { label: 'Grace Period', value: '15 minutes' },
@@ -1257,14 +1353,22 @@ export function HomePage() {
                     </p>
                     <ul className="space-y-2 text-[10px] text-neutral-400 leading-relaxed">
                       <li>• Minimum booking duration is {reservationTerms.minHours} hour(s).</li>
-                      <li>• Maximum booking duration is {reservationTerms.maxHours} hour(s).</li>
+                      <li>• Maximum booking duration (based on cut-off) is {maxAllowedDuration} hour(s).</li>
+                      <li>• Online booking window: {fmt12(rates?.reservationStartTime || '12:00')} to {fmt12(((() => { const e = rates?.reservationEndTime || '02:00'; const [hh, mm] = e.split(':').map(Number); let em = hh*60 + (mm||0); const sm = (rates?.reservationStartTime||'12:00').split(':').map(Number); let smm = sm[0]*60 + (sm[1]||0); if (em <= smm) em += 24*60; return em - 60; })()))} (cutoff 1 hour before close)</li>
+                      <li>• Store hours: {fmt12(rates?.reservationStartTime || '12:00')} — {fmt12(rates?.reservationEndTime || '02:00')}</li>
                       <li>• A {rates?.downPaymentPercent || 25}% down payment is required to secure your slot.</li>
+                      <li>• Online capacity limit: {rates?.onlineCapacityLimit ?? 70}% of tables (admin-configured)</li>
                       <li>• {reservationTerms.cancellationPolicy}</li>
                       <li>• {reservationTerms.termsAndConditions}</li>
                     </ul>
                   </div>
 
-                <button onClick={handlePaymentConfirm} disabled={confirmingPayment || !paymentRef || paymentRef.length < 13 || !receiptImg} className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
+                  <label className="flex items-start gap-2 text-[11px] text-neutral-400 cursor-pointer">
+                    <input type="checkbox" checked={agreedToTerms} onChange={() => setAgreedToTerms(prev => !prev)} className="mt-0.5 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500" />
+                    <span>I have read and agree to the reservation terms and conditions.</span>
+                  </label>
+
+                <button onClick={handlePaymentConfirm} disabled={confirmingPayment || !paymentRef || paymentRef.length < 13 || !receiptImg || !agreedToTerms} className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
                   {confirmingPayment ? 'Processing...' : <><CheckCircle size={15} /> I've Sent the Payment</>}
                 </button>
               </div>

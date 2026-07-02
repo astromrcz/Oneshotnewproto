@@ -239,6 +239,7 @@ app.put('/api/inventory/:id', (req, res) => {
 });
 
 app.put('/api/settings/rates', (req, res) => {
+  console.log('PUT /api/settings/rates payload:', req.body);
   const payload = req.body;
   let completed = 0;
   const keys = Object.keys(payload);

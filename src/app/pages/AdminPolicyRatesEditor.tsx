@@ -22,6 +22,59 @@ export default function AdminPolicyRatesEditor() {
     setTermsForm(reservationTerms);
   }, [rates, reservationTerms]);
 
+  // Helpers for time formatting and computing cutoff / max duration for preview
+  const parseToMins = (t: string) => {
+    const [hh = '0', mm = '0'] = (t || '').split(':');
+    return Number(hh) * 60 + Number(mm || 0);
+  };
+
+  const fmt12 = (tOrMins: string | number) => {
+    try {
+      let mins: number;
+      if (typeof tOrMins === 'number') mins = tOrMins;
+      else {
+        const [hh = '0', mm = '0'] = (tOrMins || '').split(':');
+        mins = Number(hh) * 60 + Number(mm || 0);
+      }
+      const m = ((mins % (24 * 60)) + (24 * 60)) % (24 * 60);
+      let hh = Math.floor(m / 60);
+      const mm = m % 60;
+      const period = hh >= 12 ? 'PM' : 'AM';
+      hh = hh % 12;
+      if (hh === 0) hh = 12;
+      return `${hh}:${String(mm).padStart(2, '0')} ${period}`;
+    } catch (e) { return String(tOrMins); }
+  };
+
+  const bookingWindowDisplay = () => {
+    try {
+      const start = ratesForm.reservationStartTime || '12:00';
+      const end = ratesForm.reservationEndTime || '02:00';
+      const s = parseToMins(start);
+      let e = parseToMins(end);
+      if (e <= s) e += 24 * 60;
+      const cutoff = e - 60; // 1 hour before close
+      if (cutoff <= s) return 'No online bookings';
+      return `${fmt12(start)} to ${fmt12(cutoff)}`;
+    } catch (e) {
+      return `${ratesForm.reservationStartTime || '12:00'} to ${ratesForm.reservationEndTime || '02:00'}`;
+    }
+  };
+
+  const maxDurationFromCutoff = () => {
+    try {
+      const start = ratesForm.reservationStartTime || '12:00';
+      const end = ratesForm.reservationEndTime || '02:00';
+      const s = parseToMins(start);
+      let e = parseToMins(end);
+      if (e <= s) e += 24 * 60;
+      const cutoff = e - 60;
+      const hrs = Math.floor((cutoff - s) / 60);
+      const maxAllowed = termsForm.maxHours || 6;
+      return Math.max(1, Math.min(hrs, maxAllowed));
+    } catch (e) { return termsForm.maxHours || 6; }
+  };
+
   // Standard handler for text strings and time inputs
   const handleRatesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type } = e.target;
@@ -35,6 +88,13 @@ export default function AdminPolicyRatesEditor() {
   const handleRatesTextNumber = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     const cleanValue = value.replace(/\D/g, ''); // Strip non-digits
+    // Clamp downPaymentPercent to 0-100
+    if (name === 'downPaymentPercent') {
+      let num = cleanValue === '' ? '' : Number(cleanValue);
+      if (num !== '' && num > 100) num = 100;
+      setRatesForm(prev => ({ ...prev, [name]: num === '' ? '' : Number(num) }));
+      return;
+    }
     setRatesForm(prev => ({ ...prev, [name]: cleanValue === '' ? '' : Number(cleanValue) }));
   };
 
@@ -68,8 +128,31 @@ export default function AdminPolicyRatesEditor() {
     setShowSummaryModal(true);
   };
 
+  // Refresh settings from local DB
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastSentPayload, setLastSentPayload] = useState<any>(null);
+  const [dbPayload, setDbPayload] = useState<any>(null);
+  const refreshFromDB = async () => {
+    try {
+      setIsRefreshing(true);
+      const res = await fetch('http://localhost:3001/api/settings/rates');
+      if (!res.ok) throw new Error('Failed to fetch from DB');
+      const data = await res.json();
+      setRatesForm(prev => ({ ...prev, ...data, onlineCapacityLimit: data.onlineCapacityLimit ?? prev.onlineCapacityLimit }));
+      setTermsForm(prev => ({ ...prev, ...data }));
+      setDbPayload(data);
+      toast.success('Refreshed settings from local database');
+    } catch (e) {
+      console.error('Refresh failed', e);
+      toast.error('Failed to refresh from DB. Is the local server running?');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // 2. Executes the actual save after the user clicks "Confirm & Save" in the modal
-  const executeSave = () => {
+  const [isSaving, setIsSaving] = useState(false);
+  const executeSave = async () => {
     const downPaymentPercent = Number(ratesForm.downPaymentPercent);
 
     if (!Number.isFinite(downPaymentPercent) || downPaymentPercent > 100) {
@@ -77,10 +160,23 @@ export default function AdminPolicyRatesEditor() {
       return;
     }
 
-    updateRates(ratesForm);
-    updateReservationTerms(termsForm);
-    setShowSummaryModal(false);
-    toast.success("Policies and Rates successfully updated!");
+    try {
+      setIsSaving(true);
+      const payload = { ...ratesForm, ...termsForm };
+      setLastSentPayload(payload);
+      // Await both updates so we can show accurate loading state
+      await updateRates(ratesForm);
+      await updateReservationTerms(termsForm);
+      // Refresh DB and capture stored payload
+      await refreshFromDB();
+      toast.success("Policies and Rates successfully updated!");
+      setShowSummaryModal(false);
+    } catch (e) {
+      console.error('Save failed', e);
+      toast.error('Failed to save settings to DB.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -90,12 +186,17 @@ export default function AdminPolicyRatesEditor() {
           <h1 className="text-3xl font-black text-white tracking-widest">POLICY & RATES</h1>
           <p className="text-sm text-neutral-400 mt-1">Manage pricing, operating hours, and booking rules.</p>
         </div>
-        <button 
-          onClick={handleReviewChanges}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors"
-        >
-          <Save size={20} /> Save Changes
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={refreshFromDB} className={`px-4 py-2 rounded-lg border ${isRefreshing ? 'bg-neutral-800/60 border-emerald-600 text-emerald-300' : 'bg-neutral-900 border-neutral-800 text-neutral-300'}`}>
+            {isRefreshing ? 'Refreshing…' : 'Refresh from DB'}
+          </button>
+          <button 
+            onClick={handleReviewChanges}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors"
+          >
+            <Save size={20} /> Save Changes
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -248,17 +349,44 @@ export default function AdminPolicyRatesEditor() {
               <ul className="space-y-4">
                 <li className="flex gap-3 text-neutral-300">
                   <AlertCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" />
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{termsForm.cancellationPolicy || "No policy defined."}</p>
+                  <div>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{termsForm.cancellationPolicy || "No policy defined."}</p>
+                    <p className="text-xs text-neutral-400 mt-2">Minimum booking: <span className="text-white font-bold">{termsForm.minHours} hour(s)</span></p>
+                    <p className="text-xs text-neutral-400">Maximum booking (cut-off adjusted): <span className="text-white font-bold">{maxDurationFromCutoff()} hour(s)</span></p>
+                  </div>
                 </li>
                 <li className="flex gap-3 text-neutral-300">
                   <Clock size={18} className="text-emerald-500 shrink-0 mt-0.5" />
-                  <p className="text-sm leading-relaxed">Cancellations must be made at least <span className="font-bold text-white">{termsForm.cancellationHours} hours</span> in advance.</p>
+                  <div>
+                    <p className="text-sm leading-relaxed">Online booking window: <span className="font-bold text-white">{bookingWindowDisplay()}</span></p>
+                    <p className="text-sm leading-relaxed">Store hours: <span className="font-bold text-white">{fmt12(ratesForm.reservationStartTime || '12:00')} — {fmt12(ratesForm.reservationEndTime || '02:00')}</span></p>
+                    <p className="text-sm leading-relaxed">Online capacity limit: <span className="font-bold text-white">{ratesForm.onlineCapacityLimit ?? 70}%</span></p>
+                    <p className="text-sm leading-relaxed">Down payment required: <span className="font-bold text-white">{ratesForm.downPaymentPercent ?? 25}%</span></p>
+                  </div>
                 </li>
                 <li className="flex gap-3 text-neutral-300">
                   <FileText size={18} className="text-neutral-500 shrink-0 mt-0.5" />
                   <p className="text-xs text-neutral-400 leading-relaxed whitespace-pre-wrap italic">{termsForm.termsAndConditions}</p>
                 </li>
               </ul>
+            </div>
+          </div>
+
+          {/* Debug Panel */}
+          <div className="mt-4 bg-neutral-900 border border-neutral-800 rounded-xl p-4 text-xs text-neutral-400">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-semibold text-neutral-200">Debug: Last Sent / DB Stored</span>
+              <button onClick={refreshFromDB} className="text-emerald-400 text-[11px]">Refresh DB</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="font-bold text-neutral-300 mb-1">Last Sent</div>
+                <pre className="whitespace-pre-wrap break-words text-[11px] bg-black/40 p-2 rounded text-neutral-300">{lastSentPayload ? JSON.stringify(lastSentPayload, null, 2) : '—'}</pre>
+              </div>
+              <div>
+                <div className="font-bold text-neutral-300 mb-1">DB Stored</div>
+                <pre className="whitespace-pre-wrap break-words text-[11px] bg-black/40 p-2 rounded text-neutral-300">{dbPayload ? JSON.stringify(dbPayload, null, 2) : '—'}</pre>
+              </div>
             </div>
           </div>
 
@@ -315,9 +443,10 @@ export default function AdminPolicyRatesEditor() {
                 </button>
                 <button 
                   onClick={executeSave}
-                  className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30"
+                  disabled={isSaving}
+                  className={`flex-1 px-4 py-3 ${isSaving ? 'bg-neutral-700 cursor-wait text-neutral-300' : 'bg-emerald-600 hover:bg-emerald-500 text-white'} rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30`}
                 >
-                  <Save size={16} /> Confirm & Save
+                  {isSaving ? 'Saving…' : (<><Save size={16} /> Confirm & Save</>)}
                 </button>
               </div>
             </div>

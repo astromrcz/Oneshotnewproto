@@ -16,8 +16,6 @@ import { SettingsPage } from './pages/Settings';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminUsers } from './pages/AdminUsers';
 import { AdminTableManagement } from './pages/AdminTableManagement';
-import { AdminRates } from './pages/AdminRates';
-import { AdminReservationTerms } from './pages/AdminReservationTerms';
 import { AdminAnnouncements } from './pages/AdminAnnouncements';
 import { AdminCalendar } from './pages/AdminCalendar';
 import { AdminEvents } from './pages/AdminEvents';
@@ -28,7 +26,7 @@ import { AdminInventory } from './pages/AdminInventory';
 import { OfflineLogin } from './pages/OfflineLogin';
 import { NotFound } from './pages/NotFound';
 import { AdminSiteSettings } from './pages/AdminSiteSettings';
-
+import AdminPolicyRatesEditor from './pages/AdminPolicyRatesEditor';
 const isDesktop = import.meta.env.VITE_APP_MODE === 'desktop';
 
 export const router = createBrowserRouter([
@@ -66,8 +64,9 @@ export const router = createBrowserRouter([
           { path: 'users',                  Component: AdminUsers },
           { path: 'tables',                 Component: AdminTableManagement },
           { path: 'inventory', Component: AdminInventory },
-          { path: 'rates',                  Component: AdminRates },
-          { path: 'reservation-terms',      Component: AdminReservationTerms },
+          { path: 'policy-rates',           Component: AdminPolicyRatesEditor },
+          { path: 'rates',                  Component: AdminPolicyRatesEditor },
+          { path: 'reservation-terms',      Component: AdminPolicyRatesEditor },
           { path: 'announcements',          Component: AdminAnnouncements },
           { path: 'events',                 Component: AdminEvents },
           { path: 'analytics',              Component: Analytics },

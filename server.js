@@ -27,8 +27,11 @@ const db = new sqlite3.Database(dbPath, (err) => {
   else {
     console.log('✅ Connected to local SQLite database (Direct Match Mode active).');
     db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, () => {});
-    // 🟢 NEW: Create a dedicated table to hold binary BLOB images
     db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
+    
+    // 🟢 NEW: Ensure settings and cms tables exist with keyName as PRIMARY KEY
+    db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   }
 });
 
@@ -66,20 +69,7 @@ app.get('/api/reservations', (req, res) => {
   });
 });
 
-app.get('/api/settings/rates', (req, res) => {
-  db.all(`SELECT keyName, settingValue FROM systemSettings`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const config = {};
-    rows.forEach(row => {
-      let val = row.settingValue;
-      if (val === 'true') val = true;
-      else if (val === 'false') val = false;
-      else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
-      config[row.keyName] = val;
-    });
-    res.json(config);
-  });
-});
+
 
 app.get('/api/inventory', (req, res) => {
   db.all(`SELECT * FROM inventory`, [], (err, rows) => {
@@ -113,6 +103,21 @@ app.get('/api/announcements', (req, res) => {
   db.all(`SELECT * FROM announcements ORDER BY createdAt DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(a => ({ ...a, isActive: a.isActive === 1 })));
+  });
+});
+
+app.get('/api/settings/rates', (req, res) => {
+  db.all(`SELECT keyName, settingValue FROM systemSettings`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const config = {};
+    rows.forEach(row => {
+      let val = row.settingValue;
+      if (val === 'true') val = true;
+      else if (val === 'false') val = false;
+      else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
+      config[row.keyName] = val;
+    });
+    res.json(config);
   });
 });
 
@@ -292,20 +297,6 @@ app.delete('/api/announcements/:id', (req, res) => {
   });
 });
 
-app.put('/api/cms', (req, res) => {
-  const payload = req.body;
-  let completed = 0;
-  const keys = Object.keys(payload);
-  if (keys.length === 0) return res.json({ message: "No CMS updates" });
-  keys.forEach(key => {
-    let value = key === 'heroImages' ? JSON.stringify(payload[key]) : payload[key].toString();
-    const sql = `INSERT INTO cms (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`;
-    db.run(sql, [key, value], (err) => {
-      completed++;
-      if (completed === keys.length) res.json({ message: "CMS synced." });
-    });
-  });
-});
 
 app.listen(PORT, () => {
   console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${PORT}`);

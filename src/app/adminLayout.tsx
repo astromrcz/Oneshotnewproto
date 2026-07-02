@@ -13,23 +13,20 @@ const navItems = [
   { to: '/admin',                   icon: LayoutDashboard, label: 'Dashboard',           exact: true },
   { to: '/admin/users',             icon: Users,           label: 'User Management' },
   { to: '/admin/tables',            icon: Table2,          label: 'Table Management' },
-  { to: '/admin/events',            icon: CalendarX2,      label: 'Events & Calendar' }, // Unified Tab
-  { to: '/admin/rates',             icon: DollarSign,      label: 'Rates Editor' },
-  { to: '/admin/reservation-terms', icon: FileText,        label: 'Reservation Terms' },
+  { to: '/admin/events',            icon: CalendarX2,      label: 'Events & Calendar' },
+  { to: '/admin/policy-rates',      icon: DollarSign,      label: 'Policy & Rates' }, // 🟢 NEW: Unified Tab
   { to: '/admin/announcements',     icon: Megaphone,       label: 'Announcements' },
   { to: '/admin/analytics',         icon: BarChart3,       label: 'Analytics' },
   { to: '/admin/feedback',          icon: Tag,             label: 'Feedback' },
   { to: '/admin/site-settings',     icon: FileText,        label: 'Site Settings' },
-
 ];
 
 const pageTitles: Record<string, string> = {
   '/admin': 'Dashboard',
   '/admin/users': 'User Management',
   '/admin/tables': 'Table Management',
-  '/admin/events': 'Events & Calendar', // Unified Title
-  '/admin/rates': 'Rates Editor',
-  '/admin/reservation-terms': 'Reservation Terms',
+  '/admin/events': 'Events & Calendar', 
+  '/admin/policy-rates': 'Policy & Rates', // 🟢 NEW: Unified Title
   '/admin/announcements': 'Announcements',
   '/admin/analytics': 'Analytics',
   '/admin/feedback': 'Feedback',
@@ -89,8 +86,6 @@ export function AdminLayout() {
             </div>
           </div>
         </div>
-
-        
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">

@@ -135,6 +135,8 @@ export function HomePage() {
   
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [isPreferredTableExpanded, setIsPreferredTableExpanded] = useState(true);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [isLiveMonitorOpen, setIsLiveMonitorOpen] = useState(false);
   
   const [resForm, setResForm] = useState({ name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2 });
@@ -211,6 +213,16 @@ export function HomePage() {
       setResTab('track'); // Auto-switch to track tab when logged in
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    setAgreedToTerms(false);
+  }, [selectedDate]);
+
+  useEffect(() => {
+    if (selectedTableId) {
+      setIsPreferredTableExpanded(false);
+    }
+  }, [selectedTableId]);
 
   const baseAmount = resForm.duration * (rates?.hourlyRate || HOURLY_RATE);
   const discountAmount = appliedPromo ? Math.floor(baseAmount * appliedPromo.discountPercent / 100) : 0;
@@ -325,8 +337,9 @@ export function HomePage() {
       }
     });
 
-    // Hard cap at 70% of total tables (e.g., 7 tables if 10 total)
-    const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * 0.7));
+    // Capacity limit is controlled by the admin policy editor slider
+    const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
+    const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
     if (overlapCount >= maxOnlineCapacity) return 'full';
 
     return 'valid';
@@ -337,7 +350,7 @@ export function HomePage() {
 
 
   const handleReservationSubmit = () => {
-    if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
+    if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid' || !agreedToTerms) return;
     setReservationStep(2);
   };
 
@@ -377,6 +390,7 @@ export function HomePage() {
   const closeReservation = () => {
     setReservationStep(0);
     setSelectedDate(null);
+    setAgreedToTerms(false);
     setResForm({ name: currentUser?.name || '', email: currentUser?.email || '', phone: '', pax: 2, timeSlot: '', duration: 2 });
     setPromoCodeInput('');
     setAppliedPromo(null);
@@ -665,11 +679,37 @@ export function HomePage() {
                       closedDates={safeClosedDates}
                     />
                     {selectedDate && (
-                      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
-                        <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
-                        <span className="text-xs text-emerald-300">
-                          Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
-                        </span>
+                      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-3">
+                        <div className="bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
+                          <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                          <span className="text-xs text-emerald-300">
+                            Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                          </span>
+                        </div>
+
+                        <div className="rounded-xl border border-emerald-900/20 bg-emerald-950/20 p-3">
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Today's Activity Guide</p>
+                            <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max {Number(rates?.onlineCapacityLimit ?? 70)}% Online Limit</span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {reservations
+                              .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), new Date(selectedDate)))
+                              .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                              .map((r: any) => (
+                                <div key={r.id} className="flex items-center gap-2 text-[10px]">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                                  <span className="text-neutral-400 w-24 flex-shrink-0">{r.timeSlot} — {format(addMinutes(new Date(`2000/01/01 ${r.timeSlot}`), r.durationHours * 60), 'HH:mm')}</span>
+                                  <span className="text-neutral-600 truncate">{r.partySize} pax booking</span>
+                                </div>
+                              ))}
+                            {reservations.filter((r: any) => r.status !== 'cancelled' && isSameDay(new Date(r.date), new Date(selectedDate))).length === 0 && (
+                              <p className="text-[10px] text-emerald-500 italic flex items-center gap-1">
+                                <CheckCircle size={10} /> Wide open! Plenty of tables available today.
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       </motion.div>
                     )}
                   </div>
@@ -694,7 +734,8 @@ export function HomePage() {
                           </div>
                           <div>
                             <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
-                            <input type="tel" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                            <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                            <p className="mt-1 text-[10px] text-neutral-500">Use 13 digits max, numbers only.</p>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             <div>
@@ -717,9 +758,13 @@ export function HomePage() {
                           
                           {/* FLEXIBLE TIME INPUT */}
                           <div>
-  <label className="block text-xs text-neutral-400 mb-1.5">Preferred Time</label>
+  <label className="block text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5">
+    <Clock size={13} className="text-white" />
+    Preferred Time
+  </label>
   <input
     type="time"
+    style={{ colorScheme: 'dark' }}
     value={resForm.timeSlot}
     onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
     className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
@@ -748,66 +793,56 @@ export function HomePage() {
     </p>
   )}
 
-  {/* 🟢 NEW: Day Availability Visualizer */}
-  {selectedDate && (
-    <div className="mt-4 bg-neutral-950 border border-neutral-800 rounded-xl p-3">
-      <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2 flex items-center justify-between">
-        <span>Today's Activity Guide</span>
-        <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max 70% Online Limit</span>
-      </p>
-      <div className="space-y-1.5">
-        {reservations
-          .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), new Date(selectedDate)))
-          .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
-          .map((r: any) => (
-            <div key={r.id} className="flex items-center gap-2 text-[10px]">
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-              <span className="text-neutral-400 w-24 flex-shrink-0">{r.timeSlot} — {format(addMinutes(new Date(`2000/01/01 ${r.timeSlot}`), r.durationHours * 60), 'HH:mm')}</span>
-              <span className="text-neutral-600 truncate">{r.partySize} pax booking</span>
-            </div>
-          ))
-        }
-        {reservations.filter((r: any) => r.status !== 'cancelled' && isSameDay(new Date(r.date), new Date(selectedDate))).length === 0 && (
-          <p className="text-[10px] text-emerald-500 italic flex items-center gap-1">
-            <CheckCircle size={10} /> Wide open! Plenty of tables available today.
-          </p>
-        )}
-      </div>
-    </div>
-  )}
 </div>
 
                           <div>
-                            <label className="block text-xs text-neutral-400 mb-2">Preferred Table <span className="text-neutral-600">(optional)</span></label>
-                            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-                              <button type="button" onClick={() => setSelectedTableId(null)} className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${!selectedTableId ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'}`}>
-                                <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="block text-xs text-neutral-400">Preferred Table <span className="text-neutral-600">(optional)</span></label>
+                              <button type="button" onClick={() => setIsPreferredTableExpanded(prev => !prev)} className="text-[10px] font-semibold text-neutral-400 hover:text-white transition-colors">
+                                {isPreferredTableExpanded ? 'Minimize' : 'Expand'}
                               </button>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                {tables.map((table: any) => {
-                                  const isAvail = table.status === 'available';
-                                  const isRes = table.status === 'reserved';
-                                  const isOcc = table.status === 'occupied';
-                                  const isSel = selectedTableId === table.id;
-                                  const disabled = isOcc || isRes;
-                                  const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
-                                  const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
-                                  const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
-                                  
-                                  return (
-                                    <button key={table.id} type="button" disabled={disabled} onClick={() => setSelectedTableId(isSel ? null : table.id)} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${isSel ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20' : disabled ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60' : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'}`}>
-                                      <div className="flex items-center justify-between w-full mb-1">
-                                        <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
-                                        {isSel && <CheckCircle size={14} className="text-emerald-400" />}
-                                      </div>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
-                                        <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>{statusText}</span>
-                                      </div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
+                            </div>
+                            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                              {!isPreferredTableExpanded ? (
+                                <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2">
+                                  <div>
+                                    <p className="text-xs font-semibold text-neutral-200">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
+                                    <p className="text-[10px] text-neutral-500">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
+                                  </div>
+                                  <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors">Expand</button>
+                                </div>
+                              ) : (
+                                <>
+                                  <button type="button" onClick={() => { setSelectedTableId(null); setIsPreferredTableExpanded(true); }} className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${!selectedTableId ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'}`}>
+                                    <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
+                                  </button>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                    {tables.map((table: any) => {
+                                      const isAvail = table.status === 'available';
+                                      const isRes = table.status === 'reserved';
+                                      const isOcc = table.status === 'occupied';
+                                      const isSel = selectedTableId === table.id;
+                                      const disabled = isOcc || isRes;
+                                      const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
+                                      const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
+                                      const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
+                                      
+                                      return (
+                                        <button key={table.id} type="button" disabled={disabled} onClick={() => { const nextSelection = isSel ? null : table.id; setSelectedTableId(nextSelection); setIsPreferredTableExpanded(nextSelection ? false : true); }} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${isSel ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20' : disabled ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60' : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'}`}>
+                                          <div className="flex items-center justify-between w-full mb-1">
+                                            <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
+                                            {isSel && <CheckCircle size={14} className="text-emerald-400" />}
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
+                                            <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>{statusText}</span>
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </>
+                              )}
                             </div>
                           </div>
 
@@ -847,21 +882,21 @@ export function HomePage() {
                               </div>
                             </div>
                           </div>
-                                {/* 🟢 NEW: Compact Policies in Step 2 */}
-                              <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 mb-4">
-                                  <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-wider flex items-center gap-1.5">
-                             <Info size={14} className="text-emerald-500" /> Booking Policies
+                                <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 mb-4">
+                                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                                    <Info size={14} className="text-emerald-500" /> Booking Policies
                                   </h4>
-                                    <ul className="space-y-1.5 text-[10px] text-neutral-400">
-                                       <li>• Minimum {reservationTerms.minHours} hour(s) per booking.</li>
-                                       <li>• {reservationTerms.cancellationPolicy}</li>
-                                      <li>• A {rates?.downPaymentPercent || 25}% down payment is required to secure your slot.</li>
-                                    </ul>
+                                  <p className="text-[10px] text-neutral-400 mt-1">The full reservation terms and conditions will be shown in the payment step before you confirm.</p>
                                 </div>
+
+                                <label className="flex items-start gap-2 text-[11px] text-neutral-400 cursor-pointer">
+                                  <input type="checkbox" checked={agreedToTerms} onChange={() => setAgreedToTerms(prev => !prev)} className="mt-0.5 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500" />
+                                  <span>I have read and agree to the reservation terms and conditions before proceeding to payment.</span>
+                                </label>
 
                           <button 
                             onClick={handleReservationSubmit} 
-                            disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid'} 
+                            disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || !agreedToTerms} 
                             className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
                           >
                             Proceed to Payment <ArrowRight size={14} />
@@ -976,8 +1011,10 @@ export function HomePage() {
                 {[
                   { name: 'Standard Play', rate: `₱${rates?.hourlyRate || HOURLY_RATE}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
                   { name: 'Reserved Table', rate: `₱${rates?.hourlyRate || HOURLY_RATE}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', '25% down payment', 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
-                  { name: 'Happy Hour', rate: `₱${rates?.happyHourRate || 200}`, unit: '/ hour', desc: `Discounted walk-in rate every weekday ${rates?.happyHourStart || '18:00'}–${rates?.happyHourEnd || '19:00'}.`, features: ['Weekdays only', 'Walk-in ONLY - No reservations', 'Discounted standard rate', 'Subject to availability'], badge: rates?.isHappyHourActive ? 'Limited' : 'Inactive', color: rates?.isHappyHourActive ? 'amber' : 'neutral' },
-                ].map(({ name, rate, unit, desc, features, badge, color }) => (
+                  { name: 'Happy Hour', rate: `₱${rates?.happyHourRate || 200}`, unit: '/ hour', desc: `Discounted walk-in rate every weekday ${rates?.happyHourStart || '18:00'}–${rates?.happyHourEnd || '19:00'}.`, features: ['Weekdays only', 'Walk-in ONLY - No reservations', 'Discounted standard rate', 'Subject to availability'], badge: 'Limited', color: 'amber' },
+                ]
+                .filter(card => card.name !== 'Happy Hour' || rates?.isHappyHourActive) // 🟢 NEW: Hides Happy Hour entirely if toggled off
+                .map(({ name, rate, unit, desc, features, badge, color }) => (
                   <div key={name} className={`relative bg-neutral-900 border rounded-2xl p-6 flex flex-col ${color === 'emerald' ? 'border-emerald-600/50 shadow-lg shadow-emerald-950/50' : color === 'amber' ? 'border-amber-600/30' : 'border-neutral-800'}`}>
                     {badge && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${color === 'emerald' ? 'bg-emerald-600 text-white' : color === 'amber' ? 'bg-amber-600 text-white' : 'bg-neutral-700 text-neutral-400'}`}>{badge}</span>}
                     <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-neutral-500'}`}>{name}</p>
@@ -1169,7 +1206,7 @@ export function HomePage() {
               {registerForm.error && <div className="bg-rose-950/40 text-rose-400 text-xs px-3 py-2 rounded-lg mb-4">{registerForm.error}</div>}
               <div className="space-y-3">
                 {[ { key: 'name', label: 'Full Name', type: 'text' }, { key: 'email', label: 'Email', type: 'email' }, { key: 'phone', label: 'Contact Number', type: 'tel' }].map(({ key, label, type }) => (
-                  <div key={key}><label className="block text-xs text-neutral-400 mb-1.5">{label}</label><input type={type} value={(registerForm as any)[key]} onChange={e => setRegisterForm(f => ({ ...f, [key]: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /></div>
+                  <div key={key}><label className="block text-xs text-neutral-400 mb-1.5">{label}</label><input type={type} inputMode={key === 'phone' ? 'numeric' : undefined} value={(registerForm as any)[key]} onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 13) : e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /></div>
                 ))}
                 <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600">{registerForm.showPw ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></div>
                 <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /></div>
@@ -1214,13 +1251,17 @@ export function HomePage() {
                   </div>
                 </div>
 
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mt-2 mb-5 h-32 overflow-y-auto">
-                    <p className="text-xs font-bold text-white mb-2 flex items-center gap-1.5">
-                      <BookOpen size={12} className="text-emerald-500" /> Terms & Conditions
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mt-2 mb-5 max-h-44 overflow-y-auto">
+                    <p className="text-xs font-bold text-white mb-3 flex items-center gap-1.5">
+                      <BookOpen size={12} className="text-emerald-500" /> Reservation Terms & Conditions
                     </p>
-                       <p className="text-[10px] text-neutral-400 whitespace-pre-line leading-relaxed">
-                         {reservationTerms.termsAndConditions}
-                    </p>
+                    <ul className="space-y-2 text-[10px] text-neutral-400 leading-relaxed">
+                      <li>• Minimum booking duration is {reservationTerms.minHours} hour(s).</li>
+                      <li>• Maximum booking duration is {reservationTerms.maxHours} hour(s).</li>
+                      <li>• A {rates?.downPaymentPercent || 25}% down payment is required to secure your slot.</li>
+                      <li>• {reservationTerms.cancellationPolicy}</li>
+                      <li>• {reservationTerms.termsAndConditions}</li>
+                    </ul>
                   </div>
 
                 <button onClick={handlePaymentConfirm} disabled={confirmingPayment || !paymentRef || paymentRef.length < 13 || !receiptImg} className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">

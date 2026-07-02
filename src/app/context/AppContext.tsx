@@ -310,13 +310,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ]);
 
         if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
-        if (ratesRes && ratesRes.ok) setRates(await ratesRes.json());
         if (resRes && resRes.ok) setReservations(await resRes.json());
         if (invRes && invRes.ok) setInventory(await invRes.json());
         if (queueRes && queueRes.ok) setQueue(await queueRes.json());
         if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
         if (annRes && annRes.ok) setAnnouncements(await annRes.json());
         if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
+        
+        if (ratesRes && ratesRes.ok) {
+        const dbSettings = await ratesRes.json();
+        setRates(prev => ({ ...prev, ...dbSettings }));
+        setReservationTerms(prev => ({ ...prev, ...dbSettings })); // 🟢 NEW: Load terms from DB
+      }
         
         console.log("✅ Local SQLite database successfully synchronized to state.");
       } catch (err) {
@@ -580,6 +585,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateReservationTerms = (t: Partial<ReservationTerms>) => {
     setReservationTerms(prev => ({ ...prev, ...t }));
+    syncToDB('/api/settings/rates', 'PUT', t, `Updated Reservation Terms`); // 🟢 NEW: Push to DB
     addActivity('admin_action', 'Reservation terms updated');
   };
 

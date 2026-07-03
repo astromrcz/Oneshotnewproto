@@ -267,49 +267,69 @@ app.put('/api/inventory/:id', (req, res) => {
   });
 });
 
+// PUT or POST /api/settings/rates
 app.put('/api/settings/rates', (req, res) => {
   const payload = req.body;
   const keys = Object.keys(payload);
   
-  console.log(`📝 Updating rates with ${keys.length} keys:`, keys);
-  
   if (keys.length === 0) return res.json({ message: "No rates to update" });
   
-  // Serialize database operations using a queue to prevent locking
   let index = 0;
   let errors = [];
   
   const processNextKey = () => {
     if (index >= keys.length) {
-      // All operations completed
-      console.log(`✅ All rate updates completed. Errors: ${errors.length}`);
-      if (errors.length > 0) {
-        console.error('❌ Errors during rate update:', errors);
-        return res.status(500).json({ error: "Some settings failed to save.", details: errors });
-      }
-      return res.json({ message: "System settings synced successfully." });
+      if (errors.length > 0) return res.status(500).json({ error: "Some rates failed to save.", details: errors });
+      return res.json({ message: "Rates updated successfully." });
     }
     
     const key = keys[index];
-    let value = payload[key];
-    
-    // Convert boolean to string for storage
-    if (typeof value === 'boolean') value = value ? 'true' : 'false';
-    else value = value !== null && value !== undefined ? value.toString() : '';
-    
-    console.log(`  → Saving [${key}] = ${value}`);
+    // Convert boolean values to strings so SQLite can store them easily in the TEXT column
+    const value = typeof payload[key] === 'boolean' ? String(payload[key]) : (payload[key] ?? '').toString();
     
     const sql = `INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`;
     
     db.run(sql, [key, value], function(err) {
       if (err) {
-        console.error(`    ❌ Error: ${err.message}`);
+        console.error(`❌ DB Error saving rates [${key}]:`, err.message);
         errors.push({ key, error: err.message });
-      } else {
-        console.log(`    ✅ Saved`);
       }
       index++;
-      processNextKey(); // Process next key in queue
+      processNextKey();
+    });
+  };
+  
+  processNextKey();
+});
+
+// PUT or POST /api/settings/terms
+app.put('/api/settings/terms', (req, res) => {
+  const payload = req.body;
+  const keys = Object.keys(payload);
+  
+  if (keys.length === 0) return res.json({ message: "No terms to update" });
+  
+  let index = 0;
+  let errors = [];
+  
+  const processNextKey = () => {
+    if (index >= keys.length) {
+      if (errors.length > 0) return res.status(500).json({ error: "Some terms failed to save.", details: errors });
+      return res.json({ message: "Terms updated successfully." });
+    }
+    
+    const key = keys[index];
+    const value = typeof payload[key] === 'boolean' ? String(payload[key]) : (payload[key] ?? '').toString();
+    
+    const sql = `INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`;
+    
+    db.run(sql, [key, value], function(err) {
+      if (err) {
+        console.error(`❌ DB Error saving terms [${key}]:`, err.message);
+        errors.push({ key, error: err.message });
+      }
+      index++;
+      processNextKey();
     });
   };
   

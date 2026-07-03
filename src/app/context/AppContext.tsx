@@ -156,25 +156,45 @@ export type StaffUser = {
 };
 
 export type RatesConfig = {
+  // Base Settings
   hourlyRate: number;
-  happyHourRate: number;
-  happyHourStart: string;
-  happyHourEnd: string;
-  isHappyHourActive: boolean; 
   overtimeRate: number;
   downPaymentPercent: number;
-  reservationStartTime: string; 
-  reservationEndTime: string;   
+
+  // Weekday Settings
+  weekdayStartTime: string;
+  weekdayEndTime: string;
+  isWeekdayHappyHourActive: boolean;
+  weekdayHappyHourRate: number;
+  weekdayHappyHourStart: string;
+  weekdayHappyHourEnd: string;
+  weekdayOnlineCapacityLimit: number;
+
+  // Weekend Settings
+  weekendStartTime: string;
+  weekendEndTime: string;
+  isWeekendHappyHourActive: boolean;
+  weekendHappyHourRate: number;
+  weekendHappyHourStart: string;
+  weekendHappyHourEnd: string;
+  weekendOnlineCapacityLimit: number;
 };
 
 export type ReservationTerms = {
+  // General Terms
   minHours: number;
   maxHours: number;
-  minPartySize: number;
-  maxPartySize: number;
   cancellationHours: number;
   cancellationPolicy: string;
   termsAndConditions: string;
+
+  // Weekday Constraints
+  weekdayMinPartySize: number;
+  weekdayMaxPartySize: number;
+
+  // Weekend Constraints
+  weekendMinPartySize: number;
+  weekendMaxPartySize: number;
 };
 
 export type AnnouncementType = 'info' | 'warning' | 'promo' | 'event';
@@ -252,8 +272,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([
     { id: 'u1', username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'manager', isAdmin: true, phone: '09171234567', isActive: true, createdAt: new Date() }
   ]);
-  const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 250, happyHourRate: 200, happyHourStart: '18:00', happyHourEnd: '19:00', isHappyHourActive: true, overtimeRate: 250, downPaymentPercent: 25, reservationStartTime: '12:00', reservationEndTime: '02:00' });
-  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 1, maxHours: 8, minPartySize: 1, maxPartySize: 10, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.' });
+ const [rates, setRates] = useState<RatesConfig>({ 
+    hourlyRate: 250, overtimeRate: 250, downPaymentPercent: 25,
+    weekdayStartTime: '12:00', weekdayEndTime: '02:00',
+    isWeekdayHappyHourActive: false, weekdayHappyHourRate: 200, weekdayHappyHourStart: '15:00', weekdayHappyHourEnd: '18:00', weekdayOnlineCapacityLimit: 70,
+    weekendStartTime: '12:00', weekendEndTime: '02:00',
+    isWeekendHappyHourActive: false, weekendHappyHourRate: 200, weekendHappyHourStart: '15:00', weekendHappyHourEnd: '18:00', weekendOnlineCapacityLimit: 70
+  });
+  
+  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ 
+    minHours: 1, maxHours: 8, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.',
+    weekdayMinPartySize: 1, weekdayMaxPartySize: 10,
+    weekendMinPartySize: 1, weekendMaxPartySize: 10
+  });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   
@@ -584,43 +615,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toggleStaffUserActive = (id: string) => setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
 
   const updateRates = async (r: Partial<RatesConfig>) => {
-    // sanitize downPaymentPercent to be within 0-100
     const sanitized = { ...r } as Partial<RatesConfig>;
+    
     // Coerce numeric fields to numbers and clamp where needed
-    if (sanitized.hourlyRate !== undefined) {
-      const hr = Number(sanitized.hourlyRate) || 0;
-      sanitized.hourlyRate = hr;
-    }
-    if (sanitized.happyHourRate !== undefined) {
-      const hh = Number(sanitized.happyHourRate) || 0;
-      sanitized.happyHourRate = hh;
-    }
-    if (sanitized.overtimeRate !== undefined) {
-      const ot = Number(sanitized.overtimeRate) || 0;
-      sanitized.overtimeRate = ot;
-    }
+    if (sanitized.hourlyRate !== undefined) sanitized.hourlyRate = Number(sanitized.hourlyRate) || 0;
+    if (sanitized.overtimeRate !== undefined) sanitized.overtimeRate = Number(sanitized.overtimeRate) || 0;
+    if (sanitized.weekdayHappyHourRate !== undefined) sanitized.weekdayHappyHourRate = Number(sanitized.weekdayHappyHourRate) || 0;
+    if (sanitized.weekendHappyHourRate !== undefined) sanitized.weekendHappyHourRate = Number(sanitized.weekendHappyHourRate) || 0;
+    
     if (sanitized.downPaymentPercent !== undefined && sanitized.downPaymentPercent !== null) {
       let dp = Number(sanitized.downPaymentPercent) || 0;
       dp = Math.max(0, Math.min(100, dp));
       sanitized.downPaymentPercent = dp;
     }
 
-    const payload: Partial<RatesConfig> = {
-      hourlyRate: sanitized.hourlyRate,
-      happyHourRate: sanitized.happyHourRate,
-      overtimeRate: sanitized.overtimeRate,
-      reservationStartTime: sanitized.reservationStartTime,
-      reservationEndTime: sanitized.reservationEndTime,
-      isHappyHourActive: sanitized.isHappyHourActive,
-      downPaymentPercent: sanitized.downPaymentPercent,
-      happyHourStart: sanitized.happyHourStart,
-      happyHourEnd: sanitized.happyHourEnd,
-    };
-
     setRates(prev => ({ ...prev, ...sanitized }));
     try {
-      console.log('Updating rates payload:', payload);
-      const res = await syncToDB('/api/settings/rates', 'PUT', payload, `Updated System Rates`);
+      console.log('Updating rates payload:', sanitized);
+      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
       addActivity('admin_action', 'System rates updated');
       return res;
     } catch (e) {
@@ -631,18 +643,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
     setReservationTerms(prev => ({ ...prev, ...t }));
-    const payload: Partial<ReservationTerms> = {
-      minHours: t.minHours,
-      maxHours: t.maxHours,
-      minPartySize: t.minPartySize,
-      maxPartySize: t.maxPartySize,
-      cancellationHours: t.cancellationHours,
-      cancellationPolicy: t.cancellationPolicy,
-      termsAndConditions: t.termsAndConditions,
-    };
+    
     try {
-      console.log('Updating reservation terms payload:', payload);
-      const res = await syncToDB('/api/settings/rates', 'PUT', payload, `Updated Reservation Terms`); // 🟢 NEW: Push to DB
+      console.log('Updating reservation terms payload:', t);
+      // FIXED: Pointing to /api/settings/terms instead of /rates
+      const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`); 
       addActivity('admin_action', 'Reservation terms updated');
       return res;
     } catch (e) {

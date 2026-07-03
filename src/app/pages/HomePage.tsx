@@ -735,8 +735,8 @@ export function HomePage() {
                 <h2 className="text-center text-2xl font-bold text-white mb-10">Why Choose One Shot?</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   {[
-                    { icon: Award, title: 'Premium Tables', desc: '10 tournament-grade billiard tables maintained to the highest standard.', color: 'emerald' },
-                    { icon: Clock, title: 'Extended Hours', desc: 'Mon–Sat 12:00 PM – 3:00 AM · Sun 5:00 PM – 3:00 AM. Game night starts here!', color: 'amber' },
+                    { icon: Award, title: 'Premium Tables', desc: `${tables.length || 10} tournament-grade billiard tables maintained to the highest standard.`, color: 'emerald' },
+                    { icon: Clock, title: 'Extended Hours', desc: `Weekdays ${fmt12(rates?.weekdayStartTime || '12:00')} – ${fmt12(rates?.weekdayEndTime || '02:00')} · Weekends ${fmt12(rates?.weekendStartTime || '12:00')} – ${fmt12(rates?.weekendEndTime || '02:00')}. Game night starts here!`, color: 'amber' },
                     { icon: Shield, title: 'Safe & Secure', desc: 'Clean, safe, and well-lit environment for players of all skill levels.', color: 'sky' },
                   ].map(({ icon: Icon, title, desc, color }) => (
                     <div key={title} className={`bg-neutral-900 border border-neutral-800 rounded-2xl p-6 hover:border-${color}-600/40 transition-all group`}>
@@ -751,6 +751,7 @@ export function HomePage() {
               </div>
             </motion.div>
           )}
+          
 
           {/* ════ RESERVATIONS SECTION ════ */}
           {activeSection === 'reservations' && (
@@ -1145,7 +1146,7 @@ export function HomePage() {
                     { label: 'Minimum Booking', value: `${reservationTerms.minHours} hour(s)` },
                     { label: 'Maximum Booking', value: `${reservationTerms.maxHours} hour(s)` },
                     { label: 'Grace Period', value: '15 minutes' },
-                    { label: 'Cancellation', value: reservationTerms.cancellationPolicy },
+                    { label: 'Cancellation Policy', value: reservationTerms.cancellationPolicy },
                   ].map(({ label, value }) => (
                     <div key={label} className="flex justify-between py-2 border-b border-neutral-800/60"><span className="text-neutral-500">{label}</span><span className="text-neutral-200 font-medium text-right ml-2">{value}</span></div>
                   ))}
@@ -1234,7 +1235,24 @@ export function HomePage() {
                     </div>
                   </div>
                   <div className="space-y-4">
-                    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-3">Follow Us</p><div className="grid grid-cols-2 gap-3">{[{ platform: 'Facebook', handle: cms.facebook, icon: '📘' }, { platform: 'Instagram', handle: cms.instagram, icon: '📸' }, { platform: 'TikTok', handle: cms.tiktok, icon: '🎵' }, { platform: 'YouTube', handle: 'One Shot Billiards', icon: '📺' }].map(({ platform, handle, icon }) => (<div key={platform} className="flex items-center gap-2.5 bg-neutral-800/60 rounded-lg p-3"><span className="text-lg">{icon}</span><div><p className="text-[10px] text-neutral-500">{platform}</p><p className="text-xs text-neutral-300 truncate">{handle}</p></div></div>))}</div></div>
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5">
+                      <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-3">Follow Us</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { platform: 'Facebook', handle: cms.facebook, icon: '📘' }, 
+                          { platform: 'Instagram', handle: cms.instagram, icon: '📸' }, 
+                          { platform: 'TikTok', handle: cms.tiktok, icon: '🎵' }
+                        ].map(({ platform, handle, icon }) => (
+                          <div key={platform} className="flex items-center gap-2.5 bg-neutral-800/60 rounded-lg p-3">
+                            <span className="text-lg">{icon}</span>
+                            <div>
+                              <p className="text-[10px] text-neutral-500">{platform}</p>
+                              <p className="text-xs text-neutral-300 truncate">{handle}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

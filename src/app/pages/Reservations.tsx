@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus } from '../context/AppContext';
+import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reservation, Event, PromoCode } from '../context/AppContext';
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
@@ -26,7 +26,7 @@ const formatDate = (d: Date) => {
 const todayStart = startOfDay(new Date());
 
 export function Reservations() {
-  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates } = useAppContext();
+  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, rates } = useAppContext();
   
   const [showForm, setShowForm] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
@@ -56,8 +56,10 @@ export function Reservations() {
     timeSlot: '', durationHours: 2, partySize: 2, tableId: '',
   });
 
-  const totalAmount = (form.durationHours * HOURLY_RATE);
-  const downPayment = totalAmount * DOWN_PAYMENT_RATE;
+  const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
+  const totalAmount = form.durationHours * effectiveHourly;
+  const downPaymentPercentVal = rates && Number(rates.downPaymentPercent) >= 0 ? Number(rates.downPaymentPercent) : DOWN_PAYMENT_RATE * 100;
+  const downPayment = totalAmount * (downPaymentPercentVal / 100);
 
   // ─── Data Mappers for Calendar ───────────────────────────────────────
   const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
@@ -69,7 +71,7 @@ export function Reservations() {
     if (!acc[d]) acc[d] = [];
     acc[d].push(r);
     return acc;
-  }, {} as Record<string, typeof reservations[0]>);
+  }, {} as Record<string, Reservation[]>);
 
   const eventsMap = events.reduce((acc, e) => {
     if (!e.date) return acc;
@@ -80,7 +82,7 @@ export function Reservations() {
       acc[key].push(e);
     });
     return acc;
-  }, {} as Record<string, typeof events[0]>);
+  }, {} as Record<string, Event[]>);
   
   const promosMap = promoCodes.reduce((acc, p) => {
     if(p.expiresAt) {
@@ -89,7 +91,7 @@ export function Reservations() {
       acc[d].push(p);
     }
     return acc;
-  }, {} as Record<string, typeof promoCodes[0]>);
+  }, {} as Record<string, PromoCode[]>);
 
   const handleSendEmail = (resId: string) => {
     setEmailToast(`Reschedule email sent to Reservation #${resId.toUpperCase()}`);
@@ -581,11 +583,11 @@ export function Reservations() {
                 <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment</p>
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-neutral-400">Total ({selected.durationHours}h × ₱{HOURLY_RATE})</span>
+                    <span className="text-neutral-400">Total ({selected.durationHours}h × ₱{effectiveHourly})</span>
                     <span className="text-neutral-200 font-semibold">{formatPHP(selected.totalAmount)}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-neutral-400">Down Payment (25%)</span>
+                    <span className="text-neutral-400">Down Payment ({downPaymentPercentVal}%)</span>
                     <div className="flex items-center gap-2">
                       <span className={selected.downPaymentPaid ? 'text-emerald-400' : 'text-neutral-400'}>{formatPHP(selected.downPaymentAmount)}</span>
                       <button
@@ -778,11 +780,11 @@ export function Reservations() {
               <div className="bg-neutral-900 rounded-xl p-4 border border-neutral-800 space-y-2">
                 <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment Summary</p>
                 <div className="flex justify-between text-sm">
-                  <span className="text-neutral-400">Total ({form.durationHours}h × ₱{HOURLY_RATE})</span>
+                  <span className="text-neutral-400">Total ({form.durationHours}h × ₱{effectiveHourly})</span>
                   <span className="text-neutral-200 font-semibold">{formatPHP(totalAmount)}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-neutral-800 pt-2">
-                  <span className="text-neutral-400">Down Payment (25%)</span>
+                  <span className="text-neutral-400">Down Payment ({downPaymentPercentVal}%)</span>
                   <span className="text-amber-400 font-semibold">{formatPHP(downPayment)}</span>
                 </div>
               </div>

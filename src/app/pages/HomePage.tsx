@@ -845,63 +845,63 @@ export function HomePage() {
                             <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
                             <p className="mt-1 text-[10px] text-neutral-500">Use 13 digits max, numbers only.</p>
                           </div>
+                          
+                          {/* FLEXIBLE TIME INPUT */}
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5">
+                              <Clock size={13} className="text-white" />
+                              Preferred Time
+                            </label>
+                            <input
+                              type="time"
+                              style={{ colorScheme: 'dark' }}
+                              value={resForm.timeSlot}
+                              onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
+                              className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
+                                timeValidation === 'closed' || timeValidation === 'happyhour' || timeValidation === 'full' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
+                              }`}
+                            />
+                            
+                            <p className="text-[10px] text-amber-500/80 mt-2 font-semibold flex items-start gap-1">
+                              <AlertTriangle size={12} className="flex-shrink-0" />
+                              <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
+                            </p>
+
+                            {timeValidation === 'closed' && (
+                              <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+                                <XCircle size={10} /> The establishment is not accepting bookings at this hour.
+                              </p>
+                            )}
+                            {timeValidation === 'happyhour' && (
+                              <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
+                                <AlertTriangle size={10} /> Happy Hour is strictly walk-in only.
+                              </p>
+                            )}
+                            {timeValidation === 'full' && (
+                              <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+                                <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
+                              </p>
+                            )}
+                          </div>
+
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <label className="block text-xs text-neutral-400 mb-1.5">No. of Persons</label>
                               <input type="number" min={1} max={20} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
                             </div>
                             <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between">
-                            <span>Duration (hours)</span>
-                            {resForm.timeSlot && <span className="text-[9px] text-amber-500">Max ~{maxAllowedDuration}h based on cut-off</span>}
-                          </label>
-                          <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
-                            {/* Dynamically render options up to the max allowed */}
-                            {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
-                              <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
-                            ))}
-                          </select>
+                              <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                                <span>Duration (hours)</span>
+                                {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h based on cut-off</span>}
+                              </label>
+                              <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
+                                {/* Dynamically render options up to the max allowed */}
+                                {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                                  <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
-                          </div>
-                          
-                          {/* FLEXIBLE TIME INPUT */}
-                          <div>
-  <label className="block text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5">
-    <Clock size={13} className="text-white" />
-    Preferred Time
-  </label>
-  <input
-    type="time"
-    style={{ colorScheme: 'dark' }}
-    value={resForm.timeSlot}
-    onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
-    className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
-      timeValidation === 'closed' || timeValidation === 'happyhour' || timeValidation === 'full' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
-    }`}
-  />
-  
-  <p className="text-[10px] text-amber-500/80 mt-2 font-semibold flex items-start gap-1">
-    <AlertTriangle size={12} className="flex-shrink-0" />
-    <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
-  </p>
-
-  {timeValidation === 'closed' && (
-    <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
-      <XCircle size={10} /> The establishment is not accepting bookings at this hour.
-    </p>
-  )}
-  {timeValidation === 'happyhour' && (
-    <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
-      <AlertTriangle size={10} /> Happy Hour is strictly walk-in only.
-    </p>
-  )}
-  {timeValidation === 'full' && (
-    <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
-      <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
-    </p>
-  )}
-
-</div>
 
                           <div>
                             <div className="flex items-center justify-between mb-2">
@@ -1003,6 +1003,7 @@ export function HomePage() {
                   </div>
                 </div>
               )}
+
 
               {/* Guest Tracking View */}
               {resTab === 'track' && (

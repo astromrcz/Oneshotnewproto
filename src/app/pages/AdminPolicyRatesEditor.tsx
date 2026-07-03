@@ -86,6 +86,7 @@ export default function AdminPolicyRatesEditor() {
 
   // Custom handler for text inputs that should only accept numbers
   const handleRatesTextNumber = (e: React.ChangeEvent<HTMLInputElement>) => {
+    
     const { name, value } = e.target;
     const cleanValue = value.replace(/\D/g, ''); // Strip non-digits
     // Clamp downPaymentPercent to 0-100
@@ -139,7 +140,16 @@ export default function AdminPolicyRatesEditor() {
       if (!res.ok) throw new Error('Failed to fetch from DB');
       const data = await res.json();
       setRatesForm(prev => ({ ...prev, ...data, onlineCapacityLimit: data.onlineCapacityLimit ?? prev.onlineCapacityLimit }));
-      setTermsForm(prev => ({ ...prev, ...data }));
+      setTermsForm(prev => ({
+        ...prev,
+        minHours: data.minHours ?? prev.minHours,
+        maxHours: data.maxHours ?? prev.maxHours,
+        minPartySize: data.minPartySize ?? prev.minPartySize,
+        maxPartySize: data.maxPartySize ?? prev.maxPartySize,
+        cancellationHours: data.cancellationHours ?? prev.cancellationHours,
+        cancellationPolicy: data.cancellationPolicy ?? prev.cancellationPolicy,
+        termsAndConditions: data.termsAndConditions ?? prev.termsAndConditions,
+      }));
       setDbPayload(data);
       toast.success('Refreshed settings from local database');
     } catch (e) {
@@ -165,6 +175,7 @@ export default function AdminPolicyRatesEditor() {
       const payload = { ...ratesForm, ...termsForm };
       setLastSentPayload(payload);
       // Await both updates so we can show accurate loading state
+      console.log("Saving ratesForm:", ratesForm, "termsForm:", termsForm, "payload:", payload);
       await updateRates(ratesForm);
       await updateReservationTerms(termsForm);
       // Refresh DB and capture stored payload

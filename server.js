@@ -6,7 +6,7 @@ import cors from 'cors';
 import sqlite3Pkg from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import multer from 'multer'; // 🟢 NEW: File parser
+import multer from 'multer';
 
 const sqlite3 = sqlite3Pkg.verbose();
 const __filename = fileURLToPath(import.meta.url);
@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3001;
 
-// 🟢 NEW: Store uploaded files in Node memory temporarily so we can save them as BLOBs
+// Store uploaded files in Node memory temporarily so we can save them as BLOBs
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors()); 
@@ -26,12 +26,46 @@ const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error('❌ Error connecting to SQLite database:', err.message);
   else {
     console.log('✅ Connected to local SQLite database (Direct Match Mode active).');
-    db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, () => {});
-    db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
     
-    // 🟢 NEW: Ensure settings and cms tables exist with keyName as PRIMARY KEY
-    db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
-    db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    // Set a busy timeout to help with concurrent access
+    db.configure('busyTimeout', 5000);
+    
+    // 🟢 DATABASE INITIALIZATION & DUPLICATE CLEANUP (Properly Serialized)
+    db.serialize(() => {
+      // Step 1: Create main tables
+      db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`, (err) => {
+        if (err) console.error('Error creating systemSettings table:', err);
+      });
+      
+      db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`, (err) => {
+        if (err) console.error('Error creating cms table:', err);
+      });
+      
+      db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`, (err) => {
+        if (err) console.error('Error creating images table:', err);
+      });
+      
+      // Step 2: Try to add sessionData column if it doesn't exist (will fail silently if exists)
+      db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, (err) => {
+        // Ignore error - column likely already exists
+      });
+
+      // Step 3: Merge and cleanup old snake_case tables if they exist
+      db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) SELECT key_name, setting_value FROM system_settings`, (err) => {
+        // Ignore errors if source table doesn't exist
+        if (!err) {
+          db.run(`DELETE FROM systemSettings WHERE keyName LIKE '%_%'`);
+          db.run(`DROP TABLE IF EXISTS system_settings`);
+        }
+      });
+
+      db.run(`INSERT OR IGNORE INTO cms (keyName, settingValue) SELECT key_name, content_value FROM cms_content`, (err) => {
+        // Ignore errors if source table doesn't exist
+        if (!err) {
+          db.run(`DROP TABLE IF EXISTS cms_content`);
+        }
+      });
+    });
   }
 });
 
@@ -39,15 +73,14 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // 🚀 READ ROUTES (GET) 
 // ==========================================
 
-// 🟢 NEW: Image serving route. This reads the BLOB and serves it as a real image file!
 app.get('/api/images/:id', (req, res) => {
   db.get(`SELECT mimeType, data FROM images WHERE id = ?`, [req.params.id], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).send('Image not found');
     
     res.setHeader('Content-Type', row.mimeType);
-    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for fast loading
-    res.send(row.data); // Serve the raw binary BLOB
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); 
+    res.send(row.data); 
   });
 });
 
@@ -68,8 +101,6 @@ app.get('/api/reservations', (req, res) => {
     res.json(rows.map(r => ({ ...r, downPaymentPaid: r.downPaymentPaid === 1, balancePaid: r.balancePaid === 1 })));
   });
 });
-
-
 
 app.get('/api/inventory', (req, res) => {
   db.all(`SELECT * FROM inventory`, [], (err, rows) => {
@@ -136,7 +167,6 @@ app.get('/api/cms', (req, res) => {
 // 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
 
-// 🟢 NEW: Upload Binary Image to BLOB
 app.post('/api/images', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
   
@@ -147,7 +177,6 @@ app.post('/api/images', upload.single('image'), (req, res) => {
     [id, req.file.mimetype, req.file.buffer], 
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
-      // Return the new URL back to the frontend so it can save it in the CMS table
       res.status(201).json({ url: `http://localhost:3001/api/images/${id}` });
     }
   );
@@ -239,21 +268,52 @@ app.put('/api/inventory/:id', (req, res) => {
 });
 
 app.put('/api/settings/rates', (req, res) => {
-  console.log('PUT /api/settings/rates payload:', req.body);
   const payload = req.body;
-  let completed = 0;
   const keys = Object.keys(payload);
+  
+  console.log(`📝 Updating rates with ${keys.length} keys:`, keys);
+  
   if (keys.length === 0) return res.json({ message: "No rates to update" });
-  keys.forEach(key => {
+  
+  // Serialize database operations using a queue to prevent locking
+  let index = 0;
+  let errors = [];
+  
+  const processNextKey = () => {
+    if (index >= keys.length) {
+      // All operations completed
+      console.log(`✅ All rate updates completed. Errors: ${errors.length}`);
+      if (errors.length > 0) {
+        console.error('❌ Errors during rate update:', errors);
+        return res.status(500).json({ error: "Some settings failed to save.", details: errors });
+      }
+      return res.json({ message: "System settings synced successfully." });
+    }
+    
+    const key = keys[index];
     let value = payload[key];
+    
+    // Convert boolean to string for storage
     if (typeof value === 'boolean') value = value ? 'true' : 'false';
     else value = value !== null && value !== undefined ? value.toString() : '';
+    
+    console.log(`  → Saving [${key}] = ${value}`);
+    
     const sql = `INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`;
-    db.run(sql, [key, value], (err) => {
-      completed++;
-      if (completed === keys.length) res.json({ message: "System settings synced." });
+    
+    db.run(sql, [key, value], function(err) {
+      if (err) {
+        console.error(`    ❌ Error: ${err.message}`);
+        errors.push({ key, error: err.message });
+      } else {
+        console.log(`    ✅ Saved`);
+      }
+      index++;
+      processNextKey(); // Process next key in queue
     });
-  });
+  };
+  
+  processNextKey();
 });
 
 app.post('/api/feedback', (req, res) => {
@@ -298,6 +358,45 @@ app.delete('/api/announcements/:id', (req, res) => {
   });
 });
 
+app.put('/api/cms', (req, res) => {
+  const payload = req.body;
+  const keys = Object.keys(payload);
+  
+  if (keys.length === 0) return res.json({ message: "No CMS updates" });
+  
+  // Serialize database operations using a queue to prevent locking
+  let index = 0;
+  let errors = [];
+  
+  const processNextKey = () => {
+    if (index >= keys.length) {
+      // All operations completed
+      if (errors.length > 0) {
+        console.error('❌ Errors during CMS update:', errors);
+        return res.status(500).json({ error: "Some CMS settings failed to save.", details: errors });
+      }
+      return res.json({ message: "CMS synced successfully." });
+    }
+    
+    const key = keys[index];
+    let value = key === 'heroImages' ? JSON.stringify(payload[key]) : payload[key].toString();
+    
+    const sql = `INSERT INTO cms (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`;
+    
+    db.run(sql, [key, value], function(err) {
+      if (err) {
+        console.error(`❌ DB Error saving CMS [${key}]:`, err.message);
+        errors.push({ key, error: err.message });
+      } else {
+        console.log(`✅ Saved CMS [${key}]`);
+      }
+      index++;
+      processNextKey(); // Process next key in queue
+    });
+  };
+  
+  processNextKey();
+});
 
 app.listen(PORT, () => {
   console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${PORT}`);

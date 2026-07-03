@@ -1,4 +1,4 @@
-import { useAppContext, HOURLY_RATE } from '../context/AppContext';
+import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router';
 import {
   TableProperties, Users, Calendar, TrendingUp,

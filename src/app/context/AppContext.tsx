@@ -605,9 +605,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sanitized.downPaymentPercent = dp;
     }
 
+    const payload: Partial<RatesConfig> = {
+      hourlyRate: sanitized.hourlyRate,
+      happyHourRate: sanitized.happyHourRate,
+      overtimeRate: sanitized.overtimeRate,
+      reservationStartTime: sanitized.reservationStartTime,
+      reservationEndTime: sanitized.reservationEndTime,
+      isHappyHourActive: sanitized.isHappyHourActive,
+      downPaymentPercent: sanitized.downPaymentPercent,
+      happyHourStart: sanitized.happyHourStart,
+      happyHourEnd: sanitized.happyHourEnd,
+    };
+
     setRates(prev => ({ ...prev, ...sanitized }));
     try {
-      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
+      console.log('Updating rates payload:', payload);
+      const res = await syncToDB('/api/settings/rates', 'PUT', payload, `Updated System Rates`);
       addActivity('admin_action', 'System rates updated');
       return res;
     } catch (e) {
@@ -618,8 +631,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
     setReservationTerms(prev => ({ ...prev, ...t }));
+    const payload: Partial<ReservationTerms> = {
+      minHours: t.minHours,
+      maxHours: t.maxHours,
+      minPartySize: t.minPartySize,
+      maxPartySize: t.maxPartySize,
+      cancellationHours: t.cancellationHours,
+      cancellationPolicy: t.cancellationPolicy,
+      termsAndConditions: t.termsAndConditions,
+    };
     try {
-      const res = await syncToDB('/api/settings/rates', 'PUT', t, `Updated Reservation Terms`); // 🟢 NEW: Push to DB
+      console.log('Updating reservation terms payload:', payload);
+      const res = await syncToDB('/api/settings/rates', 'PUT', payload, `Updated Reservation Terms`); // 🟢 NEW: Push to DB
       addActivity('admin_action', 'Reservation terms updated');
       return res;
     } catch (e) {

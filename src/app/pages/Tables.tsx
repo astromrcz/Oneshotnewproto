@@ -22,7 +22,7 @@ type CustomerSource =
 export function Tables() {
   const { 
     tables, queue, reservations, assignTable, extendSession, freeTable, 
-    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile 
+    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile, rates 
   } = useAppContext() as any;
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
@@ -142,7 +142,8 @@ export function Tables() {
   const endInfo = getEndSessionInfo();
 
   const extendingTable = tables.find((t: any) => t.id === extendingTableId);
-  const extendCharge = (extendMinutes / 60) * HOURLY_RATE;
+  const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
+  const extendCharge = (extendMinutes / 60) * effectiveHourly;
 
   const posTable = tables.find((t: any) => t.id === posTableId);
   const confirmedOrders = posTable?.session?.orders || [];
@@ -200,9 +201,9 @@ export function Tables() {
     setSelectedCustomer(c); setCustomerName(c.name);
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
-      setDurationMinutes(mins); setAmountPaid(((mins / 60) * HOURLY_RATE).toFixed(2));
+      setDurationMinutes(mins); setAmountPaid(((mins / 60) * effectiveHourly).toFixed(2));
     } else {
-      setDurationMinutes(60); setAmountPaid(((60 / 60) * HOURLY_RATE).toFixed(2));
+      setDurationMinutes(60); setAmountPaid(((60 / 60) * effectiveHourly).toFixed(2));
     }
   };
 
@@ -211,7 +212,7 @@ export function Tables() {
     if (!assigningTableId || !customerName) return;
     
     const isOpenTime = durationMinutes === 'open';
-    const autoPayment = isOpenTime ? 0 : ((durationMinutes as number) / 60) * HOURLY_RATE;
+    const autoPayment = isOpenTime ? 0 : ((durationMinutes as number) / 60) * effectiveHourly;
     
     assignTable(assigningTableId, {
       customerName,
@@ -219,7 +220,7 @@ export function Tables() {
       isOpenTime: isOpenTime,
       startTime: new Date(),
       isPaid: paymentOption === 'payNow',
-      hourlyRate: HOURLY_RATE,
+      hourlyRate: effectiveHourly,
       amountPaid: paymentOption === 'payNow' ? parseFloat(amountPaid) || autoPayment : 0,
       orders: [],
       paymentStatus: paymentOption,
@@ -345,10 +346,10 @@ export function Tables() {
         if (customer.kind === 'reservation') {
           const mins = (customer as any).durationHours * 60;
           setDurationMinutes(mins);
-          setAmountPaid(((mins / 60) * HOURLY_RATE).toFixed(2));
+          setAmountPaid(((mins / 60) * effectiveHourly).toFixed(2));
         } else {
           setDurationMinutes(60);
-          setAmountPaid(((60 / 60) * HOURLY_RATE).toFixed(2));
+          setAmountPaid(((60 / 60) * effectiveHourly).toFixed(2));
         }
         
         sessionStorage.removeItem('assignCustomer');
@@ -641,7 +642,7 @@ export function Tables() {
             <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center flex-none">
               <div>
                 <h2 className="text-base font-bold text-neutral-100">Start Session</h2>
-                <p className="text-xs text-neutral-500">{tables.find((t: any) => t.id === assigningTableId)?.name} · ₱{HOURLY_RATE}/hour</p>
+                <p className="text-xs text-neutral-500">{tables.find((t: any) => t.id === assigningTableId)?.name} · ₱{effectiveHourly}/hour</p>
               </div>
               <button onClick={() => setAssigningTableId(null)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
                 <X size={16} />
@@ -759,7 +760,7 @@ export function Tables() {
                       <button key={d} type="button"
                         onClick={() => { 
                           setDurationMinutes(d); 
-                          if (paymentOption === 'payNow') setAmountPaid(((d / 60) * HOURLY_RATE).toFixed(2)); 
+                          if (paymentOption === 'payNow') setAmountPaid(((d / 60) * effectiveHourly).toFixed(2)); 
                         }}
                         className={`py-2 rounded-xl border text-xs font-semibold transition-all ${
                           durationMinutes === d ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
@@ -817,10 +818,10 @@ export function Tables() {
                       value={amountPaid}
                       onChange={e => setAmountPaid(e.target.value)}
                       className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                      placeholder={`₱${(((durationMinutes as number) / 60) * HOURLY_RATE).toFixed(2)}`}
+                      placeholder={`₱${(((durationMinutes as number) / 60) * effectiveHourly).toFixed(2)}`}
                       step="0.01"
                     />
-                    <p className="text-[10px] text-neutral-600">Suggested: {formatPHP(((durationMinutes as number) / 60) * HOURLY_RATE)} for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
+                    <p className="text-[10px] text-neutral-600">Suggested: {formatPHP(((durationMinutes as number) / 60) * effectiveHourly)} for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
                   </div>
                 )}
 
@@ -975,7 +976,7 @@ export function Tables() {
                 <div className="grid grid-cols-2 gap-2">
                   {extendOptions.map(d => (
                     <button key={d} type="button" onClick={() => setExtendMinutes(d)} className={`py-2.5 rounded-lg border text-xs font-semibold transition-all ${extendMinutes === d ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
-                      +{d < 60 ? `${d}min` : `${d / 60}hr`}<br /><span className="text-[10px] font-normal opacity-70">+{formatPHP((d / 60) * HOURLY_RATE)}</span>
+                      +{d < 60 ? `${d}min` : `${d / 60}hr`}<br /><span className="text-[10px] font-normal opacity-70">+{formatPHP((d / 60) * effectiveHourly)}</span>
                     </button>
                   ))}
                 </div>

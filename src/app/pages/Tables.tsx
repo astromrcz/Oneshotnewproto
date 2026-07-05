@@ -68,21 +68,24 @@ export function Tables() {
   const [debtName,         setDebtName]         = useState('');
   const [debtContact,      setDebtContact]      = useState('');
 
+  const displayTables = tables.map((t: any) => 
+    !t.isActive ? { ...t, status: 'maintenance', maintenanceReason: t.maintenanceReason || 'Deactivated (Admin)' } : t
+  );
   const activeTables = tables.filter((t: any) => t.isActive);
   const available    = activeTables.filter((t: any) => t.status === 'available').length;
   const occupied     = activeTables.filter((t: any) => t.status === 'occupied').length;
   const reserved     = activeTables.filter((t: any) => t.status === 'reserved').length;
   const maintenance  = activeTables.filter((t: any) => t.status === 'maintenance').length;
 
-  const filtered = activeTables.filter((t: any) => {
+  const filtered = displayTables.filter((t: any) => {
     const matchFilter = filter === 'all' || t.status === filter;
     const matchSearch = !search
       || t.name.toLowerCase().includes(search.toLowerCase())
-      || (t.session?.customerName.toLowerCase().includes(search.toLowerCase()));
+      || (t.session?.customerName?.toLowerCase().includes(search.toLowerCase()));
     return matchFilter && matchSearch;
   });
 
-  const nearEndTables = activeTables.filter((t: any) => {
+  const nearEndTables = displayTables.filter((t: any) => {
     if (t.status !== 'occupied' || !t.session || t.session.isOpenTime) return false;
     const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     const secsLeft = differenceInSeconds(endTime, new Date());

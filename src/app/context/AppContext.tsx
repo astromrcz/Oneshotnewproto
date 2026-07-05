@@ -225,8 +225,9 @@ export type WeatherData = {
   locationName: string;
 };
 
-export const HOURLY_RATE = 250;
-export const DOWN_PAYMENT_RATE = 0.25;
+// Zeroed out but kept to prevent breaking imports
+export const HOURLY_RATE = 0;
+export const DOWN_PAYMENT_RATE = 0;
 
 export const generateRandomPromoCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -272,24 +273,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([
     { id: 'u1', username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'manager', isAdmin: true, phone: '09171234567', isActive: true, createdAt: new Date() }
   ]);
- const [rates, setRates] = useState<RatesConfig>({ 
-    hourlyRate: 250, overtimeRate: 250, downPaymentPercent: 25,
-    weekdayStartTime: '12:00', weekdayEndTime: '02:00',
-    isWeekdayHappyHourActive: false, weekdayHappyHourRate: 200, weekdayHappyHourStart: '15:00', weekdayHappyHourEnd: '18:00', weekdayOnlineCapacityLimit: 70,
-    weekendStartTime: '12:00', weekendEndTime: '02:00',
-    isWeekendHappyHourActive: false, weekendHappyHourRate: 200, weekendHappyHourStart: '15:00', weekendHappyHourEnd: '18:00', weekendOnlineCapacityLimit: 70
+  
+  const [rates, setRates] = useState<RatesConfig>({ 
+    hourlyRate: 0, overtimeRate: 0, downPaymentPercent: 0,
+    weekdayStartTime: '', weekdayEndTime: '',
+    isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0,
+    weekendStartTime: '', weekendEndTime: '',
+    isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0
   });
   
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ 
-    minHours: 1, maxHours: 8, cancellationHours: 24, cancellationPolicy: 'No refunds on same-day cancellations', termsAndConditions: 'Rules apply.',
-    weekdayMinPartySize: 1, weekdayMaxPartySize: 10,
-    weekendMinPartySize: 1, weekendMaxPartySize: 10
+    minHours: 0, maxHours: 0, cancellationHours: 0, cancellationPolicy: '', termsAndConditions: '',
+    weekdayMinPartySize: 0, weekdayMaxPartySize: 0,
+    weekendMinPartySize: 0, weekendMaxPartySize: 0
   });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   
   const [weather, setWeather] = useState<WeatherData | null>(null);
-  const [weatherConfig, setWeatherConfig] = useState({ lat: '14.5794', lon: '121.1143', name: 'Cainta, Rizal' });
+  const [weatherConfig, setWeatherConfig] = useState({ lat: '', lon: '', name: '' });
 
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
@@ -368,6 +370,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Fetch Weather
   useEffect(() => {
     const fetchWeather = async () => {
+      if (!weatherConfig.lat || !weatherConfig.lon) return;
       try {
         const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${weatherConfig.lat}&longitude=${weatherConfig.lon}&current=temperature_2m,weather_code&timezone=Asia%2FManila`);
         if (!res.ok) return;
@@ -494,12 +497,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addTable = (name: string) => {
-    setTables(prev => [...prev, { id: `t${Date.now()}`, name, status: 'available', isActive: true }]);
+    const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
+    setTables(prev => [...prev, newTable]);
     addActivity('admin_action', `Added new table: ${name}`);
+    syncToDB('/api/tables', 'POST', newTable, `New table added`);
   };
 
   const updateTable = (id: string, name: string) => setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
-  const toggleTableActive = (id: string) => setTables(prev => prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t));
+  const toggleTableActive = (id: string) => {
+    setTables(prev => {
+      const target = prev.find(t => t.id === id);
+      if (target) {
+        syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`);
+      }
+      return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
+    });
+  };
   const deleteTable = (id: string) => setTables(prev => prev.filter(t => t.id !== id));
 
   const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {

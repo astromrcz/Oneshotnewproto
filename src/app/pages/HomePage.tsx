@@ -114,6 +114,17 @@ export function HomePage() {
   const [announcementIdx, setAnnouncementIdx] = useState(0);
   const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
 
+  const getOpenHoursDisplay = () => {
+    try {
+      const parseMins = (t: string) => { const [h, m] = (t || '0').split(':').map(Number); return h * 60 + (m || 0); };
+      const start = parseMins(rates?.weekdayStartTime || '12:00');
+      let end = parseMins(rates?.weekdayEndTime || '02:00');
+      if (end <= start) end += 24 * 60;
+      return `${Math.floor((end - start) / 60)}+`;
+    } catch (e) {
+      return '15+';
+    }
+  };
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
   const [now, setNow] = useState(new Date());
@@ -716,27 +727,39 @@ export function HomePage() {
               </div>
 
               <div className="bg-neutral-900 border-y border-neutral-800">
-                <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
-                  {[
-                    { value: '10', label: 'Billiard Tables', color: 'text-emerald-400' },
-                    { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
-                    { value: '15+', label: 'Hours Open Daily', color: 'text-sky-400' },
-                    { value: 'A+', label: 'Top Tier Facility', color: 'text-rose-400' },
-                  ].map(({ value, label, color }) => (
-                    <div key={label} className="p-6 text-center">
-                      <p className={`text-3xl font-black ${color} mb-1`}>{value}</p>
-                      <p className="text-xs text-neutral-500 font-medium uppercase tracking-wider">{label}</p>
-                    </div>
-                  ))}
-                </div>
+              <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
+                {[
+                  // Uses tables.length so the business always shows its total physical inventory
+                  { value: String(tables.length || 10), label: 'Billiard Tables', color: 'text-emerald-400' },
+                  { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
+                  { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
+                  { value: 'A+', label: 'Top Tier Facility', color: 'text-rose-400' },
+                ].map(({ value, label, color }) => (
+                  <div key={label} className="p-6 text-center">
+                    <p className={`text-3xl font-black ${color} mb-1`}>{value}</p>
+                    <p className="text-xs text-neutral-500 font-medium uppercase tracking-wider">{label}</p>
+                  </div>
+                ))}
               </div>
+            </div>
 
               <div className="max-w-5xl mx-auto px-6 py-16">
                 <h2 className="text-center text-2xl font-bold text-white mb-10">Why Choose One Shot?</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   {[
-                    { icon: Award, title: 'Premium Tables', desc: `${tables.length || 10} tournament-grade billiard tables maintained to the highest standard.`, color: 'emerald' },
-                    { icon: Clock, title: 'Extended Hours', desc: `Weekdays ${fmt12(rates?.weekdayStartTime || '12:00')} – ${fmt12(rates?.weekdayEndTime || '02:00')} · Weekends ${fmt12(rates?.weekendStartTime || '12:00')} – ${fmt12(rates?.weekendEndTime || '02:00')}. Game night starts here!`, color: 'amber' },
+                    { 
+                      icon: Award, 
+                      title: 'Premium Tables', 
+                      // Uses tables.length to preserve the marketing appearance
+                      desc: `${tables.length || 10} tournament-grade billiard tables maintained to the highest standard.`, 
+                      color: 'emerald' 
+                    },
+                    { 
+                      icon: Clock, 
+                      title: 'Extended Hours', 
+                      desc: `Weekdays ${fmt12(rates?.weekdayStartTime || '12:00')} – ${fmt12(rates?.weekdayEndTime || '02:00')} · Weekends ${fmt12(rates?.weekendStartTime || '12:00')} – ${fmt12(rates?.weekendEndTime || '02:00')}. Game night starts here!`, 
+                      color: 'amber' 
+                    },
                     { icon: Shield, title: 'Safe & Secure', desc: 'Clean, safe, and well-lit environment for players of all skill levels.', color: 'sky' },
                   ].map(({ icon: Icon, title, desc, color }) => (
                     <div key={title} className={`bg-neutral-900 border border-neutral-800 rounded-2xl p-6 hover:border-${color}-600/40 transition-all group`}>
@@ -926,7 +949,7 @@ export function HomePage() {
                                     <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
                                   </button>
                                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                    {tables.map((table: any) => {
+                                    {tables.filter((table: any) => table.isActive).map((table: any) => {
                                       const isAvail = table.status === 'available';
                                       const isRes = table.status === 'reserved';
                                       const isOcc = table.status === 'occupied';
@@ -1437,11 +1460,12 @@ export function HomePage() {
               </div>
 
               <div className="overflow-y-auto flex-1 p-4 space-y-4">
+                {/* 1. Tables Section (Updated with Maintenance logic) */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Tables</p>
                     <div className="flex items-center gap-2">
-                      {[{ c: 'bg-emerald-500', l: 'Free' }, { c: 'bg-amber-500', l: 'Rsv' }, { c: 'bg-rose-500', l: 'Busy' }].map(s => (
+                      {[{ c: 'bg-emerald-500', l: 'Free' }, { c: 'bg-amber-500', l: 'Rsv' }, { c: 'bg-rose-500', l: 'Busy' }, { c: 'bg-orange-500', l: 'Maint' }].map(s => (
                         <span key={s.l} className="text-[9px] flex items-center gap-1 text-neutral-500">
                           <span className={`w-1.5 h-1.5 rounded-full ${s.c}`} />{s.l}
                         </span>
@@ -1450,15 +1474,18 @@ export function HomePage() {
                   </div>
                   <div className="space-y-0.5">
                     {tables.map((table: any) => {
-                      const isAvail = table.status === 'available';
-                      const isRes = table.status === 'reserved';
-                      let statusLabel = isAvail ? 'Free' : isRes ? 'Reserved' : 'Occupied';
-                      let dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
+                      // Treat inactive tables OR tables explicitly set to maintenance as "Maintenance"
+                      const isMaintenance = !table.isActive || table.status === 'maintenance';
+                      const isAvail = table.status === 'available' && !isMaintenance;
+                      const isRes = table.status === 'reserved' && !isMaintenance;
+                      
+                      let statusLabel = isMaintenance ? 'Maintenance' : isAvail ? 'Free' : isRes ? 'Reserved' : 'Occupied';
+                      let dotColor = isMaintenance ? 'bg-orange-500' : isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
                       let timeDetail = '';
                       
-                      if (table.session) {
+                      if (!isMaintenance && table.session) {
                         if (table.session.isOpenTime || table.session.durationMinutes === null) {
-                           timeDetail = "Open Time";
+                          timeDetail = "Open Time";
                         } else {
                           const end = new Date(new Date(table.session.startTime).getTime() + table.session.durationMinutes * 60000);
                           const remMs = end.getTime() - now.getTime();
@@ -1479,8 +1506,8 @@ export function HomePage() {
                         <div key={table.id} className="flex items-center justify-between py-1.5 border-b border-neutral-900 last:border-0">
                           <div className="flex items-center gap-2">
                             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
-                            <span className="text-[10px] text-neutral-200 font-semibold">{table.name}</span>
-                            <span className={`text-[9px] font-medium ${isAvail ? 'text-emerald-500' : isRes ? 'text-amber-500' : statusLabel === 'Overtime' ? 'text-rose-400' : 'text-neutral-500'}`}>{statusLabel}</span>
+                            <span className={`text-[10px] font-semibold ${isMaintenance ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
+                            <span className={`text-[9px] font-medium ${isMaintenance ? 'text-orange-500' : isAvail ? 'text-emerald-500' : isRes ? 'text-amber-500' : statusLabel === 'Overtime' ? 'text-rose-400' : 'text-neutral-500'}`}>{statusLabel}</span>
                           </div>
                           {timeDetail && (
                             <span className="text-[9px] text-neutral-600 text-right max-w-[90px] truncate">{timeDetail}</span>
@@ -1491,6 +1518,7 @@ export function HomePage() {
                   </div>
                 </div>
 
+                {/* 2. Walk-in Queue Section (Restored) */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Walk-in Queue</p>

@@ -182,17 +182,37 @@ app.post('/api/images', upload.single('image'), (req, res) => {
   );
 });
 
+app.post('/api/tables', (req, res) => {
+  const { id, name, status, isActive } = req.body;
+  const sql = `INSERT INTO tables (id, name, status, isActive) VALUES (?, ?, ?, ?)`;
+  db.run(sql, [id, name, status || 'available', isActive ? 1 : 0], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: 'Table created successfully', id: id });
+  });
+});
+
 app.put('/api/tables/:id', (req, res) => {
-  const { status, session } = req.body;
+  const { status, session, isActive, name } = req.body;
   const sessionData = session ? JSON.stringify(session) : null;
-  db.run(
-    `UPDATE tables SET status = ?, sessionData = ? WHERE id = ?`, 
-    [status, sessionData, req.params.id], 
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: "Table updated successfully." });
-    }
-  );
+  
+  let updates = [];
+  let params = [];
+  
+  if (status !== undefined) { updates.push("status = ?"); params.push(status); }
+  if (session !== undefined || req.body.hasOwnProperty('session')) { 
+    updates.push("sessionData = ?"); 
+    params.push(sessionData); 
+  }
+  if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
+  if (name !== undefined) { updates.push("name = ?"); params.push(name); }
+  
+  if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  params.push(req.params.id);
+  
+  db.run(`UPDATE tables SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Table updated successfully." });
+  });
 });
 
 app.post('/api/queue', (req, res) => {

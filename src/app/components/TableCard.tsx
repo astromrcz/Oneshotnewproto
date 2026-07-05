@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Table } from '../context/AppContext';
-import { Play, XSquare, Clock, Calendar, Wrench, ShoppingCart, Plus } from 'lucide-react';
+import { Play, XSquare, Clock, Calendar, Wrench, ShoppingCart, Plus, Infinity as InfinityIcon } from 'lucide-react';
 import { addMinutes, differenceInSeconds } from 'date-fns';
 
 interface TableCardProps {
@@ -25,18 +25,39 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
   // Timer Calculation Logic
   const getTimerInfo = () => {
     if (!table.session) return null;
+    
+    // 🟢 NEW: Intercept Open Time Logic
+    if (table.session.isOpenTime || table.session.durationMinutes === null) {
+      const elapsedSecs = Math.max(0, differenceInSeconds(now, new Date(table.session.startTime)));
+      const hrs = String(Math.floor(elapsedSecs / 3600)).padStart(2, '0');
+      const mm = String(Math.floor((elapsedSecs % 3600) / 60)).padStart(2, '0');
+      const ss = String(elapsedSecs % 60).padStart(2, '0');
+      
+      return { 
+        isOvertime: false, 
+        percentLeft: 100, // Keeps the progress bar solid
+        display: `${hrs}:${mm}:${ss}`, // Count UP instead of down
+        isOpenTime: true 
+      };
+    }
+
+    // Standard Countdown Logic
     const endTime = addMinutes(new Date(table.session.startTime), table.session.durationMinutes);
     const secsLeft = differenceInSeconds(endTime, now);
     const isOvertime = secsLeft < 0;
     const absSecs = Math.abs(secsLeft);
-    const mm = String(Math.floor(absSecs / 60)).padStart(2, '0');
+    
+    const hrs = Math.floor(absSecs / 3600);
+    const mm = String(Math.floor((absSecs % 3600) / 60)).padStart(2, '0');
     const ss = String(absSecs % 60).padStart(2, '0');
     
+    const display = hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
+
     // Calculate progress bar percentage
     const totalSecs = table.session.durationMinutes * 60;
     const percentLeft = Math.max(0, Math.min(100, (secsLeft / totalSecs) * 100));
 
-    return { mm, ss, isOvertime, percentLeft };
+    return { display, isOvertime, percentLeft, isOpenTime: false };
   };
 
   const timer = getTimerInfo();
@@ -59,7 +80,8 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
       ${table.status === 'available' ? 'border-emerald-900/50 hover:border-emerald-500/50' :
         table.status === 'reserved' ? 'border-blue-900/50 hover:border-blue-500/50' :
         table.status === 'maintenance' ? 'border-orange-900/50' :
-        timer?.isOvertime ? 'border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:border-rose-400' : 'border-neutral-800 hover:border-neutral-600'
+        timer?.isOvertime ? 'border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:border-rose-400' : 
+        timer?.isOpenTime ? 'border-blue-500/50 hover:border-blue-400' : 'border-neutral-800 hover:border-neutral-600'
       }`}
     >
       
@@ -78,9 +100,9 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
             {table.status === 'reserved' && <span className="text-sm font-bold text-blue-400 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" /> Reserved</span>}
             {table.status === 'maintenance' && <span className="text-sm font-bold text-orange-400 flex items-center gap-1.5"><Wrench size={12}/> Maintenance</span>}
             {table.status === 'occupied' && (
-              <span className={`text-sm font-bold flex items-center gap-1.5 ${timer?.isOvertime ? 'text-rose-400' : 'text-amber-400'}`}>
-                <span className={`w-2 h-2 rounded-full ${timer?.isOvertime ? 'bg-rose-500 animate-pulse' : 'bg-amber-500'}`} />
-                {timer?.isOvertime ? 'Overtime' : 'In Use'}
+              <span className={`text-sm font-bold flex items-center gap-1.5 ${timer?.isOvertime ? 'text-rose-400' : timer?.isOpenTime ? 'text-blue-400' : 'text-amber-400'}`}>
+                <span className={`w-2 h-2 rounded-full ${timer?.isOvertime ? 'bg-rose-500 animate-pulse' : timer?.isOpenTime ? 'bg-blue-500' : 'bg-amber-500'}`} />
+                {timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
               </span>
             )}
           </div>
@@ -138,13 +160,19 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
           <div className="space-y-4 relative z-10">
             <div className="text-center">
               <p className="text-xs text-neutral-400 font-medium truncate px-2">{table.session.customerName}</p>
-              <div className={`text-4xl font-black tabular-nums tracking-tight mt-1 ${timer.isOvertime ? 'text-rose-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'}`}>
-                {timer.isOvertime && '+'}{timer.mm}:{timer.ss}
+              
+              <div className="flex items-center justify-center gap-2 mt-1">
+                {timer.isOpenTime && <InfinityIcon size={24} className="text-blue-400/50" />}
+                <div className={`text-4xl font-black tabular-nums tracking-tight ${timer.isOvertime ? 'text-rose-400' : timer.isOpenTime ? 'text-blue-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'}`}>
+                  {timer.isOvertime && '+'}{timer.display}
+                </div>
               </div>
               
               {/* Progress Bar */}
               <div className="mt-3 h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden">
-                {!timer.isOvertime ? (
+                {timer.isOpenTime ? (
+                  <div className="h-full w-full bg-blue-500/80" />
+                ) : !timer.isOvertime ? (
                   <div 
                     className={`h-full transition-all duration-1000 ${timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
                     style={{ width: `${timer.percentLeft}%` }} 
@@ -176,7 +204,8 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
               
               <button 
                 onClick={(e) => { e.stopPropagation(); onExtend(); }} 
-                className="flex items-center justify-center gap-1.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-semibold transition-colors"
+                disabled={timer.isOpenTime} // Cannot extend an open-ended session
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors ${timer.isOpenTime ? 'bg-neutral-900 text-neutral-600 opacity-50 cursor-not-allowed' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
               >
                 <Clock size={13} /> Extend
               </button>

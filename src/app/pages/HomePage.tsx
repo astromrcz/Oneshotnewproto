@@ -411,7 +411,7 @@ export function HomePage() {
     }
   }, [maxAllowedDuration, resForm.timeSlot]);
 
-  const validateTimeSlot = (time: string, duration: number) => {
+ const validateTimeSlot = (time: string, duration: number) => {
     if(!time || !selectedDate) return 'invalid';
 
     const parseToMins = (t: string) => {
@@ -420,6 +420,24 @@ export function HomePage() {
     };
 
     const slotMins = parseToMins(time);
+
+    // 🟢 ENFORCED: Block past times and require 1-hour advance notice
+    if (isToday(new Date(selectedDate))) {
+      const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+      
+      if (isToday(new Date(selectedDate))) {
+        console.log("Validating today's time:", { slotMins, nowMins, result: slotMins <= nowMins ? 'past' : 'valid' });
+    }
+
+    if (isToday(new Date(selectedDate))) {
+      if (slotMins <= nowMins) return 'past'; 
+      if (slotMins < nowMins + 60) return 'advance';
+    }
+
+      if (slotMins <= nowMins) return 'past'; // Time has passed
+      if (slotMins < nowMins + 60) return 'advance'; // Less than 1 hour notice
+    }
+
     const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
     let endReserveMins = parseToMins(rates?.reservationEndTime || '02:00');
     if (endReserveMins <= startReserveMins) endReserveMins += 24 * 60;
@@ -429,40 +447,7 @@ export function HomePage() {
 
     if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
-    if (rates?.isHappyHourActive) {
-      const startHour = parseToMins(rates.happyHourStart || '18:00');
-      const endHour = parseToMins(rates.happyHourEnd || '19:00');
-      let s = startHour; let e = endHour;
-      if (e <= s) e += 24 * 60;
-      let slotNorm = slotMins;
-      if (slotMins < s) slotNorm += 24 * 60;
-      if (slotNorm >= s && slotNorm < e) return 'happyhour';
-    }
-
-    // 🟢 NEW: 70/30 Rule Overlap Checker
-    const requestedStart = new Date(selectedDate);
-    const [h, m] = time.split(':').map(Number);
-    requestedStart.setHours(h, m, 0, 0);
-    const requestedEnd = addMinutes(requestedStart, duration * 60);
-
-    let overlapCount = 0;
-    const sameDayRes = reservations.filter((r: any) => 
-      r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), requestedStart)
-    );
-
-    sameDayRes.forEach((r: any) => {
-      const rStart = new Date(r.date);
-      const rEnd = addMinutes(rStart, r.durationHours * 60);
-      // Overlap math: Does the new request start before the existing ends, AND end after the existing starts?
-      if (requestedStart < rEnd && requestedEnd > rStart) {
-        overlapCount++;
-      }
-    });
-
-    // Capacity limit is controlled by the admin policy editor slider
-    const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
-    const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
-    if (overlapCount >= maxOnlineCapacity) return 'full';
+    // ... (keep your existing Happy Hour and Capacity logic here) ...
 
     return 'valid';
   };
@@ -865,7 +850,7 @@ export function HomePage() {
                             <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
                           </div>
                           <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
+                            <label className="block text-xs text-neutral-400 mb-1.5">Phone Number <span className="text-rose-500">*</span></label>
                             <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
                             <p className="mt-1 text-[10px] text-neutral-500">Use 13 digits max, numbers only.</p>
                           </div>
@@ -890,6 +875,17 @@ export function HomePage() {
                               <AlertTriangle size={12} className="flex-shrink-0" />
                               <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
                             </p>
+                              
+                             {timeValidation === 'past' && (
+                              <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+                                <XCircle size={10} /> This time slot has already passed today.
+                              </p>
+                            )}
+                            {timeValidation === 'advance' && (
+                              <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
+                                <AlertTriangle size={10} /> Bookings require at least 1 hour advance notice.
+                              </p>
+                            )}
 
                             {timeValidation === 'closed' && (
                               <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
@@ -1014,9 +1010,15 @@ export function HomePage() {
                               </div>
                             </div>
                           </div>
-                          <button 
+                         <button 
                             onClick={handleReservationSubmit} 
-                            disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid'} 
+                            // 🟢 The logic below relies entirely on the output of validateTimeSlot
+                            disabled={
+                              !resForm.name.trim() || 
+                              !resForm.phone.trim() || 
+                              !resForm.timeSlot || 
+                              timeValidation !== 'valid'
+                            } 
                             className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
                           >
                             Proceed to Payment <ArrowRight size={14} />
@@ -1535,7 +1537,7 @@ export function HomePage() {
                     <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
                   </div>
                 </div>
-              </div>
+              </div>  
             </motion.div>
           )}
         </AnimatePresence>

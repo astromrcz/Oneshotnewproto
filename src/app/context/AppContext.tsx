@@ -162,6 +162,7 @@ export type RatesConfig = {
   downPaymentPercent: number;
 
   // Weekday Settings
+  bookingCutoffMinutes: number;
   weekdayStartTime: string;
   weekdayEndTime: string;
   isWeekdayHappyHourActive: boolean;
@@ -279,7 +280,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     weekdayStartTime: '', weekdayEndTime: '',
     isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0,
     weekendStartTime: '', weekendEndTime: '',
-    isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0
+    isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0,   bookingCutoffMinutes: 60,    weekdayStartTime: '',
   });
   
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ 

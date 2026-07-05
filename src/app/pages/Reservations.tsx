@@ -3,7 +3,7 @@ import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reser
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
-  CalendarX2, List as ListIcon, ChevronLeft, ChevronRight, Send
+  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
 
@@ -40,6 +40,9 @@ export function Reservations() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+  const [voidModal, setVoidModal] = useState<{ type: 'downPayment' | 'balance'; id: string } | null>(null);
+  const [voidPassword, setVoidPassword] = useState('');
+  const [voidError, setVoidError] = useState('');
 
   // GCash Receipt State (browser memory)
   const [gcashReceipts, setGcashReceipts] = useState<Record<string, { refNo: string; imageUrl: string }>>(() => {
@@ -579,105 +582,69 @@ export function Reservations() {
               </div>
 
               {/* Payment breakdown */}
-              <div className="bg-neutral-900 rounded-xl p-4 space-y-2.5 border border-neutral-800">
-                <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment</p>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-400">Total ({selected.durationHours}h × ₱{effectiveHourly})</span>
-                    <span className="text-neutral-200 font-semibold">{formatPHP(selected.totalAmount)}</span>
+              <div className="bg-neutral-900 rounded-xl p-4 space-y-4 border border-neutral-800">
+                <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Payment Details</p>
+                
+                {/* Down Payment Block */}
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-neutral-400">Down Payment ({rates?.downPaymentPercent || 25}%)</span>
+                  <div className="flex items-center gap-2">
+                    <span className={selected.downPaymentPaid ? 'text-emerald-400 font-bold' : 'text-neutral-400'}>
+                      {formatPHP(selected.downPaymentAmount)}
+                    </span>
+                    {selected.downPaymentPaid ? (
+                      <div className="flex items-center gap-2">
+                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-500 border border-emerald-900/50 cursor-default flex items-center gap-1">
+                           <CheckCircle size={10}/> Paid
+                         </span>
+                         <button onClick={() => setVoidModal({ type: 'downPayment', id: selected.id })} className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">
+                           Void
+                         </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => updateDownPayment(selected.id, true)} className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors">Mark Paid</button>
+                    )}
                   </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-neutral-400">Down Payment ({downPaymentPercentVal}%)</span>
-                    <div className="flex items-center gap-2">
-                      <span className={selected.downPaymentPaid ? 'text-emerald-400' : 'text-neutral-400'}>{formatPHP(selected.downPaymentAmount)}</span>
-                      <button
-                        onClick={() => updateDownPayment(selected.id, !selected.downPaymentPaid)}
-                        className={`text-[10px] px-2 py-0.5 rounded font-bold border transition-colors ${
-                          selected.downPaymentPaid
-                            ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/30'
-                            : 'bg-neutral-800 text-neutral-500 border-neutral-700 hover:border-neutral-600'
-                        }`}
-                      >
-                        {selected.downPaymentPaid ? '✓ Paid' : 'Mark Paid'}
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {/* GCash Reference & Receipt Display */}
-                  {gcashReceipts[selected.id]?.refNo && (
-                    <div className="flex justify-between items-center text-sm border-t border-neutral-800 pt-2 mt-2">
-                      <span className="text-neutral-400">GCash Ref No.</span>
-                      <span className="text-neutral-200 font-mono text-xs">{gcashReceipts[selected.id].refNo}</span>
-                    </div>
-                  )}
-                  {gcashReceipts[selected.id]?.imageUrl && (
-                    <div className="mt-2 pt-2 border-t border-neutral-800">
-                      <button 
-                        onClick={() => window.open(gcashReceipts[selected.id].imageUrl, '_blank')}
-                        className="w-full flex items-center justify-center gap-2 text-xs bg-blue-900/20 hover:bg-blue-900/40 text-blue-400 py-2.5 rounded-lg transition-colors border border-blue-700/30"
-                      >
-                        <ImageIcon size={14} /> View Saved GCash Receipt
-                      </button>
-                    </div>
-                  )}
+                </div>
 
-                  {/* GCash Receipt Upload Form */}
-                  {!gcashReceipts[selected.id]?.refNo && (
-                    <div className="mt-3 pt-3 border-t border-neutral-800/60 space-y-2">
-                      <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Add GCash Receipt (Optional)</p>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="GCash Reference No."
-                          id={`gcash-ref-${selected.id}`}
-                          className="flex-1 text-xs bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-neutral-200 placeholder-neutral-600"
-                        />
-                        <input
-                          type="file"
-                          accept="image/*"
-                          id={`gcash-image-${selected.id}`}
-                          className="hidden"
-                        />
-                        <label
-                          htmlFor={`gcash-image-${selected.id}`}
-                          className="cursor-pointer px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs rounded font-semibold border border-blue-700/30 transition-colors"
-                        >
-                          Upload
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const refInput = document.getElementById(`gcash-ref-${selected.id}`) as HTMLInputElement;
-                            const fileInput = document.getElementById(`gcash-image-${selected.id}`) as HTMLInputElement;
-                            if (refInput?.value && fileInput?.files?.length) {
-                              handleGcashReceiptUpload(selected.id, refInput.value, fileInput.files[0]);
-                              refInput.value = '';
-                              fileInput.value = '';
-                            }
-                          }}
-                          className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-xs rounded font-semibold border border-emerald-700/30 transition-colors"
-                        >
-                          Save
+                {/* GCash Receipt Area (Mandatory Logic) */}
+                <div className="space-y-2 border-t border-neutral-800 pt-3">
+                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">GCash Receipt (Mandatory)</label>
+                  {selected.paymentRef ? (
+                    <div className="flex items-center justify-between bg-neutral-950 p-2 rounded border border-neutral-800">
+                      <span className="text-xs font-mono text-neutral-300">Ref: {selected.paymentRef}</span>
+                      {selected.receiptImg ? (
+                        <a href={selected.receiptImg} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 transition-colors p-1" title="View Receipt Image">
+                          <ImageIcon size={14} />
+                        </a>
+                      ) : (
+                        <span className="text-[9px] text-neutral-600 italic px-1">No Image</span>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-rose-500 italic">No receipt provided in database.</p>
+                  )}
+                </div>
+
+                {/* Balance Block */}
+                <div className="flex justify-between items-center text-sm border-t border-neutral-800 pt-3">
+                  <span className="text-neutral-300 font-semibold">Balance</span>
+                  <div className="flex items-center gap-2">
+                    <span className={selected.balancePaid ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                      {formatPHP(selected.totalAmount - selected.downPaymentAmount)}
+                    </span>
+                    {selected.balancePaid ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-500 border border-emerald-900/50 cursor-default flex items-center gap-1">
+                          <CheckCircle size={10}/> Paid
+                        </span>
+                        <button onClick={() => setVoidModal({ type: 'balance', id: selected.id })} className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">
+                          Void
                         </button>
                       </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-between items-center text-sm border-t border-neutral-800 pt-2">
-                    <span className="text-neutral-400">Balance</span>
-                    <div className="flex items-center gap-2">
-                      <span className={selected.balancePaid ? 'text-emerald-400' : 'text-rose-400'}>{formatPHP(selected.totalAmount - selected.downPaymentAmount)}</span>
-                      <button
-                        onClick={() => updateBalance(selected.id, !selected.balancePaid)}
-                        className={`text-[10px] px-2 py-0.5 rounded font-bold border transition-colors ${
-                          selected.balancePaid
-                            ? 'bg-emerald-600/20 text-emerald-400 border-emerald-700/30'
-                            : 'bg-rose-600/20 text-rose-400 border-rose-700/30 hover:bg-rose-600/30'
-                        }`}
-                      >
-                        {selected.balancePaid ? '✓ Paid' : 'Collect'}
-                      </button>
-                    </div>
+                    ) : (
+                      <button onClick={() => updateBalance(selected.id, true)} className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors">Settle Balance</button>
+                    )}
                   </div>
                 </div>
               </div>

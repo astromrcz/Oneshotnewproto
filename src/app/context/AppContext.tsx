@@ -186,6 +186,7 @@ export type ReservationTerms = {
   minHours: number;
   maxHours: number;
   cancellationHours: number;
+  advanceBookingHours: number;
   cancellationPolicy: string;
   termsAndConditions: string;
 
@@ -284,7 +285,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ 
-    minHours: 0, maxHours: 0, cancellationHours: 0, cancellationPolicy: '', termsAndConditions: '',
+    minHours: 0, maxHours: 0, cancellationHours: 0, advanceBookingHours: 1, // 🟢 NEW
+    cancellationPolicy: '', termsAndConditions: '',
     weekdayMinPartySize: 0, weekdayMaxPartySize: 0,
     weekendMinPartySize: 0, weekendMaxPartySize: 0
   });

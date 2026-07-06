@@ -188,6 +188,7 @@ export default function AdminPolicyRatesEditor() {
         minHours: termsForm.minHours,
         maxHours: termsForm.maxHours,
         cancellationHours: termsForm.cancellationHours,
+        advanceBookingHours: termsForm.advanceBookingHours, // 🟢 NEW
         cancellationPolicy: termsForm.cancellationPolicy,
         termsAndConditions: termsForm.termsAndConditions,
         weekdayMinPartySize: termsForm.weekdayMinPartySize,
@@ -449,6 +450,10 @@ export default function AdminPolicyRatesEditor() {
             
             <div className="space-y-4">
               <div>
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Advance Booking Cut-off (Hours)</label>
+                <input type="text" inputMode="numeric" name="advanceBookingHours" value={termsForm.advanceBookingHours} onChange={handleTermsTextNumber} className="w-full bg-black border border-neutral-800 rounded p-3 text-white focus:border-amber-500 outline-none" />
+              </div>
                 <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Cancellation Grace Period (Hours)</label>
                 <input type="text" inputMode="numeric" name="cancellationHours" value={termsForm.cancellationHours} onChange={handleTermsTextNumber} className="w-full bg-black border border-neutral-800 rounded p-3 text-white focus:border-amber-500 outline-none" />
               </div>
@@ -475,7 +480,10 @@ export default function AdminPolicyRatesEditor() {
                   <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{termsForm.cancellationPolicy || "No policy defined."}</p>
-                    <p className="text-xs text-neutral-400 mt-2">Minimum booking: <span className="text-white font-bold">{termsForm.minHours} hour(s)</span></p>
+                    <p className="text-xs text-neutral-400 mt-2">
+                      Minimum booking: <span className="text-white font-bold">{termsForm.minHours} hour(s)</span> | 
+                      Advance Notice: <span className="text-white font-bold">{termsForm.advanceBookingHours} hour(s)</span>
+                    </p>
                   </div>
                 </li>
                 
@@ -568,8 +576,9 @@ export default function AdminPolicyRatesEditor() {
                 {renderChangeRow('Online Capacity', `${rates.weekendOnlineCapacityLimit}%`, `${ratesForm.weekendOnlineCapacityLimit}%`)}
                 {renderChangeRow('Min/Max Party Size', `${reservationTerms.weekendMinPartySize}-${reservationTerms.weekendMaxPartySize}`, `${termsForm.weekendMinPartySize}-${termsForm.weekendMaxPartySize}`)}
 
-                {/* Policies */}
+               {/* Policies */}
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-amber-400 text-[10px] uppercase tracking-widest">Policies</div>
+                {renderChangeRow('Advance Notice', `${reservationTerms.advanceBookingHours} Hrs`, `${termsForm.advanceBookingHours} Hrs`)}
                 {renderChangeRow('Cancellation Grace', `${reservationTerms.cancellationHours} Hrs`, `${termsForm.cancellationHours} Hrs`)}
                 {renderChangeRow('Cancellation Policy', truncate(reservationTerms.cancellationPolicy), truncate(termsForm.cancellationPolicy))}
                 {renderChangeRow('T&C Text', truncate(reservationTerms.termsAndConditions), truncate(termsForm.termsAndConditions))}

@@ -447,7 +447,25 @@ export function HomePage() {
 
     if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
-    // ... (keep your existing Happy Hour and Capacity logic here) ...
+    // 🟢 NEW: Split Weekday/Weekend Happy Hour Checker
+    const isSlotWeekend = [0, 5, 6].includes(new Date(selectedDate).getDay()); // 0=Sun, 5=Fri, 6=Sat
+    const isHHActive = isSlotWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
+    
+    if (isHHActive) {
+      const hhStart = isSlotWeekend ? rates?.weekendHappyHourStart : rates?.weekdayHappyHourStart;
+      const hhEnd = isSlotWeekend ? rates?.weekendHappyHourEnd : rates?.weekdayHappyHourEnd;
+      
+      const startHour = parseToMins(hhStart || '18:00');
+      const endHour = parseToMins(hhEnd || '19:00');
+      let s = startHour; let e = endHour;
+      if (e <= s) e += 24 * 60;
+      let slotNorm = slotMins;
+      if (slotMins < s) slotNorm += 24 * 60;
+      if (slotNorm >= s && slotNorm < e) return 'happyhour';
+    }
+
+    // 70/30 Rule Overlap Checker
+
 
     return 'valid';
   };
@@ -1131,28 +1149,47 @@ export function HomePage() {
                 <p className="text-neutral-400 text-sm">Transparent and affordable pricing for everyone.</p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                {[
-                  { name: 'Standard Play', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
-                  { name: 'Reserved Table', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', '25% down payment', 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
-                  { name: 'Happy Hour', rate: `₱${rates?.happyHourRate || 200}`, unit: '/ hour', desc: `Discounted walk-in rate every weekday ${rates?.happyHourStart || '18:00'}–${rates?.happyHourEnd || '19:00'}.`, features: ['Weekdays only', 'Walk-in ONLY - No reservations', 'Discounted standard rate', 'Subject to availability'], badge: 'Limited', color: 'amber' },
-                ]
-                .filter(card => card.name !== 'Happy Hour' || rates?.isHappyHourActive) // 🟢 NEW: Hides Happy Hour entirely if toggled off
-                .map(({ name, rate, unit, desc, features, badge, color }) => (
-                  <div key={name} className={`relative bg-neutral-900 border rounded-2xl p-6 flex flex-col ${color === 'emerald' ? 'border-emerald-600/50 shadow-lg shadow-emerald-950/50' : color === 'amber' ? 'border-amber-600/30' : 'border-neutral-800'}`}>
-                    {badge && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${color === 'emerald' ? 'bg-emerald-600 text-white' : color === 'amber' ? 'bg-amber-600 text-white' : 'bg-neutral-700 text-neutral-400'}`}>{badge}</span>}
-                    <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-neutral-500'}`}>{name}</p>
-                    <div className="flex items-end gap-1 mb-3"><span className={`text-4xl font-black ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-white'}`}>{rate}</span><span className="text-neutral-500 text-sm mb-1">{unit}</span></div>
-                    <p className="text-neutral-500 text-xs mb-5 leading-relaxed">{desc}</p>
-                    <ul className="space-y-2 flex-1">
-                      {features.map(f => <li key={f} className="flex items-center gap-2 text-xs text-neutral-400"><CheckCircle size={12} className={color === 'emerald' ? 'text-emerald-500' : color === 'amber' ? 'text-amber-500' : 'text-neutral-600'} />{f}</li>)}
-                    </ul>
-                    {name !== 'Happy Hour' ? (
-                      <button onClick={() => setActiveSection('reservations')} className={`mt-5 w-full py-2.5 rounded-xl text-xs font-semibold transition-all ${color === 'emerald' ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700'}`}>Book Now</button>
-                    ) : (
-                      <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40">🚶 Walk-in Only</div>
-                    )}
-                  </div>
-                ))}
+                {(() => {
+                  // 🟢 NEW: Calculate "Today" for dynamic Happy Hour display
+                  const currentDay = new Date().getDay();
+                  const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
+                  const isHappyHourActive = isWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
+                  const happyHourRate = isWeekend ? rates?.weekendHappyHourRate : rates?.weekdayHappyHourRate;
+                  const happyHourStart = isWeekend ? rates?.weekendHappyHourStart : rates?.weekdayHappyHourStart;
+                  const happyHourEnd = isWeekend ? rates?.weekendHappyHourEnd : rates?.weekdayHappyHourEnd;
+                  const dayTypeLabel = isWeekend ? 'Weekends (Fri-Sun)' : 'Weekdays (Mon-Thu)';
+
+                  return [
+                    { name: 'Standard Play', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
+                  { name: 'Reserved Table', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', `${rates?.downPaymentPercent ?? 25}% down payment`, 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
+                    { 
+                      name: 'Happy Hour', 
+                      rate: `₱${happyHourRate || 200}`, 
+                      unit: '/ hour', 
+                      desc: `Discounted walk-in rate today (${dayTypeLabel}) from ${fmt12(happyHourStart || '18:00')}–${fmt12(happyHourEnd || '19:00')}.`, 
+                      features: ['Valid today only', 'Walk-in ONLY - No reservations', 'Discounted standard rate', 'Subject to availability'], 
+                      badge: 'Limited', 
+                      color: 'amber' 
+                    },
+                  ]
+                  .filter(card => card.name !== 'Happy Hour' || isHappyHourActive)
+                  .map(({ name, rate, unit, desc, features, badge, color }) => (
+                    <div key={name} className={`relative bg-neutral-900 border rounded-2xl p-6 flex flex-col ${color === 'emerald' ? 'border-emerald-600/50 shadow-lg shadow-emerald-950/50' : color === 'amber' ? 'border-amber-600/30' : 'border-neutral-800'}`}>
+                      {badge && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${color === 'emerald' ? 'bg-emerald-600 text-white' : color === 'amber' ? 'bg-amber-600 text-white' : 'bg-neutral-700 text-neutral-400'}`}>{badge}</span>}
+                      <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-neutral-500'}`}>{name}</p>
+                      <div className="flex items-end gap-1 mb-3"><span className={`text-4xl font-black ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-white'}`}>{rate}</span><span className="text-neutral-500 text-sm mb-1">{unit}</span></div>
+                      <p className="text-neutral-500 text-xs mb-5 leading-relaxed">{desc}</p>
+                      <ul className="space-y-2 flex-1">
+                        {features.map(f => <li key={f} className="flex items-center gap-2 text-xs text-neutral-400"><CheckCircle size={12} className={color === 'emerald' ? 'text-emerald-500' : color === 'amber' ? 'text-amber-500' : 'text-neutral-600'} />{f}</li>)}
+                      </ul>
+                      {name !== 'Happy Hour' ? (
+                        <button onClick={() => setActiveSection('reservations')} className={`mt-5 w-full py-2.5 rounded-xl text-xs font-semibold transition-all ${color === 'emerald' ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700'}`}>Book Now</button>
+                      ) : (
+                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40">🚶 Walk-in Only</div>
+                      )}
+                    </div>
+                  ));
+                })()}
               </div>
 
               <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
@@ -1161,15 +1198,15 @@ export function HomePage() {
                   <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-600/20 flex items-center justify-center mt-0.5"><Info size={13} className="text-emerald-400" /></div>
                   <div>
                     <p className="text-emerald-300 text-xs font-semibold mb-1">Reservation Redemption Policy</p>
-                    <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent || 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled in full upon arrival</span> before your table time begins — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
+                    <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled after your game</span> — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   {[
-                    { label: 'Booking Cut-off', value: `Requires at least ${reservationTerms.cancellationHours} hours notice.` },
+                    { label: 'Booking Cut-off', value: `Requires at least ${reservationTerms.advanceBookingHours || 1} hour(s) advance notice.` },
                     { label: 'Online Booking Hours', value: bookingHoursDisplay },
-                    { label: 'Minimum Booking', value: `${reservationTerms.minHours} hour(s)` },
-                    { label: 'Maximum Booking', value: `${reservationTerms.maxHours} hour(s)` },
+                    { label: 'Minimum Booking', value: `${reservationTerms.minHours || 1} hour(s)` },
+                    { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
                     { label: 'Grace Period', value: '15 minutes' },
                     { label: 'Cancellation Policy', value: reservationTerms.cancellationPolicy },
                   ].map(({ label, value }) => (
@@ -1363,10 +1400,10 @@ export function HomePage() {
             <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[95vh] overflow-y-auto">
               <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex items-center justify-between"><div><h3 className="text-base font-bold text-white">Down Payment</h3></div><button onClick={closeReservation} className="text-neutral-600 hover:text-white"><X size={18} /></button></div>
               <div className="p-6">
-                <div className="bg-amber-950/30 border border-amber-800/30 rounded-xl p-4 mb-5 text-center">
-                  <p className="text-xs text-amber-500 mb-1">Amount Due ({rates?.downPaymentPercent || 25}% Down Payment)</p>
+               <div className="bg-amber-950/30 border border-amber-800/30 rounded-xl p-4 mb-5 text-center">
+                  <p className="text-xs text-amber-500 mb-1">Amount Due ({rates?.downPaymentPercent ?? 25}% Down Payment)</p>
                   <p className="text-4xl font-black text-amber-400">₱{downPayment}.00</p>
-                  <p className="text-xs text-neutral-500 mt-1">Remaining balance <span className="text-neutral-300 font-semibold">₱{totalAmount - downPayment}.00</span> must be paid on arrival</p>
+                  <p className="text-xs text-neutral-500 mt-1">Remaining balance <span className="text-neutral-300 font-semibold">₱{totalAmount - downPayment}.00</span> must be paid after your game</p>
                 </div>
                 
                 <div className="flex flex-col items-center gap-4">
@@ -1396,11 +1433,12 @@ export function HomePage() {
                       <BookOpen size={12} className="text-emerald-500" /> Reservation Terms & Conditions
                     </p>
                     <ul className="space-y-2 text-[10px] text-neutral-400 leading-relaxed">
-                      <li>• Minimum booking duration is {reservationTerms.minHours} hour(s).</li>
+                      <li>• Minimum booking duration is {reservationTerms.minHours || 1} hour(s).</li>
                       <li>• Maximum booking duration (based on cut-off) is {maxAllowedDuration} hour(s).</li>
                       <li>• Online booking window: {fmt12(rates?.reservationStartTime || '12:00')} to {fmt12(((() => { const e = rates?.reservationEndTime || '02:00'; const [hh, mm] = e.split(':').map(Number); let em = hh*60 + (mm||0); const sm = (rates?.reservationStartTime||'12:00').split(':').map(Number); let smm = sm[0]*60 + (sm[1]||0); if (em <= smm) em += 24*60; return em - 60; })()))} (cutoff 1 hour before close)</li>
                       <li>• Store hours: {fmt12(rates?.reservationStartTime || '12:00')} — {fmt12(rates?.reservationEndTime || '02:00')}</li>
-                      <li>• A {rates?.downPaymentPercent || 25}% down payment is required to secure your slot.</li>
+                      <li>• A {rates?.downPaymentPercent ?? 25}% down payment is required to secure your slot.</li>
+                      <li>• Remaining balance must be settled after your session.</li>
                       <li>• Online capacity limit: {rates?.onlineCapacityLimit ?? 70}% of tables (admin-configured)</li>
                       <li>• {reservationTerms.cancellationPolicy}</li>
                       <li>• {reservationTerms.termsAndConditions}</li>

@@ -116,10 +116,17 @@ export function HomePage() {
 
   const getOpenHoursDisplay = () => {
     try {
+      const currentDay = new Date().getDay();
+      const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6; // 0=Sun, 5=Fri, 6=Sat
+      
+      const openTime = isWeekend ? (rates?.weekendStartTime || '12:00') : (rates?.weekdayStartTime || '12:00');
+      const closeTime = isWeekend ? (rates?.weekendEndTime || '02:00') : (rates?.weekdayEndTime || '02:00');
+
       const parseMins = (t: string) => { const [h, m] = (t || '0').split(':').map(Number); return h * 60 + (m || 0); };
-      const start = parseMins(rates?.weekdayStartTime || '12:00');
-      let end = parseMins(rates?.weekdayEndTime || '02:00');
+      const start = parseMins(openTime);
+      let end = parseMins(closeTime);
       if (end <= start) end += 24 * 60;
+      
       return `${Math.floor((end - start) / 60)}+`;
     } catch (e) {
       return '15+';
@@ -217,6 +224,36 @@ export function HomePage() {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Magic Link Simulator for Email Integration
+  useEffect(() => {
+    // Only run if we actually have reservations loaded from the database
+    if (reservations.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const emailResId = params.get('resId');
+      
+      if (emailResId) {
+        // 1. Switch to reservations section
+        setActiveSection('reservations');
+        // 2. Switch to tracking tab
+        setResTab('track');
+        // 3. Fill in the ID
+        setTrackForm({ reservationId: emailResId });
+        
+        // 4. Fetch and display the reservation automatically
+        const found = reservations
+          .filter((r: any) => r.id.toUpperCase() === emailResId.toUpperCase())
+          .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        
+        if (found.length > 0) {
+          setTrackedReservations(found);
+        }
+
+        // 5. Clean the URL so refreshing doesn't re-trigger it
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  }, [reservations.length]);
 
   useEffect(() => {
     if (currentUser) {
@@ -1150,7 +1187,7 @@ export function HomePage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                 {(() => {
-                  // 🟢 NEW: Calculate "Today" for dynamic Happy Hour display
+                  // 🟢 Calculate "Today" for dynamic Happy Hour display
                   const currentDay = new Date().getDay();
                   const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
                   const isHappyHourActive = isWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
@@ -1161,7 +1198,7 @@ export function HomePage() {
 
                   return [
                     { name: 'Standard Play', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
-                  { name: 'Reserved Table', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', `${rates?.downPaymentPercent ?? 25}% down payment`, 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
+                    { name: 'Reserved Table', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', `${rates?.downPaymentPercent ?? 25}% down payment`, 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
                     { 
                       name: 'Happy Hour', 
                       rate: `₱${happyHourRate || 200}`, 
@@ -1182,10 +1219,14 @@ export function HomePage() {
                       <ul className="space-y-2 flex-1">
                         {features.map(f => <li key={f} className="flex items-center gap-2 text-xs text-neutral-400"><CheckCircle size={12} className={color === 'emerald' ? 'text-emerald-500' : color === 'amber' ? 'text-amber-500' : 'text-neutral-600'} />{f}</li>)}
                       </ul>
-                      {name !== 'Happy Hour' ? (
-                        <button onClick={() => setActiveSection('reservations')} className={`mt-5 w-full py-2.5 rounded-xl text-xs font-semibold transition-all ${color === 'emerald' ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700'}`}>Book Now</button>
+                      
+                      {/* 🟢 Unified Button Handler conditional on Card Type */}
+                      {name === 'Standard Play' ? (
+                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40 select-none">🚶 Walk-ins Welcome</div>
+                      ) : name === 'Happy Hour' ? (
+                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40 select-none">🚶 Walk-in Only</div>
                       ) : (
-                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40">🚶 Walk-in Only</div>
+                        <button onClick={() => setActiveSection('reservations')} className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/20">Book Now</button>
                       )}
                     </div>
                   ));
@@ -1198,12 +1239,12 @@ export function HomePage() {
                   <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-600/20 flex items-center justify-center mt-0.5"><Info size={13} className="text-emerald-400" /></div>
                   <div>
                     <p className="text-emerald-300 text-xs font-semibold mb-1">Reservation Redemption Policy</p>
-                    <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled after your game</span> — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
+                    <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled before or after your game</span> — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   {[
-                    { label: 'Booking Cut-off', value: `Requires at least ${reservationTerms.advanceBookingHours || 1} hour(s) advance notice.` },
+                    { label: 'Reservation Rule', value: `Requires at least ${reservationTerms.advanceBookingHours || 1} hour(s) advance notice.` },
                     { label: 'Online Booking Hours', value: bookingHoursDisplay },
                     { label: 'Minimum Booking', value: `${reservationTerms.minHours || 1} hour(s)` },
                     { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
@@ -1347,7 +1388,12 @@ export function HomePage() {
         <footer className="bg-neutral-900 border-t border-neutral-800 mt-10 py-8 px-6 text-center">
           <div className="max-w-4xl mx-auto space-y-4">
             <div className="flex items-center justify-center gap-2.5 mb-3"><img src={logoImg} alt="One Shot Bar & Billiards" className="h-8 w-8 object-contain" /><span className="text-white font-bold text-sm">One Shot Bar & Billiards</span></div>
-            <p className="text-neutral-600 text-xs">Autobase OAX, Cainta, Rizal · Mon–Sat 12PM–3AM · Sun 5PM–3AM</p>
+            
+            {/* 🟢 DYNAMIC FOOTER SETUP */}
+            <p className="text-neutral-600 text-xs">
+              {cms.address} · Mon–Thu {fmt12(rates?.weekdayStartTime || '12:00')}–{fmt12(rates?.weekdayEndTime || '02:00')} · Fri–Sun {fmt12(rates?.weekendStartTime || '12:00')}–{fmt12(rates?.weekendEndTime || '02:00')}
+            </p>
+
             <div className="flex justify-center gap-4 border-t border-neutral-800/60 pt-4 mt-4">
               <button onClick={() => { adminLogin('admin', 'admin123'); navigate('/admin'); }} className="text-[10px] text-neutral-600 hover:text-amber-400 transition-colors">Admin Login</button>
               <button onClick={() => { staffLogin('staff', 'staff123'); navigate('/staff'); }} className="text-[10px] text-neutral-600 hover:text-emerald-400 transition-colors">Staff Login</button>

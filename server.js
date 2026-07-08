@@ -250,13 +250,21 @@ app.post('/api/reservations', (req, res) => {
 
 app.put('/api/reservations/:id', (req, res) => {
   const id = req.params.id;
-  const { date, timeSlot, status } = req.body;
+  const { date, timeSlot, status, downPaymentPaid, balancePaid, cancellationReason, tableId } = req.body;
+  
   let updates = [], params = [];
-  if (date) { updates.push("date = ?"); params.push(date); }
-  if (timeSlot) { updates.push("timeSlot = ?"); params.push(timeSlot); }
-  if (status) { updates.push("status = ?"); params.push(status); }
+  
+  if (date !== undefined) { updates.push("date = ?"); params.push(date); }
+  if (timeSlot !== undefined) { updates.push("timeSlot = ?"); params.push(timeSlot); }
+  if (status !== undefined) { updates.push("status = ?"); params.push(status); }
+  if (downPaymentPaid !== undefined) { updates.push("downPaymentPaid = ?"); params.push(downPaymentPaid ? 1 : 0); }
+  if (balancePaid !== undefined) { updates.push("balancePaid = ?"); params.push(balancePaid ? 1 : 0); }
+  if (cancellationReason !== undefined) { updates.push("cancellationReason = ?"); params.push(cancellationReason); }
+  if (tableId !== undefined) { updates.push("tableId = ?"); params.push(tableId); }
+  
   if (updates.length === 0) return res.json({ message: "Nothing to update" });
   params.push(id);
+  
   db.run(`UPDATE reservations SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Reservation updated successfully." });

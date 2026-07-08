@@ -587,17 +587,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`);
   };
 
-  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
+ const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setReservations(prev => [...prev, { ...i, id, createdAt: new Date() }]);
-    syncToSupabase('RESERVATION_ADDED', { id, ...i });
+    const newRes = { ...i, id, createdAt: new Date() };
+    setReservations(prev => [...prev, newRes]);
+    // 🟢 Send to local DB
+    syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`);
+    syncToSupabase('RESERVATION_ADDED', newRes);
     return id;
   };
-  const updateReservationStatus = (id: string, status: ReservationStatus) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
-  const updateReservation = (id: string, u: Partial<Reservation>) => setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
-  const cancelReservation = (id: string, reason: string) => setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
-  const updateDownPayment = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
-  const updateBalance = (id: string, paid: boolean) => setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
+  
+  const updateReservationStatus = (id: string, status: ReservationStatus) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`);
+  };
+  
+  const updateReservation = (id: string, u: Partial<Reservation>) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`);
+  };
+  
+  const cancelReservation = (id: string, reason: string) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`);
+  };
+  
+  const updateDownPayment = (id: string, paid: boolean) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`);
+  };
+  
+  const updateBalance = (id: string, paid: boolean) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`);
+  };
 
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };

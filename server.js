@@ -19,7 +19,9 @@ const PORT = 3001;
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors()); 
-app.use(express.json());
+// 🚨 CRITICAL: This must be the ONLY express.json() call in your file!
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const dbPath = path.resolve(__dirname, 'oneshot.db');
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -72,6 +74,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // ==========================================
 // 🚀 READ ROUTES (GET) 
 // ==========================================
+app.get('/api/promo-codes', (req, res) => {
+  db.all(`SELECT * FROM promo_codes`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({
+      id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description,
+      isActive: r.is_active === 1, isLimitedUses: r.is_limited_uses === 1, maxUsage: r.max_usage,
+      usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at
+    })));
+  });
+});
 
 app.get('/api/images/:id', (req, res) => {
   db.get(`SELECT mimeType, data FROM images WHERE id = ?`, [req.params.id], (err, row) => {
@@ -81,6 +93,20 @@ app.get('/api/images/:id', (req, res) => {
     res.setHeader('Content-Type', row.mimeType);
     res.setHeader('Cache-Control', 'public, max-age=31536000'); 
     res.send(row.data); 
+  });
+});
+
+app.get('/api/closed-dates', (req, res) => {
+  db.all(`SELECT * FROM closed_dates ORDER BY closed_date ASC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({
+      id: r.id,
+      date: r.closed_date,
+      reason: r.reason,
+      isFullDay: r.is_full_day === 1,
+      openTime: r.open_time,
+      closeTime: r.close_time
+    })));
   });
 });
 
@@ -167,6 +193,31 @@ app.get('/api/cms', (req, res) => {
 // 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
 
+
+app.post('/api/promo-codes', (req, res) => {
+  const { id, code, discountPercent, description, isActive, isLimitedUses, maxUsage, startDate, expiresAt } = req.body;
+  db.run(`INSERT INTO promo_codes (id, code, discount_percent, description, is_active, is_limited_uses, max_usage, start_date, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+  [id, code, discountPercent, description, isActive ? 1 : 0, isLimitedUses ? 1 : 0, maxUsage, startDate, expiresAt], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Promo added to DB." });
+  });
+});
+
+app.put('/api/promo-codes/:id', (req, res) => {
+  const { isActive } = req.body;
+  db.run(`UPDATE promo_codes SET is_active = ? WHERE id = ?`, [isActive ? 1 : 0, req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Promo updated." });
+  });
+});
+
+app.delete('/api/promo-codes/:id', (req, res) => {
+  db.run(`DELETE FROM promo_codes WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Promo deleted." });
+  });
+});
+
 app.post('/api/images', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
   
@@ -188,6 +239,88 @@ app.post('/api/tables', (req, res) => {
   db.run(sql, [id, name, status || 'available', isActive ? 1 : 0], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: 'Table created successfully', id: id });
+  });
+});
+
+app.post('/api/closed-dates', (req, res) => {
+  const { id, date, reason, isFullDay, openTime, closeTime } = req.body;
+  db.run(
+    `INSERT INTO closed_dates (id, closed_date, reason, is_full_day, open_time, close_time) VALUES (?, ?, ?, ?, ?, ?)`, 
+    [id, date, reason, isFullDay ? 1 : 0, openTime, closeTime], 
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Closed date added to DB." });
+    }
+  );
+});
+
+app.put('/api/closed-dates/:id', (req, res) => {
+  const { date, reason, isFullDay, openTime, closeTime } = req.body;
+  let updates = [], params = [];
+  
+  if (date !== undefined) { updates.push("closed_date = ?"); params.push(date); }
+  if (reason !== undefined) { updates.push("reason = ?"); params.push(reason); }
+  if (isFullDay !== undefined) { updates.push("is_full_day = ?"); params.push(isFullDay ? 1 : 0); }
+  if (openTime !== undefined) { updates.push("open_time = ?"); params.push(openTime); }
+  if (closeTime !== undefined) { updates.push("close_time = ?"); params.push(closeTime); }
+  
+  if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  params.push(req.params.id);
+  
+  db.run(`UPDATE closed_dates SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Closed date updated in DB." });
+  });
+});
+
+app.delete('/api/closed-dates/:id', (req, res) => {
+  db.run(`DELETE FROM closed_dates WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Closed date deleted from DB." });
+  });
+});
+
+app.post('/api/events', (req, res) => {
+  const { id, title, date, type, description, registrationLink, maxParticipants, slotsFull, attachments } = req.body;
+  const attString = attachments && attachments.length > 0 ? attachments[0] : null;
+  db.run(`INSERT INTO events (id, title, date, type, description, registrationLink, maxParticipants, slotsFull, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+  [id, title, date, type, description, registrationLink, maxParticipants, slotsFull ? 1 : 0, attString], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Event added to DB." });
+  });
+});
+
+app.put('/api/events/:id', (req, res) => {
+  const { title, date, type, description, duration, registrationLink, maxParticipants, slotsFull, attachments } = req.body;
+  let updates = [], params = [];
+  
+  if (title !== undefined) { updates.push("title = ?"); params.push(title); }
+  if (date !== undefined) { updates.push("date = ?"); params.push(date); }
+  if (type !== undefined) { updates.push("type = ?"); params.push(type); }
+  if (description !== undefined) { updates.push("description = ?"); params.push(description); }
+  if (duration !== undefined) { updates.push("duration = ?"); params.push(duration); }
+  if (registrationLink !== undefined) { updates.push("registrationLink = ?"); params.push(registrationLink); }
+  if (maxParticipants !== undefined) { updates.push("maxParticipants = ?"); params.push(maxParticipants); }
+  if (slotsFull !== undefined) { updates.push("slotsFull = ?"); params.push(slotsFull ? 1 : 0); }
+  if (attachments !== undefined) { 
+    updates.push("attachments = ?"); 
+    // 🟢 Grabs the first image from the array to save in the DB
+    params.push(attachments && attachments.length > 0 ? attachments[0] : null); 
+  }
+  
+  if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  params.push(req.params.id);
+  
+  db.run(`UPDATE events SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Event updated." });
+  });
+});
+
+app.delete('/api/events/:id', (req, res) => {
+  db.run(`DELETE FROM events WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Event deleted." });
   });
 });
 

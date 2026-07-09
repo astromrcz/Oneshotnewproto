@@ -226,6 +226,7 @@ export function HomePage() {
   }, []);
 
   // Magic Link Simulator for Email Integration
+ // 🟢 NEW: Magic Link Simulator for Email Integration
   useEffect(() => {
     // Only run if we actually have reservations loaded from the database
     if (reservations.length > 0) {
@@ -448,8 +449,8 @@ export function HomePage() {
     }
   }, [maxAllowedDuration, resForm.timeSlot]);
 
- const validateTimeSlot = (time: string, duration: number) => {
-    if(!time || !selectedDate) return 'invalid';
+const validateTimeSlot = (time: string, duration: number) => {
+    if (!time || !selectedDate) return 'invalid';
 
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
@@ -462,17 +463,8 @@ export function HomePage() {
     if (isToday(new Date(selectedDate))) {
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
       
-      if (isToday(new Date(selectedDate))) {
-        console.log("Validating today's time:", { slotMins, nowMins, result: slotMins <= nowMins ? 'past' : 'valid' });
-    }
-
-    if (isToday(new Date(selectedDate))) {
       if (slotMins <= nowMins) return 'past'; 
       if (slotMins < nowMins + 60) return 'advance';
-    }
-
-      if (slotMins <= nowMins) return 'past'; // Time has passed
-      if (slotMins < nowMins + 60) return 'advance'; // Less than 1 hour notice
     }
 
     const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
@@ -484,29 +476,44 @@ export function HomePage() {
 
     if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
-    // 🟢 NEW: Split Weekday/Weekend Happy Hour Checker
-    const isSlotWeekend = [0, 5, 6].includes(new Date(selectedDate).getDay()); // 0=Sun, 5=Fri, 6=Sat
+    // Happy Hour logic
+    const isSlotWeekend = [0, 5, 6].includes(new Date(selectedDate).getDay());
     const isHHActive = isSlotWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
     
     if (isHHActive) {
       const hhStart = isSlotWeekend ? rates?.weekendHappyHourStart : rates?.weekdayHappyHourStart;
       const hhEnd = isSlotWeekend ? rates?.weekendHappyHourEnd : rates?.weekdayHappyHourEnd;
-      
-      const startHour = parseToMins(hhStart || '18:00');
-      const endHour = parseToMins(hhEnd || '19:00');
-      let s = startHour; let e = endHour;
-      if (e <= s) e += 24 * 60;
+      const s = parseToMins(hhStart || '18:00');
+      const e = parseToMins(hhEnd || '19:00');
       let slotNorm = slotMins;
       if (slotMins < s) slotNorm += 24 * 60;
-      if (slotNorm >= s && slotNorm < e) return 'happyhour';
+      if (slotNorm >= s && slotNorm < (e <= s ? e + 24 * 60 : e)) return 'happyhour';
     }
 
-    // 70/30 Rule Overlap Checker
+    // Capacity Logic
+    const requestedStart = new Date(selectedDate);
+    const [h, m] = time.split(':').map(Number);
+    requestedStart.setHours(h, m, 0, 0);
+    const requestedEnd = addMinutes(requestedStart, duration * 60);
 
+    let overlapCount = 0;
+    const sameDayRes = reservations.filter((r: any) => 
+      r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), requestedStart)
+    );
+
+    sameDayRes.forEach((r: any) => {
+      const rStart = new Date(r.date);
+      const rEnd = addMinutes(rStart, r.durationHours * 60);
+      if (requestedStart < rEnd && requestedEnd > rStart) overlapCount++;
+    });
+
+    const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
+    const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
+    if (overlapCount >= maxOnlineCapacity) return 'full';
 
     return 'valid';
   };
-
+    // 🟢 Split Weekday/Weekend Happy Hour Checker
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
 
 
@@ -1066,18 +1073,17 @@ export function HomePage() {
                             </div>
                           </div>
                          <button 
-                            onClick={handleReservationSubmit} 
-                            // 🟢 The logic below relies entirely on the output of validateTimeSlot
-                            disabled={
-                              !resForm.name.trim() || 
-                              !resForm.phone.trim() || 
-                              !resForm.timeSlot || 
-                              timeValidation !== 'valid'
-                            } 
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
-                          >
-                            Proceed to Payment <ArrowRight size={14} />
-                          </button>
+                                onClick={handleReservationSubmit} 
+                                disabled={
+                                  !resForm.name.trim() || 
+                                  !resForm.phone.trim() || 
+                                  !resForm.timeSlot || 
+                                  timeValidation !== 'valid' // 🟢 Button is ONLY enabled if validation is 'valid'
+                                } 
+                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                              >
+                                Proceed to Payment <ArrowRight size={14} />
+                              </button>
                         </div>
                       </div>
                     )}
@@ -1130,8 +1136,12 @@ export function HomePage() {
                           <p className="text-xs text-neutral-400">Showing results for: <strong className="text-neutral-200">{currentUser ? currentUser.email : trackForm.reservationId}</strong></p>
                           {!currentUser && <button onClick={() => setTrackedReservations(null)} className="text-xs text-emerald-400 hover:underline">New Search</button>}
                         </div>
-                        {myBookings.map((r: any) => (
-                          <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4">
+                        {myBookings.map((r: any) => {
+                          // 🟢 NEW: Check if this specific reservation is affected by an admin closure
+                          const isAffectedByClosure = closedDates.some(cd => isSameDay(new Date(cd.date), new Date(r.date)));
+                          
+                          return (
+                          <div key={r.id} className={`border rounded-xl p-4 flex flex-col gap-4 ${isAffectedByClosure && r.status !== 'cancelled' ? 'bg-rose-950/20 border-rose-900/50' : 'bg-neutral-900 border-neutral-800'}`}>
                             <div className="flex flex-wrap items-start justify-between gap-4">
                               <div className="flex-1 min-w-0 space-y-1">
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -1147,13 +1157,31 @@ export function HomePage() {
                               </div>
                             </div>
                             
-                            {(r.status === 'pending' || r.status === 'confirmed') && (
+                            {/* 🟢 NEW: Affected Booking UI */}
+                            {isAffectedByClosure && r.status !== 'cancelled' && (
+                              <div className="bg-rose-950/40 border border-rose-800/50 rounded-lg p-4 mt-2">
+                                <h4 className="text-rose-400 font-bold text-sm flex items-center gap-2 mb-2"><AlertTriangle size={16} /> Action Required: Establishment Closed</h4>
+                                <p className="text-xs text-neutral-300 mb-3 leading-relaxed">
+                                  We sincerely apologize, but One Shot Bar & Billiards will be closed on <strong>{format(new Date(r.date), 'MMM d, yyyy')}</strong> due to unforeseen circumstances or a private event. <br/><br/>
+                                  You are entitled to a full refund of your <strong>₱{r.downPaymentAmount.toFixed(2)}</strong> down payment, or you may reschedule your booking to a new date.
+                                </p>
+                                <div className="flex gap-2 border-t border-rose-900/30 pt-3 mt-3">
+                                  <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="flex-1 text-[11px] font-semibold bg-rose-600 hover:bg-rose-500 text-white px-3 py-2 rounded transition-colors">Reschedule Booking</button>
+                                  <button onClick={() => cancelReservation(r.id, "Closure Refund Request")} className="flex-1 text-[11px] font-semibold text-rose-300 hover:text-white bg-rose-950/50 border border-rose-800/50 hover:bg-rose-900/50 px-3 py-2 rounded transition-colors">Cancel & Request Refund</button>
+                                </div>
+                                <p className="text-[10px] text-neutral-500 mt-3 text-center">Need help? Contact us at <strong>{cms.phone}</strong> or <strong>{cms.email}</strong></p>
+                              </div>
+                            )}
+
+                            {/* Standard Actions */}
+                            {(!isAffectedByClosure && (r.status === 'pending' || r.status === 'confirmed')) && (
                               <div className="border-t border-neutral-800/60 pt-3 flex justify-end gap-2">
                                 <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors">Reschedule</button>
                                 <button onClick={() => handleCancelBooking(r.id)} className="text-[10px] font-semibold text-rose-400 hover:text-white bg-rose-950/30 border border-rose-900/50 hover:bg-rose-900/50 px-3 py-1.5 rounded transition-colors">Cancel Booking</button>
                               </div>
                             )}
 
+                            {/* Reschedule Calendar Pop-up */}
                             {reschedulingId === r.id && (
                               <div className="mt-2 p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-4">
                                 <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Select New Date & Time</h4>
@@ -1163,13 +1191,14 @@ export function HomePage() {
                                    <input type="time" value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => ({ ...prev, timeSlot: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
                                 </div>
                                 <div className="flex gap-2 justify-end pt-2 border-t border-neutral-800/60">
-                                   <button onClick={() => setReschedulingId(null)} className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors">Cancel</button>
+                                   <button onClick={() => setReschedulingId(null)} className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors">Abort</button>
                                    <button onClick={() => handleRescheduleSubmit(r.id)} disabled={!rescheduleData.date || !rescheduleData.timeSlot} className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 text-white rounded-lg transition-colors">Confirm Reschedule</button>
                                 </div>
                               </div>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     );
                   })()}
@@ -1222,9 +1251,9 @@ export function HomePage() {
                       
                       {/* 🟢 Unified Button Handler conditional on Card Type */}
                       {name === 'Standard Play' ? (
-                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40 select-none">🚶 Walk-ins Welcome</div>
+                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40 select-none"> Walk-ins Welcome</div>
                       ) : name === 'Happy Hour' ? (
-                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40 select-none">🚶 Walk-in Only</div>
+                        <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40 select-none"> Walk-in Only</div>
                       ) : (
                         <button onClick={() => setActiveSection('reservations')} className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/20">Book Now</button>
                       )}
@@ -1631,4 +1660,5 @@ export function HomePage() {
       </div>
     </div>
   );
+  
 }

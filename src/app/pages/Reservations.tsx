@@ -609,7 +609,7 @@ export function Reservations() {
 
                 {/* GCash Receipt Area (Mandatory Logic) */}
                 <div className="space-y-2 border-t border-neutral-800 pt-3">
-                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">GCash Receipt (Mandatory)</label>
+                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">GCash Receipt</label>
                   {selected.paymentRef ? (
                     <div className="flex items-center justify-between bg-neutral-950 p-2 rounded border border-neutral-800">
                       <span className="text-xs font-mono text-neutral-300">Ref: {selected.paymentRef}</span>

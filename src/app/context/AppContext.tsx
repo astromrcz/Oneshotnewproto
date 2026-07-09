@@ -334,7 +334,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const fetchLocalDatabase = async () => {
       console.log("📡 Attempting to fetch data from localhost:3001...");
       try {
-        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes] = await Promise.all([
+        // 🟢 FIXED: Added closedDatesRes and eventsRes to the destructuring array
+        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes] = await Promise.all([
           fetch('http://localhost:3001/api/tables').catch(e => { console.error("Table fetch failed:", e); return null; }),
           fetch('http://localhost:3001/api/reservations').catch(() => null),
           fetch('http://localhost:3001/api/inventory').catch(() => null),
@@ -343,6 +344,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fetch('http://localhost:3001/api/feedback').catch(() => null),
           fetch('http://localhost:3001/api/announcements').catch(() => null),
           fetch('http://localhost:3001/api/cms').catch(() => null),
+          fetch('http://localhost:3001/api/closed-dates').catch(() => null),
+          fetch('http://localhost:3001/api/promo-codes').catch(() => null), 
+          fetch('http://localhost:3001/api/events').catch(() => null),
         ]);
 
         if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
@@ -352,6 +356,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
         if (annRes && annRes.ok) setAnnouncements(await annRes.json());
         if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
+        if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
+        if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
+        
+        if (eventsRes && eventsRes.ok) {
+          const dbEvents = await eventsRes.json();
+          setEvents(prev => {
+            const existingIds = new Set(prev.map(e => e.id));
+            const newEvents = dbEvents.filter((e: any) => !existingIds.has(e.id));
+            return [...prev, ...newEvents];
+          });
+        }
         
         if (ratesRes && ratesRes.ok) {
         const dbSettings = await ratesRes.json();
@@ -628,15 +643,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback");
   };
 
-  const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
+ 
+ const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
     const id = `p${Date.now()}`;
-    setPromoCodes(prev => [...prev, { ...i, id, createdAt: new Date(), usageCount: 0 }]);
-    addActivity('promo_created', `Generated new promo code: ${i.code}`);
+    const newPromo = { ...i, id, createdAt: new Date(), usageCount: 0 };
+    setPromoCodes(prev => [...prev, newPromo]);
+    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`); // 🟢 NEW
     return id;
   };
-  const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
-  const togglePromoCode = (id: string) => setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
-  const deletePromoCode = (id: string) => setPromoCodes(prev => prev.filter(p => p.id !== id));
+  const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => {
+    setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
+  };
+  const togglePromoCode = (id: string) => {
+    const target = promoCodes.find(p => p.id === id);
+    setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
+    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo'); // 🟢 NEW
+  };
+  const deletePromoCode = (id: string) => {
+    setPromoCodes(prev => prev.filter(p => p.id !== id));
+    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo'); // 🟢 NEW
+  };
   const applyPromoCode = (code: string) => {
     const now = new Date();
     return promoCodes.find(p => {
@@ -719,9 +745,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addClosedDate = (c: Omit<ClosedDate, 'id'>) => setClosedDates(prev => [...prev, { ...c, id: `cd${Date.now()}` }]);
-  const removeClosedDate = (id: string) => setClosedDates(prev => prev.filter(c => c.id !== id));
-  const updateClosedDate = (id: string, u: Partial<ClosedDate>) => setClosedDates(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
+  const addClosedDate = (c: Omit<ClosedDate, 'id'>) => {
+    const newCd = { ...c, id: `cd${Date.now()}` };
+    setClosedDates(prev => [...prev, newCd]);
+    syncToDB('/api/closed-dates', 'POST', newCd, `Created closed date for ${c.date}`);
+  };
+  
+  const removeClosedDate = (id: string) => {
+    setClosedDates(prev => prev.filter(c => c.id !== id));
+    syncToDB(`/api/closed-dates/${id}`, 'DELETE', {}, `Deleted closed date`);
+  };
+  
+  const updateClosedDate = (id: string, u: Partial<ClosedDate>) => {
+    setClosedDates(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
+    syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`);
+  };
 
   const updateSiteConfig = (newConfig: any) => {
     setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
@@ -730,11 +768,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addEvent = (e: Omit<Event, 'id'>) => {
-    setEvents(prev => [...prev, { ...e, id: Date.now().toString() }]);
-    addActivity('admin_action', `Created new event: ${e.title}`);
+    const newEvent = { ...e, id: Date.now().toString() };
+    setEvents(prev => [...prev, newEvent]);
+    syncToDB('/api/events', 'POST', newEvent, `Created new event`); // 🟢 NEW
   };
-  const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-  const deleteEvent = (id: string) => setEvents(prev => prev.filter(e => e.id !== id));
+  const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => {
+    setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`); // 🟢 NEW
+  };
+  const deleteEvent = (id: string) => {
+    setEvents(prev => prev.filter(e => e.id !== id));
+    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`); // 🟢 NEW
+  };
 
   if (isInitializing) {
     return (

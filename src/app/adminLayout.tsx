@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Table2, Tag, BarChart3,
   DollarSign, FileText, Megaphone, CalendarX2,
   Menu, X, LogOut, ChevronRight,
-  ShieldCheck, Circle, ShoppingCart
+  ShieldCheck, Circle, ShoppingCart, Shield, Settings
 } from 'lucide-react';
 import { useAppContext } from './context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
@@ -17,8 +17,10 @@ const navItems = [
   { to: '/admin/policy-rates',      icon: DollarSign,      label: 'Policy & Rates' }, // 🟢 NEW: Unified Tab
   { to: '/admin/announcements',     icon: Megaphone,       label: 'Announcements' },
   { to: '/admin/analytics',         icon: BarChart3,       label: 'Analytics' },
+  { to: '/admin/activity',          icon: Shield,          label: 'System Activity' },
   { to: '/admin/feedback',          icon: Tag,             label: 'Feedback' },
   { to: '/admin/site-settings',     icon: FileText,        label: 'Site Settings' },
+  { to: '/admin/settings',            icon: Settings,    label: 'Settings' },
 ];
 
 const pageTitles: Record<string, string> = {
@@ -29,7 +31,10 @@ const pageTitles: Record<string, string> = {
   '/admin/policy-rates': 'Policy & Rates', // 🟢 NEW: Unified Title
   '/admin/announcements': 'Announcements',
   '/admin/analytics': 'Analytics',
+  '/admin/activity': 'System Activity Log',
   '/admin/feedback': 'Feedback',
+  '/staff/settings': 'Settings',
+
 };
 
 export function AdminLayout() {
@@ -139,7 +144,7 @@ export function AdminLayout() {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header */}
-        <header className="h-14 flex-none bg-neutral-950/80 border-b border-amber-900/20 flex items-center justify-between px-5 backdrop-blur-sm">
+        <header className="relative z-50 h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <button className="lg:hidden text-neutral-400 hover:text-neutral-200 p-1" onClick={() => setSidebarOpen(true)}>
               <Menu size={20} />
@@ -150,6 +155,9 @@ export function AdminLayout() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/admin/settings')} className="p-1.5 text-neutral-400 hover:text-amber-400 transition-colors">
+              <Settings size={16} />
+            </button>
             <div className="hidden sm:flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-full">
               <ShieldCheck size={13} className="text-amber-400" />
               <span className="text-xs text-amber-400 font-semibold">Admin Mode</span>

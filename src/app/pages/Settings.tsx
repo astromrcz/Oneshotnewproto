@@ -19,7 +19,7 @@ export function SettingsPage() {
   const [saved, setSaved] = useState<string | null>(null);
   
   // Profile Picture State
-  const [avatarImg, setAvatarImg] = useState<string | null>(null);
+  const [avatarImg, setAvatarImg] = useState<string | null>(staffProfile.avatarImg || null);
 
   // ── Profile Form ────────────────────────────────────────────
   const [profileEdit, setProfileEdit] = useState(false);
@@ -52,7 +52,7 @@ export function SettingsPage() {
       fullName: profileForm.fullName,
       email:    profileForm.email,
       phone:    profileForm.phone,
-      // Note: Role is explicitly NOT updated here to ensure only admin changes it
+      avatarImg: avatarImg || undefined, // 🟢 NEW: Saves the photo to context & DB
     });
     setProfileEdit(false);
     flashSaved('profile');

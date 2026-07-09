@@ -140,6 +140,7 @@ export type StaffProfile = {
   role: string;
   phone: string;
   joinedDate: string;
+  avatarImg?: string;
 };
 
 export type StaffUser = {
@@ -335,7 +336,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.log("📡 Attempting to fetch data from localhost:3001...");
       try {
         // 🟢 FIXED: Added closedDatesRes and eventsRes to the destructuring array
-        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes] = await Promise.all([
+        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, activitiesRes] = await Promise.all([
           fetch('http://localhost:3001/api/tables').catch(e => { console.error("Table fetch failed:", e); return null; }),
           fetch('http://localhost:3001/api/reservations').catch(() => null),
           fetch('http://localhost:3001/api/inventory').catch(() => null),
@@ -347,6 +348,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fetch('http://localhost:3001/api/closed-dates').catch(() => null),
           fetch('http://localhost:3001/api/promo-codes').catch(() => null), 
           fetch('http://localhost:3001/api/events').catch(() => null),
+          fetch('http://localhost:3001/api/activities').catch(() => null),
         ]);
 
         if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
@@ -358,6 +360,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
         if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
         if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
+        if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
         
         if (eventsRes && eventsRes.ok) {
           const dbEvents = await eventsRes.json();
@@ -471,16 +474,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
-    setActivities(prev => [{ id: Math.random().toString(36).substring(7), type, description, timestamp: new Date(), metadata }, ...prev]);
-    toast.success(description);
-    console.log(`✅ [SYSTEM SUCCESS]: ${description} | Data accurately updated.`);
+    const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description, timestamp: new Date(), metadata };
+    setActivities(prev => [newActivity, ...prev]);
+    
+    // Silent database push
+    fetch('http://localhost:3001/api/activities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newActivity)
+    }).catch(e => console.error("Failed to log activity"));
   };
 
   const staffLogin = (u: string, p: string) => { const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive); if (valid || (u==='staff' && p==='staff123')) { setStaffLoggedIn(true); return true; } return false; };
   const staffLogout = () => setStaffLoggedIn(false);
   const adminLogin = (u: string, p: string) => { if (u === 'admin' && p === 'admin123') { setAdminLoggedIn(true); return true; } return false; };
   const adminLogout = () => setAdminLoggedIn(false);
-  const updateStaffProfile = (p: Partial<StaffProfile>) => setStaffProfile(prev => ({ ...prev, ...p }));
+  const updateStaffProfile = (p: Partial<StaffProfile>) => {
+    setStaffProfile(prev => {
+      const updated = { ...prev, ...p };
+      
+      // 🟢 NEW: Push profile changes to the SQLite database
+      fetch(`http://localhost:3001/api/staff/${updated.username}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(p)
+      }).catch(e => console.error("Failed to update profile to DB"));
+      
+      return updated;
+    });
+  };
 
   const assignTable = (tableId: string, session: Session) => {
     const updatedSession = { ...session, orders: [] };
@@ -606,35 +628,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     setReservations(prev => [...prev, newRes]);
-    // 🟢 Send to local DB
     syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`);
     syncToSupabase('RESERVATION_ADDED', newRes);
+    addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`); // 🟢 NEW
     return id;
   };
   
   const updateReservationStatus = (id: string, status: ReservationStatus) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`);
+    addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); // 🟢 NEW
   };
-  
+
   const updateReservation = (id: string, u: Partial<Reservation>) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`);
+    addActivity('reservation_updated', `Reservation ${id} details were updated`);
   };
   
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`);
+    addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); // 🟢 NEW
   };
   
   const updateDownPayment = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`);
+    if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); // 🟢 NEW
   };
   
   const updateBalance = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`);
+    if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); // 🟢 NEW
   };
 
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {

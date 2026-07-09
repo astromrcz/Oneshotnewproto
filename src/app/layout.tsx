@@ -16,7 +16,6 @@ const navItems = [
   { to: '/staff/reservations',        icon: Calendar,    label: 'Reservations' },
   { to: '/staff/queue',               icon: UserPlus,    label: 'Queue' },
   { to: '/staff/promo-codes',         icon: Tag,         label: 'Promo Codes' },
-  { to: '/staff/activity',            icon: Shield,      label: 'Activity Log' },
   { to: '/staff/settings',            icon: Settings,    label: 'Settings' },
 ];
 
@@ -26,7 +25,6 @@ const pageTitles: Record<string, string> = {
   '/staff/reservations': 'Reservations',
   '/staff/queue': 'Queue Management',
   '/staff/promo-codes': 'Promo Codes',
-  '/staff/activity': 'Activity Log',
   '/staff/settings': 'Settings',
 };
 
@@ -187,7 +185,7 @@ export function Layout() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header */}
-        <header className="h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
+        <header className="relative z-50 h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <button
               className="lg:hidden text-neutral-400 hover:text-neutral-200 p-1"

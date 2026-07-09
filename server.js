@@ -142,6 +142,15 @@ app.get('/api/queue', (req, res) => {
   });
 });
 
+app.get('/api/activities', (req, res) => {
+  db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`, () => {
+    db.all(`SELECT * FROM activities ORDER BY timestamp DESC LIMIT 200`, [], (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(rows.map(r => ({ ...r, metadata: r.metadata ? JSON.parse(r.metadata) : undefined })));
+    });
+  });
+})
+
 app.get('/api/events', (req, res) => {
   db.all(`SELECT * FROM events`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -495,6 +504,42 @@ app.put('/api/settings/terms', (req, res) => {
   };
   
   processNextKey();
+});
+
+app.post('/api/activities', (req, res) => {
+  const { id, type, description, timestamp, metadata } = req.body;
+  db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`, () => {
+    db.run(`INSERT INTO activities (id, type, description, timestamp, metadata) VALUES (?, ?, ?, ?, ?)`, 
+    [id, type, description, timestamp, metadata ? JSON.stringify(metadata) : null], function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Activity logged." });
+    });
+  });
+});
+
+// ==========================================
+// 🟢 STAFF / USER PROFILE ROUTES
+// ==========================================
+app.put('/api/staff/:username', (req, res) => {
+  const { fullName, email, phone, password, avatarImg } = req.body;
+  let updates = [], params = [];
+  
+  if (fullName !== undefined) { updates.push("fullName = ?"); params.push(fullName); }
+  if (email !== undefined) { updates.push("email = ?"); params.push(email); }
+  if (phone !== undefined) { updates.push("phone = ?"); params.push(phone); }
+  if (password !== undefined) { updates.push("password = ?"); params.push(password); }
+  if (avatarImg !== undefined) { updates.push("avatarImg = ?"); params.push(avatarImg); }
+  
+  if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  params.push(req.params.username);
+  
+  // Auto-create table if missing
+  db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, email TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT)`, () => {
+     db.run(`UPDATE staff SET ${updates.join(', ')} WHERE username = ?`, params, function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: "Profile updated successfully." });
+    });
+  });
 });
 
 app.post('/api/feedback', (req, res) => {

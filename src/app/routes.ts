@@ -70,8 +70,10 @@ export const router = createBrowserRouter([
           { path: 'announcements',          Component: AdminAnnouncements },
           { path: 'events',                 Component: AdminEvents },
           { path: 'analytics',              Component: Analytics },
+          { path: 'activity',          Component: ActivityLog },
           { path: 'feedback',               Component: FeedbackPage },
           { path: 'site-settings',               Component: AdminSiteSettings },
+          { path: 'settings',               Component: SettingsPage },
 
         ],
       },

@@ -109,26 +109,60 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
+  const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser } = useAppContext() as any;
 
   // 🟢 NEW: Announcement State & Local Storage Tracking
+  // 🟢 NEW: Advanced Notification & First-Time User Tracking
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
+  const [isFirstTime, setIsFirstTime] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('oneshot_read_announcements');
     if (stored) {
       try { setReadAnnouncements(JSON.parse(stored)); } catch(e) {}
     }
+    // Check if first time user
+    const visited = localStorage.getItem('oneshot_visited');
+    if (!visited) {
+      setIsFirstTime(true);
+      localStorage.setItem('oneshot_visited', 'true');
+    }
   }, []);
 
+  // 1. Get CMS Announcements
   const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
-  const hasUnread = activeAnnouncements.some((a: any) => !readAnnouncements.includes(a.id));
+  
+  // 2. Get User's Reservation Updates (if logged in)
+  const userReservations = currentUser 
+    ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()) 
+    : [];
+  const resNotifications = userReservations.map((r: any) => ({
+    id: `notif_${r.id}_${r.status}`,
+    type: 'Reservation Update',
+    title: `Booking ${r.status.toUpperCase()}`,
+    content: `Your reservation for ${format(new Date(r.date), 'MMM d, yyyy')} is currently marked as ${r.status}.`,
+    createdAt: r.createdAt
+  }));
+
+  // 3. Merge & Sort
+  const allNotifications = [...activeAnnouncements, ...resNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  // 4. Check Unread Status
+  const hasUnread = isFirstTime || allNotifications.some((n: any) => !readAnnouncements.includes(n.id));
+
+  const markAsRead = (id: string) => {
+    const newRead = [...readAnnouncements, id];
+    setReadAnnouncements(newRead);
+    localStorage.setItem('oneshot_read_announcements', JSON.stringify(newRead));
+    if (isFirstTime) setIsFirstTime(false);
+  };
 
   const markAllAsRead = () => {
-    const ids = activeAnnouncements.map((a: any) => a.id);
+    const ids = allNotifications.map((n: any) => n.id);
     setReadAnnouncements(ids);
     localStorage.setItem('oneshot_read_announcements', JSON.stringify(ids));
+    setIsFirstTime(false);
   };
 
   const getOpenHoursDisplay = () => {
@@ -153,7 +187,7 @@ export function HomePage() {
   const [now, setNow] = useState(new Date());
   const [activeSection, setActiveSection] = useState<Section>('home');
 
-  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
+  const [setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -624,11 +658,11 @@ export function HomePage() {
             >
               <Bell size={20} />
               {hasUnread && (
-                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-neutral-950" />
+                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-neutral-950 animate-pulse" />
               )}
             </button>
 
-            {/* Announcement Dropdown */}
+            {/* Notification Dropdown */}
             <AnimatePresence>
               {showAnnouncements && (
                 <motion.div
@@ -639,7 +673,7 @@ export function HomePage() {
                 >
                   <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 bg-neutral-900/50">
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <Megaphone size={14} className="text-emerald-500" /> Announcements
+                      <Bell size={14} className="text-emerald-500" /> Notifications
                     </h3>
                     {hasUnread && (
                       <button onClick={markAllAsRead} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 bg-emerald-950/30 px-2 py-1 rounded transition-colors">
@@ -648,22 +682,30 @@ export function HomePage() {
                     )}
                   </div>
                   <div className="max-h-80 overflow-y-auto p-2">
-                    {activeAnnouncements.length === 0 ? (
-                      <p className="text-xs text-neutral-500 text-center py-6">No active announcements</p>
+                    {allNotifications.length === 0 ? (
+                      <p className="text-xs text-neutral-500 text-center py-6">No notifications yet</p>
                     ) : (
-                      activeAnnouncements.map((a: any) => {
-                        const isUnread = !readAnnouncements.includes(a.id);
+                      allNotifications.map((n: any) => {
+                        const isUnread = isFirstTime || !readAnnouncements.includes(n.id);
+                        const isRes = n.type === 'Reservation Update';
                         return (
-                          <div key={a.id} className={`p-4 rounded-xl mb-1 transition-colors ${isUnread ? 'bg-emerald-950/10 border border-emerald-900/30' : 'hover:bg-neutral-900/50 border border-transparent'}`}>
+                          <div key={n.id} className={`p-4 rounded-xl mb-1 transition-colors ${isUnread ? 'bg-emerald-950/20 border border-emerald-900/40' : 'hover:bg-neutral-900/50 border border-transparent'}`}>
                             <div className="flex items-center justify-between mb-2">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">{a.type}</span>
-                              <span className="text-[10px] text-neutral-500">{format(new Date(a.createdAt), 'MMM d, yyyy')}</span>
+                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${isRes ? 'text-sky-400 bg-sky-500/10' : 'text-emerald-500 bg-emerald-500/10'}`}>{n.type}</span>
+                              <div className="flex items-center gap-3">
+                                <span className="text-[10px] text-neutral-500">{format(new Date(n.createdAt), 'MMM d')}</span>
+                                {isUnread && (
+                                  <button onClick={() => markAsRead(n.id)} className="text-[10px] text-emerald-400 hover:text-white transition-colors flex items-center gap-1" title="Mark as read">
+                                    <CheckCircle size={12} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <div className="flex items-start gap-2">
                               {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 flex-shrink-0" />}
                               <div>
-                                <p className={`text-sm font-bold mb-1 ${isUnread ? 'text-white' : 'text-neutral-300'}`}>{a.title}</p>
-                                <p className="text-xs text-neutral-400 leading-relaxed">{a.content}</p>
+                                <p className={`text-sm font-bold mb-1 ${isUnread ? 'text-white' : 'text-neutral-300'}`}>{n.title}</p>
+                                <p className="text-xs text-neutral-400 leading-relaxed">{n.content}</p>
                               </div>
                             </div>
                           </div>

@@ -475,10 +475,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
-    const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description, timestamp: new Date(), metadata };
+    // 🟢 NEW: Identify exactly who is performing the action
+    let actor = 'Customer / System';
+    if (adminLoggedIn) actor = 'Admin';
+    else if (staffLoggedIn && staffProfile?.fullName) actor = staffProfile.fullName;
+
+    // Append the actor to the log
+    const detailedDescription = `${description} (Action by: ${actor})`;
+
+    const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description: detailedDescription, timestamp: new Date(), metadata };
     setActivities(prev => [newActivity, ...prev]);
     
-    // Silent database push
     fetch('http://localhost:3001/api/activities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

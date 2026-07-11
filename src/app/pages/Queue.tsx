@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, 
-  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Info 
+  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Info, Plus, Minus 
 } from 'lucide-react';
 import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, addMinutes, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
@@ -129,6 +129,7 @@ export function Queue() {
               <input
                 type="text"
                 value={name}
+                maxLength={20}
                 onChange={e => setName(e.target.value)}
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
                 placeholder="Customer name"
@@ -141,6 +142,7 @@ export function Queue() {
               <input
                 type="tel"
                 value={contact}
+                maxLength={20}
                 onChange={e => setContact(e.target.value)}
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
                 placeholder="09xx-xxx-xxxx"
@@ -148,21 +150,10 @@ export function Queue() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Party Size</label>
-              <div className="flex gap-2">
-                {[1, 2, 3, 4, 5, 6].map(n => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setPartySize(n)}
-                    className={`flex-1 py-2 rounded-lg border text-xs font-bold transition-all ${
-                      partySize === n
-                        ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
-                        : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
+              <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-lg p-1.5">
+                <button type="button" onClick={() => setPartySize(p => Math.max(1, p - 1))} className="flex-1 h-8 flex items-center justify-center bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-md transition-colors"><Minus size={14}/></button>
+                <span className="w-12 text-center text-sm font-bold text-neutral-200">{partySize}</span>
+                <button type="button" onClick={() => setPartySize(p => p + 1)} className="flex-1 h-8 flex items-center justify-center bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-md transition-colors"><Plus size={14}/></button>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -170,6 +161,7 @@ export function Queue() {
               <input
                 type="text"
                 value={notes}
+                maxLength={100}
                 onChange={e => setNotes(e.target.value)}
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
                 placeholder="Special requests..."

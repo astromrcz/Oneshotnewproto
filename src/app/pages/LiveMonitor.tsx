@@ -50,18 +50,35 @@ function getSessionTimer(table: Table): {
 function TableCard({ table }: { table: Table }) {
   const timer = getSessionTimer(table);
 
+  if (table.status === 'maintenance') {
+    return (
+      <div className="bg-orange-950/40 border-2 border-orange-800/40 rounded-2xl p-5 flex flex-col items-center gap-3 opacity-60">
+        <div className="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-600/30 flex items-center justify-center">
+          <span className="text-orange-500 font-black text-lg">{table.name.replace('Table ', '')}</span>
+        </div>
+        <div className="text-center">
+          <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
+          <div className="flex items-center justify-center gap-1.5 mt-2">
+            <span className="w-2 h-2 rounded-full bg-orange-500" />
+            <span className="text-orange-500 font-black text-lg">MAINTENANCE</span>
+          </div>
+          <p className="text-[11px] text-orange-600 mt-1">{table.maintenanceReason || 'Unavailable'}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (table.status === 'available') {
     return (
-      <div className="relative bg-emerald-950/30 border-2 border-emerald-700/50 rounded-2xl p-5 flex flex-col items-center gap-3 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/5 to-transparent pointer-events-none" />
+      <div className="relative bg-emerald-950/20 border-2 border-emerald-800/30 rounded-2xl p-5 flex flex-col items-center gap-3 overflow-hidden">
         <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center">
-          <span className="text-emerald-400 font-black text-lg">{table.name.replace('Table ', '')}</span>
+          <span className="text-emerald-500 font-black text-lg">{table.name.replace('Table ', '')}</span>
         </div>
         <div className="text-center">
           <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
           <div className="flex items-center justify-center gap-1.5 mt-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-            <span className="text-emerald-400 font-black text-lg">OPEN</span>
+            <span className="text-emerald-500 font-black text-lg">OPEN</span>
           </div>
           <p className="text-[11px] text-emerald-600 mt-1">Walk-in Welcome</p>
         </div>
@@ -71,82 +88,76 @@ function TableCard({ table }: { table: Table }) {
 
   if (table.status === 'reserved') {
     return (
-      <div className="bg-blue-950/30 border-2 border-blue-700/40 rounded-2xl p-5 flex flex-col items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-600/30 flex items-center justify-center">
-          <span className="text-blue-400 font-black text-lg">{table.name.replace('Table ', '')}</span>
+      <div className="bg-sky-950/40 border-2 border-sky-800/40 rounded-2xl p-5 flex flex-col items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-sky-600/20 border border-sky-600/30 flex items-center justify-center">
+          <span className="text-sky-400 font-black text-lg">{table.name.replace('Table ', '')}</span>
         </div>
         <div className="text-center">
           <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
           <div className="flex items-center justify-center gap-1.5 mt-2">
-            <span className="w-2 h-2 rounded-full bg-blue-500" />
-            <span className="text-blue-300 font-black text-lg">RESERVED</span>
+            <span className="w-2 h-2 rounded-full bg-sky-500" />
+            <span className="text-sky-400 font-black text-lg">RESERVED</span>
           </div>
-          <p className="text-[11px] text-blue-600 mt-1">Pre-booked</p>
+          <p className="text-[11px] text-sky-600 mt-1">Pre-booked</p>
         </div>
       </div>
     );
   }
 
-  // Occupied Status
+  // Occupied Status (In Use, Open Time, Overtime)
+  const isOvertime = timer.isOvertime;
+  const isOpenTime = timer.isOpenTime;
+  
+  const colorClass = isOvertime 
+    ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse'
+    : isOpenTime
+    ? 'bg-blue-950/40 border-blue-800/40 text-blue-400'
+    : 'bg-amber-950/40 border-amber-800/40 text-amber-400';
+    
+  const badgeClass = isOvertime
+    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+    : isOpenTime
+    ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+    : 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+
+  const barClass = isOvertime
+    ? 'bg-rose-500/40'
+    : isOpenTime
+    ? 'bg-blue-400/50'
+    : timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500';
+
   return (
-    <div className={`relative border-2 rounded-2xl p-5 flex flex-col gap-3 overflow-hidden ${
-      timer.isOvertime
-        ? 'bg-rose-950/40 border-rose-600/60'
-        : 'bg-neutral-900/80 border-neutral-700/50'
-    }`}>
-      {timer.isOvertime && (
-        <div className="absolute inset-0 bg-rose-500/5 animate-pulse pointer-events-none" />
-      )}
-
-      {/* Table number + Status Badge */}
+    <div className={`relative border-2 rounded-2xl p-5 flex flex-col gap-3 overflow-hidden ${colorClass}`}>
       <div className="flex items-start justify-between">
-        <div className="w-9 h-9 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center flex-shrink-0">
-          <span className="text-white font-black">{table.name.replace('Table ', '')}</span>
+        <div className="w-9 h-9 rounded-xl bg-black/20 border border-white/10 flex items-center justify-center flex-shrink-0">
+          <span className="font-black text-white">{table.name.replace('Table ', '')}</span>
         </div>
-        <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
-          timer.isOvertime
-            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-            : timer.isOpenTime
-            ? 'bg-sky-500/15 text-sky-400 border border-sky-500/20'
-            : 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
-        }`}>
-          {timer.isOvertime ? '⚠ OVERTIME' : timer.isOpenTime ? 'OPEN TIME' : 'IN USE'}
+        <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${badgeClass}`}>
+          {isOvertime ? '⚠ OVERTIME' : isOpenTime ? 'OPEN TIME' : 'IN USE'}
         </div>
       </div>
 
-      {/* Customer name */}
       <div>
-        <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Customer</p>
-        <p className="text-white font-bold text-sm mt-0.5 truncate">{table.session?.customerName || '—'}</p>
+        <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70">Customer</p>
+        <p className="font-bold text-sm mt-0.5 truncate text-white">{table.session?.customerName || '—'}</p>
       </div>
 
-      {/* Countdown / Countup */}
       <div className="text-center">
-        <p className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">
-          {timer.isOpenTime ? 'Time Elapsed' : timer.isOvertime ? 'Overtime' : 'Time Left'}
+        <p className="text-[10px] uppercase tracking-wider mb-1 opacity-70">
+          {isOpenTime ? 'Time Elapsed' : isOvertime ? 'Overtime' : 'Time Left'}
         </p>
-        <div className={`font-black text-4xl tabular-nums tracking-tight ${
-          timer.isOvertime ? 'text-rose-400' : timer.isOpenTime ? 'text-sky-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'
-        }`}>
+        <div className="font-black text-4xl tabular-nums tracking-tight text-white">
           {timer.mm}:{timer.ss}
         </div>
 
-        {/* Progress bar */}
-        <div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden relative">
-          {!timer.isOvertime && !timer.isOpenTime && (
-            <div
-              className={`h-full rounded-full transition-all duration-1000 ${
-                timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500'
-              }`}
-              style={{ width: `${timer.percentLeft}%` }}
-            />
+        <div className="mt-2 h-1.5 bg-black/40 rounded-full overflow-hidden relative">
+          {!isOvertime && !isOpenTime && (
+            <div className={`h-full rounded-full transition-all duration-1000 ${barClass}`} style={{ width: `${timer.percentLeft}%` }} />
           )}
-          {timer.isOvertime && (
-            <div className="h-full w-full bg-rose-500/40 animate-pulse" />
-          )}
-          {timer.isOpenTime && (
-            <div className="h-full w-full bg-sky-900 overflow-hidden relative">
-              <div className="absolute inset-0 w-1/2 bg-sky-400/50 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] skew-x-12" />
+          {isOvertime && <div className={`h-full w-full ${barClass}`} />}
+          {isOpenTime && (
+            <div className="h-full w-full bg-blue-900/50 overflow-hidden relative">
+              <div className={`absolute inset-0 w-1/2 ${barClass} animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] skew-x-12`} />
             </div>
           )}
         </div>
@@ -197,9 +208,10 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 }
 
 // ── Main Component ─────────────────────────────────────────────
+// ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
-  // 🟢 Extract refreshLiveMonitor from context
-  const { tables, queue, refreshLiveMonitor } = useAppContext();
+  // 🟢 Extract refreshLiveMonitor and rates from context
+  const { tables, queue, refreshLiveMonitor, rates } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
 
@@ -280,8 +292,8 @@ export function LiveMonitor() {
           <span className="text-sm font-semibold text-amber-300">{occupiedCount} In Use</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-          <span className="text-sm font-semibold text-blue-300">{reservedCount} Reserved</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+          <span className="text-sm font-semibold text-sky-300">{reservedCount} Reserved</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -305,11 +317,13 @@ export function LiveMonitor() {
           </div>
 
           {/* Legend */}
-          <div className="mt-6 flex flex-wrap gap-4 text-[11px] text-neutral-600">
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-emerald-700" /> Available — walk up to any open table</div>
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-neutral-700" /> In Use — countdown shows remaining time</div>
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-blue-800" /> Reserved — pre-booked slot</div>
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-rose-800" /> Overtime — please see staff</div>
+          <div className="mt-6 flex flex-wrap gap-4 text-[11px] text-neutral-600 font-medium">
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Open</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> In Use</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /> Open Time</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500" /> Overtime</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500" /> Reserved</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-orange-500" /> Maintenance</div>
           </div>
         </div>
 
@@ -353,12 +367,8 @@ export function LiveMonitor() {
                 <span className="text-neutral-300 font-semibold">{waitingQueue.length}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-neutral-600">Rate per hour</span>
-                <span className="text-neutral-300 font-semibold">₱250 / hr</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-neutral-600">Happy Hour (6–8PM)</span>
-                <span className="text-amber-400 font-semibold">₱200 / hr</span>
+                <span className="text-neutral-600">Base Rate per hour</span>
+                <span className="text-emerald-400 font-semibold">₱{rates?.hourlyRate || 0} / hr</span>
               </div>
             </div>
             <p className="text-[10px] text-neutral-700 text-center mt-3 leading-relaxed">
@@ -367,17 +377,6 @@ export function LiveMonitor() {
           </div>
         </div>
       </div>
-
-      {/* Footer */}
-      <footer className="flex-none bg-black/40 border-t border-neutral-800/50 px-6 py-2 flex items-center justify-between">
-        <p className="text-[11px] text-neutral-700">Autobase OAX, San Juan, Cainta, Rizal · Mon–Sat 12PM–3AM · Sun 5PM–3AM</p>
-        <a
-          href="/staff"
-          className="text-[11px] text-neutral-700 hover:text-neutral-500 transition-colors"
-        >
-          ← Staff Dashboard
-        </a>
-      </footer>
     </div>
   );
 }

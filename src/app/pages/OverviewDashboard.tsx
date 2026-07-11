@@ -156,9 +156,10 @@ export function OverviewDashboard() {
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Available Tables" value={available} sub={`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
-        <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-rose-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
-        <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-amber-400" icon={Users} onClick={() => navigate('/staff/queue')} />
-        <StatCard label="Today's Revenue" value={formatPHP(todayRevenue)} sub="table rentals only" color="text-blue-400" icon={TrendingUp} />
+        <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-amber-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
+        <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-purple-400" icon={Users} onClick={() => navigate('/staff/queue')} />
+        {/* 🟢 NEW: Swapped Revenue for Overtime tracker */}
+        <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables')} />
       </div>
 
       {/* Table Grid Quick View */}
@@ -171,25 +172,29 @@ export function OverviewDashboard() {
         </div>
         <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
           {tables.filter(t => t.isActive).map(t => {
-            const isOvertime = t.status === 'occupied' && t.session && (() => {
-              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+            const isOpenTime = t.status === 'occupied' && t.session && (t.session.isOpenTime || t.session.durationMinutes === null);
+            const isOvertime = !isOpenTime && t.status === 'occupied' && t.session && (() => {
+              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
               return new Date() > end;
             })();
-            const isAlert = t.status === 'occupied' && t.session && (() => {
-              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+            const isAlert = !isOpenTime && !isOvertime && t.status === 'occupied' && t.session && (() => {
+              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
               const secs = differenceInSeconds(end, new Date());
               return secs > 0 && secs <= 900;
             })();
+            
             return (
               <div
                 key={t.id}
                 onClick={() => navigate('/staff/tables')}
-                title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''}`}
+                title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''} (${t.status})`}
                 className={`aspect-square rounded-lg flex flex-col items-center justify-center cursor-pointer border transition-all text-[10px] font-bold
-                  ${isOvertime ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' :
-                    isAlert ? 'bg-amber-500/20 border-amber-500 text-amber-400' :
-                    t.status === 'occupied' ? 'bg-rose-950/40 border-rose-800/40 text-rose-400' :
-                    t.status === 'reserved' ? 'bg-amber-950/40 border-amber-800/40 text-amber-400' :
+                  ${t.status === 'maintenance' ? 'bg-orange-950/40 border-orange-800/40 text-orange-500 opacity-60' :
+                    isOvertime ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' :
+                    isOpenTime ? 'bg-blue-950/40 border-blue-800/40 text-blue-400' :
+                    isAlert ? 'bg-rose-950/40 border-rose-500/50 text-rose-400' :
+                    t.status === 'occupied' ? 'bg-amber-950/40 border-amber-800/40 text-amber-400' :
+                    t.status === 'reserved' ? 'bg-sky-950/40 border-sky-800/40 text-sky-400' :
                     'bg-emerald-950/20 border-emerald-800/30 text-emerald-500'}
                 `}
               >
@@ -198,15 +203,20 @@ export function OverviewDashboard() {
             );
           })}
         </div>
-        <div className="flex items-center gap-4 mt-3">
+        
+        {/* 🟢 NEW: Comprehensive Legend mapping to the updated colors */}
+        <div className="flex flex-wrap items-center gap-4 mt-4">
           {[
-            { color: 'bg-emerald-500', label: 'Available' },
-            { color: 'bg-rose-500', label: 'Occupied' },
-            { color: 'bg-amber-500', label: 'Reserved' },
+            { color: 'bg-emerald-500', label: 'Open' },
+            { color: 'bg-amber-500', label: 'In Use' },
+            { color: 'bg-blue-500', label: 'Open Time' },
+            { color: 'bg-rose-500', label: 'Overtime' },
+            { color: 'bg-sky-500', label: 'Reserved' },
+            { color: 'bg-orange-500', label: 'Maintenance' },
           ].map(item => (
             <div key={item.label} className="flex items-center gap-1.5">
               <span className={`w-2.5 h-2.5 rounded-sm ${item.color}`} />
-              <span className="text-xs text-neutral-500">{item.label}</span>
+              <span className="text-xs text-neutral-500 font-medium">{item.label}</span>
             </div>
           ))}
         </div>

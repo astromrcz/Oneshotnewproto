@@ -5,7 +5,7 @@ import {
   Search, Play, Zap, X, UserPlus, Clock,
   Calendar, Users, CheckCircle, ChevronRight,
   CreditCard, Banknote, AlertTriangle, CircleCheck,
-  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2
+  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History
 } from 'lucide-react';
 import { isToday, differenceInSeconds, addMinutes } from 'date-fns';
 
@@ -22,7 +22,7 @@ type CustomerSource =
 export function Tables() {
   const { 
     tables, queue, reservations, assignTable, extendSession, freeTable, 
-    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile, rates 
+    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile, rates, reservationTerms
   } = useAppContext() as any;
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
@@ -35,7 +35,7 @@ export function Tables() {
   const [posCart,          setPosCart]          = useState<SessionOrder[]>([]);
   const [voidItem,         setVoidItem]         = useState<{ index: number, order: SessionOrder } | null>(null);
   const [voidPassword,     setVoidPassword]     = useState('');
-
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
 
   // Menu Editing States
@@ -68,6 +68,7 @@ export function Tables() {
   const [debtName,         setDebtName]         = useState('');
   const [debtContact,      setDebtContact]      = useState('');
 
+  const [showArchivedMenu, setShowArchivedMenu] = useState(false);
   const displayTables = tables.map((t: any) => 
     !t.isActive ? { ...t, status: 'maintenance', maintenanceReason: t.maintenanceReason || 'Deactivated (Admin)' } : t
   );
@@ -332,8 +333,42 @@ export function Tables() {
     { key: 'maintenance', label: 'Maintenance', count: maintenance,         color: 'bg-orange-500/10 text-orange-400 border-orange-500/30' },
   ];
 
-  const durationOptions = [30, 60, 90, 120, 180, 240];
-  const extendOptions   = [30, 60, 90, 120];
+ // 🟢 NEW: Dynamic Hour Calculator based on closing time
+  const getAvailableDurations = () => {
+    const now = new Date();
+    // Friday (5) and Saturday (6) are treated as Weekend nights
+    const isWeekend = now.getDay() === 5 || now.getDay() === 6; 
+    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    
+    // Default fallback to maxHours if no closing time is set
+    let maxMins = (reservationTerms?.maxHours || 8) * 60;
+
+    if (closeTimeStr) {
+      const [hr, min] = closeTimeStr.split(':').map(Number);
+      const closeDate = new Date(now);
+      closeDate.setHours(hr, min, 0, 0);
+      
+      // If closing time is early AM (e.g., 03:00) and we are currently in PM, push it to tomorrow
+      if (hr <= 12 && now.getHours() >= 12) {
+         closeDate.setDate(closeDate.getDate() + 1);
+      }
+      
+      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
+      if (minsLeft > 0) {
+         maxMins = Math.min(maxMins, minsLeft);
+      }
+    }
+
+    const opts = [];
+    // Generate options in 60-minute blocks only
+    for (let m = 60; m <= maxMins; m += 60) {
+      opts.push(m);
+    }
+    // Always provide at least 1 hour, even if right at closing
+    return opts.length > 0 ? opts : [60]; 
+  };
+
+  const availableDurations = getAvailableDurations();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -383,7 +418,8 @@ export function Tables() {
             { label: 'Available',   value: available,   color: 'text-emerald-400' },
             { label: 'Occupied',    value: occupied,    color: 'text-rose-400' },
             { label: 'Reserved',    value: reserved,    color: 'text-amber-400' },
-            { label: 'Maintenance', value: maintenance, color: 'text-orange-400' },
+            // 🟢 FIX: Replaced Maintenance with In Queue
+            { label: 'In Queue',    value: waitingCustomers.length, color: 'text-purple-400' }, 
           ].map(s => (
             <div key={s.label} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center">
               <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
@@ -546,54 +582,99 @@ export function Tables() {
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><ShoppingCart size={11} /> Available Menu</p>
                 {isAdmin && (
-                  <button 
-                    onClick={() => { setIsEditingMenu(!isEditingMenu); setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} 
-                    className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${isEditingMenu ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`}
-                  >
-                    {isEditingMenu ? 'Done Editing' : 'Edit Menu'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {isEditingMenu && (
+                      <button onClick={() => setShowArchivedMenu(!showArchivedMenu)} className={`p-1.5 rounded transition-colors ${showArchivedMenu ? 'bg-neutral-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`} title="View Archive History">
+                        <History size={12} />
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => { setIsEditingMenu(!isEditingMenu); setEditingItem(null); setShowArchivedMenu(false); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} 
+                      className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${isEditingMenu ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`}
+                    >
+                      {isEditingMenu ? 'Done Editing' : 'Edit Menu'}
+                    </button>
+                  </div>
                 )}
               </div>
 
               {isEditingMenu ? (
                 <div className="space-y-4">
-                  <form onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
-                    <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold mb-2">{editingItem ? 'Edit Item' : 'Add New Item'}</p>
-                    <input type="text" value={newItemForm.name} onChange={e => setNewItemForm(f => ({ ...f, name: e.target.value }))} placeholder="Item Name" required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <select value={newItemForm.category} onChange={e => setNewItemForm(f => ({ ...f, category: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 appearance-none">
-                        <option value="Drinks">Drinks</option>
-                        <option value="Food">Food</option>
-                        <option value="Extras">Extras</option>
-                      </select>
-                      <input type="number" value={newItemForm.price || ''} onChange={e => setNewItemForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} placeholder="Price ₱" required min="1" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Add Stock</label>
-                      <input type="number" value={newItemForm.stock === 0 ? '' : newItemForm.stock} onChange={e => setNewItemForm(f => ({ ...f, stock: parseInt(e.target.value) || 0 }))} placeholder="Current Stock" min="0" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
-                    </div>
-                    <div className="flex gap-2 pt-2">
-                      {editingItem && <button type="button" onClick={() => { setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} className="flex-1 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg transition-colors">Cancel</button>}
-                      <button type="submit" className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">{editingItem ? 'Save Changes' : 'Add Item'}</button>
-                    </div>
-                  </form>
+                  {!showArchivedMenu && (
+                    <form onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
+                      <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold mb-2">{editingItem ? 'Edit Item' : 'Add New Item'}</p>
+                      <input type="text" value={newItemForm.name} onChange={e => setNewItemForm(f => ({ ...f, name: e.target.value }))} placeholder="Item Name" required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <select value={newItemForm.category} onChange={e => setNewItemForm(f => ({ ...f, category: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 appearance-none">
+                          <option value="Drinks">Drinks</option>
+                          <option value="Food">Food</option>
+                          <option value="Extras">Extras</option>
+                        </select>
+                        <input type="number" value={newItemForm.price || ''} onChange={e => setNewItemForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} placeholder="Price ₱" required min="1" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Add Stock</label>
+                        <input type="number" value={newItemForm.stock === 0 ? '' : newItemForm.stock} onChange={e => setNewItemForm(f => ({ ...f, stock: parseInt(e.target.value) || 0 }))} placeholder="Current Stock" min="0" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        {editingItem && <button type="button" onClick={() => { setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} className="flex-1 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg transition-colors">Cancel</button>}
+                        <button type="submit" className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">{editingItem ? 'Save Changes' : 'Add Item'}</button>
+                      </div>
+                    </form>
+                  )}
+                  
+                  {/* Menu List & Archive View */}
                   <div className="space-y-2">
-                    {inventory.map((item: any) => (
-                      <div key={item.id} className="w-full flex items-center justify-between p-3 rounded-xl border bg-neutral-900 border-neutral-800">
+                    {showArchivedMenu && <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Archived Items (Hidden from POS)</p>}
+                    
+                    {inventory.filter((i: any) => showArchivedMenu ? !i.isActive : i.isActive).map((item: any) => (
+                      <div key={item.id} className={`w-full flex items-center justify-between p-3 rounded-xl border ${showArchivedMenu ? 'bg-neutral-950 border-neutral-800/50 opacity-70' : 'bg-neutral-900 border-neutral-800'}`}>
                         <div>
-                          <p className="text-sm font-semibold text-neutral-200">{item.name}</p>
+                          <p className={`text-sm font-semibold ${showArchivedMenu ? 'text-neutral-400 line-through' : 'text-neutral-200'}`}>{item.name}</p>
                           <p className="text-[10px] text-neutral-500">{item.category} · Stock: {item.stock}</p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <p className="text-sm font-black text-amber-400">{formatPHP(item.price)}</p>
-                          <button onClick={() => startEditItem(item)} className="p-1.5 text-neutral-500 hover:text-white bg-neutral-800 rounded-md transition-colors"><Edit2 size={12} /></button>
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm font-black mr-2 ${showArchivedMenu ? 'text-neutral-600' : 'text-amber-400'}`}>{formatPHP(item.price)}</p>
+                          
+                          {showArchivedMenu ? (
+                            <button onClick={() => updateInventoryItem(item.id, { isActive: true })} className="p-1.5 text-emerald-500 hover:text-emerald-400 bg-emerald-950/20 hover:bg-emerald-950/40 rounded-md transition-colors title='Restore Item'"><History size={12} /></button>
+                          ) : (
+                            <>
+                              <button onClick={() => startEditItem(item)} className="p-1.5 text-neutral-500 hover:text-white bg-neutral-800 rounded-md transition-colors"><Edit2 size={12} /></button>
+                              {confirmArchiveId === item.id ? (
+                            <button 
+                              onClick={() => {
+                                updateInventoryItem(item.id, { isActive: false });
+                                setConfirmArchiveId(null);
+                              }} 
+                              // 🟢 FIX: Removed the onMouseLeave that caused it to disappear
+                              className="px-2 py-1.5 text-white bg-rose-600 hover:bg-rose-500 rounded-md transition-colors text-[10px] font-bold" 
+                              title="Confirm Archive"
+                            >
+                              Sure?
+                            </button>
+                          ) : (
+                            <button 
+                              onClick={() => setConfirmArchiveId(item.id)} 
+                              className="p-1.5 text-neutral-500 hover:text-rose-400 bg-neutral-800 hover:bg-rose-950/30 rounded-md transition-colors" 
+                              title="Archive Item"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                            </>
+                          )}
                         </div>
                       </div>
                     ))}
+                    {showArchivedMenu && inventory.filter((i: any) => !i.isActive).length === 0 && (
+                      <p className="text-xs text-neutral-600 text-center py-4">No archived items found.</p>
+                    )}
                   </div>
                 </div>
               ) : (
                 <div className="space-y-2">
+                  {/* Standard POS View mapping active items */}
                   {inventory.filter((i: any) => i.isActive).map((item: any) => {
                     const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
                     const stockRemaining = item.stock - inCartQty;
@@ -616,7 +697,6 @@ export function Tables() {
                 </div>
               )}
             </div>
-
           </div>
 
           <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex-none">
@@ -758,31 +838,28 @@ export function Tables() {
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
                     <Clock size={11} /> Duration
                   </label>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {durationOptions.map(d => (
-                      <button key={d} type="button"
-                        onClick={() => { 
-                          setDurationMinutes(d); 
-                          if (paymentOption === 'payNow') setAmountPaid(((d / 60) * effectiveHourly).toFixed(2)); 
-                        }}
-                        className={`py-2 rounded-xl border text-xs font-semibold transition-all ${
-                          durationMinutes === d ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                        }`}
-                      >{d < 60 ? `${d}m` : `${d / 60}h`}</button>
-                    ))}
-                    <button type="button"
-                      onClick={() => {
+                  {/* 🟢 NEW: Clean Dropdown for Start Session */}
+                  <select 
+                    value={durationMinutes === 'open' ? 'open' : durationMinutes}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === 'open') {
                         setDurationMinutes('open');
                         setAmountPaid('0');
                         setPaymentOption('payLater');
-                      }}
-                      className={`col-span-3 sm:col-span-1 py-2 rounded-xl border text-xs font-semibold transition-all ${
-                        durationMinutes === 'open' ? 'bg-blue-600/15 border-blue-600 text-blue-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                      }`}
-                    >
-                      Open Time
-                    </button>
-                  </div>
+                      } else {
+                        const d = Number(val);
+                        setDurationMinutes(d);
+                        if (paymentOption === 'payNow') setAmountPaid(((d / 60) * effectiveHourly).toFixed(2));
+                      }
+                    }}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  >
+                    {availableDurations.map(d => (
+                      <option key={d} value={d}>{d / 60} Hour{d / 60 > 1 ? 's' : ''}</option>
+                    ))}
+                    <option value="open">Open Time</option>
+                  </select>
                 </div>
 
                 <div className="space-y-1.5">
@@ -976,13 +1053,16 @@ export function Tables() {
             <form onSubmit={handleConfirmExtend} className="overflow-y-auto flex-1 p-6 space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Extra Time</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {extendOptions.map(d => (
-                    <button key={d} type="button" onClick={() => setExtendMinutes(d)} className={`py-2.5 rounded-lg border text-xs font-semibold transition-all ${extendMinutes === d ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
-                      +{d < 60 ? `${d}min` : `${d / 60}hr`}<br /><span className="text-[10px] font-normal opacity-70">+{formatPHP((d / 60) * effectiveHourly)}</span>
-                    </button>
+                {/* 🟢 NEW: Clean Dropdown for Extend Session */}
+                <select 
+                  value={extendMinutes}
+                  onChange={e => setExtendMinutes(Number(e.target.value))}
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                >
+                  {availableDurations.map(d => (
+                    <option key={d} value={d}>+{d / 60} Hour{d / 60 > 1 ? 's' : ''} (+{formatPHP((d / 60) * effectiveHourly)})</option>
                   ))}
-                </div>
+                </select>
               </div>
 
               <div className="bg-neutral-900 rounded-xl p-3 text-xs border border-neutral-800 flex justify-between">

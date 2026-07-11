@@ -7,7 +7,7 @@ import {
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle, XCircle
+  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle, XCircle, Bell
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -111,14 +111,30 @@ export function HomePage() {
   const navigate = useNavigate();
   const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin } = useAppContext() as any;
 
-  const [announcementIdx, setAnnouncementIdx] = useState(0);
-  const [announcementDir, setAnnouncementDir] = useState<1 | -1>(1);
+  // 🟢 NEW: Announcement State & Local Storage Tracking
+  const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
+  const [showAnnouncements, setShowAnnouncements] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('oneshot_read_announcements');
+    if (stored) {
+      try { setReadAnnouncements(JSON.parse(stored)); } catch(e) {}
+    }
+  }, []);
+
+  const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
+  const hasUnread = activeAnnouncements.some((a: any) => !readAnnouncements.includes(a.id));
+
+  const markAllAsRead = () => {
+    const ids = activeAnnouncements.map((a: any) => a.id);
+    setReadAnnouncements(ids);
+    localStorage.setItem('oneshot_read_announcements', JSON.stringify(ids));
+  };
 
   const getOpenHoursDisplay = () => {
     try {
       const currentDay = new Date().getDay();
-      const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6; // 0=Sun, 5=Fri, 6=Sat
-      
+      const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6; 
       const openTime = isWeekend ? (rates?.weekendStartTime || '12:00') : (rates?.weekdayStartTime || '12:00');
       const closeTime = isWeekend ? (rates?.weekendEndTime || '02:00') : (rates?.weekdayEndTime || '02:00');
 
@@ -170,12 +186,6 @@ export function HomePage() {
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', message: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
-  // 🟢 CMS DYNAMIC MAPPING 
-  const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
-  const displayAnnouncements = activeAnnouncements.length > 0 
-    ? activeAnnouncements.map((a: any) => a.content) 
-    : ["🎱 Welcome to One Shot Bar & Billiards! Book your favorite table now!"];
-
   // Safely parse hero images from the siteConfig
   let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
   try {
@@ -203,14 +213,6 @@ export function HomePage() {
   };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setAnnouncementDir(1);
-      setAnnouncementIdx(prev => (prev + 1) % displayAnnouncements.length);
-    }, 4500);
-    return () => clearInterval(interval);
-  }, [displayAnnouncements.length]);
-
-  useEffect(() => {
     if (heroSlides.length > 0) {
       const interval = setInterval(() => {
         setHeroSlideDir(1);
@@ -225,23 +227,16 @@ export function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Magic Link Simulator for Email Integration
- // 🟢 NEW: Magic Link Simulator for Email Integration
   useEffect(() => {
-    // Only run if we actually have reservations loaded from the database
     if (reservations.length > 0) {
       const params = new URLSearchParams(window.location.search);
       const emailResId = params.get('resId');
       
       if (emailResId) {
-        // 1. Switch to reservations section
         setActiveSection('reservations');
-        // 2. Switch to tracking tab
         setResTab('track');
-        // 3. Fill in the ID
         setTrackForm({ reservationId: emailResId });
         
-        // 4. Fetch and display the reservation automatically
         const found = reservations
           .filter((r: any) => r.id.toUpperCase() === emailResId.toUpperCase())
           .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -249,8 +244,6 @@ export function HomePage() {
         if (found.length > 0) {
           setTrackedReservations(found);
         }
-
-        // 5. Clean the URL so refreshing doesn't re-trigger it
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
@@ -259,7 +252,7 @@ export function HomePage() {
   useEffect(() => {
     if (currentUser) {
       setResForm(f => ({ ...f, name: currentUser.name, email: currentUser.email }));
-      setResTab('track'); // Auto-switch to track tab when logged in
+      setResTab('track');
     }
   }, [currentUser]);
 
@@ -267,7 +260,6 @@ export function HomePage() {
     setAgreedToTerms(false);
   }, [selectedDate]);
 
-  // Persist reservation draft to localStorage so closing dialogs doesn't lose input
   const RES_DRAFT_KEY = 'oneshot_reservation_draft_v1';
 
   const saveReservationDraft = useCallback(() => {
@@ -307,7 +299,6 @@ export function HomePage() {
     loadReservationDraft();
   }, [loadReservationDraft]);
 
-  // Save draft on significant changes
   useEffect(() => {
     saveReservationDraft();
   }, [saveReservationDraft]);
@@ -368,8 +359,6 @@ export function HomePage() {
     setPromoError('');
   };
 
-  // 🟢 NEW: Dynamic Duration & Capacity Logic
- // 🟢 NEW: Precise Minute-Based Duration & Capacity Logic
   const getMaxDuration = () => {
     if (!resForm.timeSlot) return reservationTerms?.maxHours || 6;
 
@@ -384,10 +373,8 @@ export function HomePage() {
     const startMins = parseToMins(rates?.reservationStartTime || '12:00');
     let endMins = parseToMins(rates?.reservationEndTime || '02:00');
 
-    // treat end as next day if it's earlier or equal to start
     if (endMins <= startMins) endMins += 24 * 60;
 
-    // if slot is before start (unlikely) normalize to same day
     let normalizedSlotMins = slotMins;
     if (slotMins < startMins) normalizedSlotMins += 24 * 60;
 
@@ -418,7 +405,6 @@ export function HomePage() {
     } catch (e) { return String(tOrMins); }
   };
 
-  // Compute online booking display hours with a cutoff 1 hour before closing
   const bookingHoursDisplay = (() => {
     try {
       const start = rates?.reservationStartTime || '12:00';
@@ -428,13 +414,11 @@ export function HomePage() {
 
       let startMins = sh * 60 + (sm || 0);
       let endMins = eh * 60 + (em || 0);
-      // If end <= start, treat end as next day
       if (endMins <= startMins) endMins += 24 * 60;
 
-      const cutoffMins = endMins - 60; // 1 hour before closing
+      const cutoffMins = endMins - 60; 
       if (cutoffMins <= startMins) return 'No online bookings';
 
-      // format provided start time into 12-hour display as well
       const startDisplay = fmt12(start);
       return `${startDisplay} to ${fmt12(cutoffMins)}`;
     } catch (e) {
@@ -442,14 +426,13 @@ export function HomePage() {
     }
   })();
 
-  // Auto-shrink the duration if they select a late time
   useEffect(() => {
     if (resForm.duration > maxAllowedDuration) {
       setResForm(f => ({ ...f, duration: maxAllowedDuration }));
     }
   }, [maxAllowedDuration, resForm.timeSlot]);
 
-const validateTimeSlot = (time: string, duration: number) => {
+  const validateTimeSlot = (time: string, duration: number) => {
     if (!time || !selectedDate) return 'invalid';
 
     const parseToMins = (t: string) => {
@@ -459,7 +442,6 @@ const validateTimeSlot = (time: string, duration: number) => {
 
     const slotMins = parseToMins(time);
 
-    // 🟢 ENFORCED: Block past times and require 1-hour advance notice
     if (isToday(new Date(selectedDate))) {
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
       
@@ -476,7 +458,6 @@ const validateTimeSlot = (time: string, duration: number) => {
 
     if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
-    // Happy Hour logic
     const isSlotWeekend = [0, 5, 6].includes(new Date(selectedDate).getDay());
     const isHHActive = isSlotWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
     
@@ -490,7 +471,6 @@ const validateTimeSlot = (time: string, duration: number) => {
       if (slotNorm >= s && slotNorm < (e <= s ? e + 24 * 60 : e)) return 'happyhour';
     }
 
-    // Capacity Logic
     const requestedStart = new Date(selectedDate);
     const [h, m] = time.split(':').map(Number);
     requestedStart.setHours(h, m, 0, 0);
@@ -513,10 +493,8 @@ const validateTimeSlot = (time: string, duration: number) => {
 
     return 'valid';
   };
-    // 🟢 Split Weekday/Weekend Happy Hour Checker
+  
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
-
-
 
   const handleReservationSubmit = () => {
     if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
@@ -552,14 +530,12 @@ const validateTimeSlot = (time: string, duration: number) => {
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
       setConfirmingPayment(false);
-      // Clear saved draft since reservation is completed
       try { localStorage.removeItem(RES_DRAFT_KEY); } catch (e) {}
       setReservationStep(3);
     }, 1500);
   };
 
   const closeReservation = () => {
-    // Persist current draft and simply close the modal so user inputs are preserved
     saveReservationDraft();
     setReservationStep(0);
     setAgreedToTerms(false);
@@ -578,7 +554,7 @@ const validateTimeSlot = (time: string, duration: number) => {
 
   const handleRescheduleSubmit = (id: string) => {
     if (!rescheduleData.date || !rescheduleData.timeSlot) return;
-    const val = validateTimeSlot(rescheduleData.timeSlot);
+    const val = validateTimeSlot(rescheduleData.timeSlot, 2);
     if (val !== 'valid') {
       alert(`Invalid time selected: ${val === 'closed' ? 'Outside of reservation hours' : 'Walk-in only happy hour'}`);
       return;
@@ -605,27 +581,6 @@ const validateTimeSlot = (time: string, duration: number) => {
   const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
 
-  const calculateAIWaitTime = () => {
-    const waitingCustomers = queue.filter((q: any) => q.status === 'waiting').length;
-    if (waitingCustomers === 0) return "No wait";
-
-    const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
-    if (activeTables.length === 0) return "Available immediately";
-
-    const remainingTimes = activeTables.map((t: any) => {
-      const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0); 
-      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
-    }).sort((a: any, b: any) => a - b); 
-
-    const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
-    const estimatedMinutes = baseWait + 2 + (waitingCustomers * 15);
-
-    if (estimatedMinutes < 60) return `~${estimatedMinutes} mins`;
-    const hrs = Math.floor(estimatedMinutes / 60);
-    const mins = estimatedMinutes % 60;
-    return `~${hrs}h ${mins}m`;
-  };
-
   const publicEvents = events.filter((e: any) => e.type !== 'Holiday');
   const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
   const reservedDates = reservations.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date));
@@ -643,7 +598,7 @@ const validateTimeSlot = (time: string, duration: number) => {
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col">
 
       {/* ── Top Header ── */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-16 bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-hidden">
+      <header className="fixed top-0 left-0 right-0 z-50 h-16 bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
         <div
           className="h-full flex items-center px-5 pr-12 bg-emerald-700 flex-shrink-0 relative z-10"
           style={{ clipPath: 'polygon(0 0, 100% 0, 82% 100%, 0 100%)', minWidth: 220 }}
@@ -657,38 +612,72 @@ const validateTimeSlot = (time: string, duration: number) => {
           </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center overflow-hidden px-4">
-          <div className="flex items-center gap-2 max-w-lg w-full">
-            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center">
-              <Megaphone size={10} className="text-emerald-400" />
-            </div>
-            <div className="flex-1 overflow-hidden text-center">
-              <AnimatePresence mode="wait">
-                <motion.p
-                  key={announcementIdx}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.35 }}
-                  className="text-xs text-neutral-300 truncate"
-                >
-                  {displayAnnouncements[announcementIdx]}
-                </motion.p>
-              </AnimatePresence>
-            </div>
-            <div className="flex gap-1 flex-shrink-0 hidden sm:flex">
-              {displayAnnouncements.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => { setAnnouncementDir(i > announcementIdx ? 1 : -1); setAnnouncementIdx(i); }}
-                  className={`w-1.5 h-1.5 rounded-full transition-all ${i === announcementIdx ? 'bg-emerald-400 w-3' : 'bg-neutral-600 hover:bg-neutral-400'}`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
+        <div className="flex-1" />
 
-        <div className="flex items-center gap-2 pr-4 flex-shrink-0">
+        <div className="flex items-center gap-4 pr-5 flex-shrink-0 relative">
+          
+          {/* Bell Button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowAnnouncements(!showAnnouncements)}
+              className="relative p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800"
+            >
+              <Bell size={20} />
+              {hasUnread && (
+                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-neutral-950" />
+              )}
+            </button>
+
+            {/* Announcement Dropdown */}
+            <AnimatePresence>
+              {showAnnouncements && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute top-full mt-2 right-0 w-80 sm:w-96 bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden z-50"
+                >
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 bg-neutral-900/50">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Megaphone size={14} className="text-emerald-500" /> Announcements
+                    </h3>
+                    {hasUnread && (
+                      <button onClick={markAllAsRead} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 bg-emerald-950/30 px-2 py-1 rounded transition-colors">
+                        Mark all as read
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto p-2">
+                    {activeAnnouncements.length === 0 ? (
+                      <p className="text-xs text-neutral-500 text-center py-6">No active announcements</p>
+                    ) : (
+                      activeAnnouncements.map((a: any) => {
+                        const isUnread = !readAnnouncements.includes(a.id);
+                        return (
+                          <div key={a.id} className={`p-4 rounded-xl mb-1 transition-colors ${isUnread ? 'bg-emerald-950/10 border border-emerald-900/30' : 'hover:bg-neutral-900/50 border border-transparent'}`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">{a.type}</span>
+                              <span className="text-[10px] text-neutral-500">{format(new Date(a.createdAt), 'MMM d, yyyy')}</span>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 flex-shrink-0" />}
+                              <div>
+                                <p className={`text-sm font-bold mb-1 ${isUnread ? 'text-white' : 'text-neutral-300'}`}>{a.title}</p>
+                                <p className="text-xs text-neutral-400 leading-relaxed">{a.content}</p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="w-px h-6 bg-neutral-800" />
+
           {currentUser ? (
             <div className="flex items-center gap-2">
               <button onClick={() => setShowProfileModal(true)} className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/25 rounded-full px-3 py-1.5 hover:bg-emerald-600/20 transition-colors">
@@ -735,7 +724,9 @@ const validateTimeSlot = (time: string, duration: number) => {
           {/* ════ HOME SECTION ════ */}
           {activeSection === 'home' && (
             <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
-              <div className="relative h-[70vh] min-h-[480px] overflow-hidden group">
+              
+              {/* HERO SECTION FIX */}
+              <div className="relative h-[70vh] min-h-[500px] overflow-hidden group bg-neutral-950">
                 <AnimatePresence mode="wait" custom={heroSlideDir}>
                   <motion.div
                     key={heroSlideIdx}
@@ -744,29 +735,33 @@ const validateTimeSlot = (time: string, duration: number) => {
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.9 }}
-                    className="absolute inset-0"
+                    className="absolute inset-0 w-full h-full"
                   >
                     <ImageWithFallback src={heroSlides[heroSlideIdx].src} alt={heroSlides[heroSlideIdx].alt} className="w-full h-full object-cover" />
                   </motion.div>
                 </AnimatePresence>
-                <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/55 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/40 to-transparent pointer-events-none" />
 
-                <button onClick={prevHeroSlide} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60 z-10"><ChevronLeft size={18} /></button>
-                <button onClick={nextHeroSlide} className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60 z-10"><ChevronRight size={18} /></button>
+                {/* Left/Right controls (z-20 and pointer-events-auto) */}
+                <button onClick={prevHeroSlide} className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-emerald-600 hover:border-emerald-500 z-20 cursor-pointer shadow-xl"><ChevronLeft size={24} /></button>
+                <button onClick={nextHeroSlide} className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-emerald-600 hover:border-emerald-500 z-20 cursor-pointer shadow-xl"><ChevronRight size={24} /></button>
 
-                <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 px-6 text-center z-10">
-                  <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center">
-                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">{cms.heroTitle}</p>
-                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight">{cms.heroTitle}</h1>
-                    <p className="text-emerald-300 text-xl font-light mb-5">{cms.heroSubtitle}</p>
-                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed">{cms.heroDescription}</p>
-                    <div className="flex flex-wrap justify-center gap-3 mb-6">
-                      <button onClick={() => setActiveSection('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-900/40 hover:shadow-emerald-800/60"><Calendar size={15} /> Book a Table</button>
-                      <button onClick={() => setActiveSection('about')} className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 px-6 py-3 rounded-full text-sm font-semibold transition-all border border-neutral-700"><Info size={15} /> Learn More</button>
+                {/* Pointer-events-none on wrapper so it doesn't block the screen, auto on the actual text content */}
+                <div className="absolute inset-0 flex flex-col items-center justify-end pb-12 px-6 text-center z-10 pointer-events-none">
+                  <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center pointer-events-auto">
+                    <p className="text-emerald-400 text-sm uppercase tracking-[0.3em] font-semibold mb-4 drop-shadow-md">{cms.heroTitle}</p>
+                    {/* SCALED UP TITLE & SUBTITLE */}
+                    <h1 className="text-7xl md:text-[5.5rem] font-black text-white mb-4 tracking-tight leading-none drop-shadow-2xl">{cms.heroTitle}</h1>
+                    <p className="text-emerald-300 text-2xl md:text-3xl font-light mb-8 drop-shadow-lg">{cms.heroSubtitle}</p>
+                    
+                    <p className="text-neutral-200 text-base max-w-lg mx-auto mb-10 leading-relaxed drop-shadow-md">{cms.heroDescription}</p>
+                    <div className="flex flex-wrap justify-center gap-4 mb-8">
+                      <button onClick={() => setActiveSection('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-full text-base font-semibold transition-all shadow-lg shadow-emerald-900/40 hover:shadow-emerald-800/60"><Calendar size={18} /> Book a Table</button>
+                      <button onClick={() => setActiveSection('about')} className="flex items-center gap-2 bg-neutral-900/80 backdrop-blur-sm hover:bg-neutral-800 text-neutral-100 px-8 py-4 rounded-full text-base font-semibold transition-all border border-neutral-700/50 hover:border-neutral-600"><Info size={18} /> Learn More</button>
                     </div>
                     <div className="flex gap-2">
                       {heroSlides.map((_, i) => (
-                        <button key={i} onClick={() => { setHeroSlideDir(i > heroSlideIdx ? 1 : -1); setHeroSlideIdx(i); }} className={`h-1.5 rounded-full transition-all ${i === heroSlideIdx ? 'bg-emerald-400 w-5' : 'bg-white/35 w-1.5 hover:bg-white/60'}`} />
+                        <button key={i} onClick={() => { setHeroSlideDir(i > heroSlideIdx ? 1 : -1); setHeroSlideIdx(i); }} className={`h-1.5 rounded-full transition-all ${i === heroSlideIdx ? 'bg-emerald-400 w-6' : 'bg-white/30 w-2 hover:bg-white/60'}`} />
                       ))}
                     </div>
                   </motion.div>
@@ -776,7 +771,6 @@ const validateTimeSlot = (time: string, duration: number) => {
               <div className="bg-neutral-900 border-y border-neutral-800">
               <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
                 {[
-                  // Uses tables.length so the business always shows its total physical inventory
                   { value: String(tables.length || 10), label: 'Billiard Tables', color: 'text-emerald-400' },
                   { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
                   { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
@@ -797,7 +791,6 @@ const validateTimeSlot = (time: string, duration: number) => {
                     { 
                       icon: Award, 
                       title: 'Premium Tables', 
-                      // Uses tables.length to preserve the marketing appearance
                       desc: `${tables.length || 10} tournament-grade billiard tables maintained to the highest standard.`, 
                       color: 'emerald' 
                     },
@@ -1078,7 +1071,7 @@ const validateTimeSlot = (time: string, duration: number) => {
                                   !resForm.name.trim() || 
                                   !resForm.phone.trim() || 
                                   !resForm.timeSlot || 
-                                  timeValidation !== 'valid' // 🟢 Button is ONLY enabled if validation is 'valid'
+                                  timeValidation !== 'valid'
                                 } 
                                 className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
                               >
@@ -1137,8 +1130,7 @@ const validateTimeSlot = (time: string, duration: number) => {
                           {!currentUser && <button onClick={() => setTrackedReservations(null)} className="text-xs text-emerald-400 hover:underline">New Search</button>}
                         </div>
                         {myBookings.map((r: any) => {
-                          // 🟢 NEW: Check if this specific reservation is affected by an admin closure
-                          const isAffectedByClosure = closedDates.some(cd => isSameDay(new Date(cd.date), new Date(r.date)));
+                          const isAffectedByClosure = closedDates.some((cd: any) => isSameDay(new Date(cd.date), new Date(r.date)));
                           
                           return (
                           <div key={r.id} className={`border rounded-xl p-4 flex flex-col gap-4 ${isAffectedByClosure && r.status !== 'cancelled' ? 'bg-rose-950/20 border-rose-900/50' : 'bg-neutral-900 border-neutral-800'}`}>
@@ -1157,7 +1149,6 @@ const validateTimeSlot = (time: string, duration: number) => {
                               </div>
                             </div>
                             
-                            {/* 🟢 NEW: Affected Booking UI */}
                             {isAffectedByClosure && r.status !== 'cancelled' && (
                               <div className="bg-rose-950/40 border border-rose-800/50 rounded-lg p-4 mt-2">
                                 <h4 className="text-rose-400 font-bold text-sm flex items-center gap-2 mb-2"><AlertTriangle size={16} /> Action Required: Establishment Closed</h4>
@@ -1173,7 +1164,6 @@ const validateTimeSlot = (time: string, duration: number) => {
                               </div>
                             )}
 
-                            {/* Standard Actions */}
                             {(!isAffectedByClosure && (r.status === 'pending' || r.status === 'confirmed')) && (
                               <div className="border-t border-neutral-800/60 pt-3 flex justify-end gap-2">
                                 <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors">Reschedule</button>
@@ -1181,7 +1171,6 @@ const validateTimeSlot = (time: string, duration: number) => {
                               </div>
                             )}
 
-                            {/* Reschedule Calendar Pop-up */}
                             {reschedulingId === r.id && (
                               <div className="mt-2 p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-4">
                                 <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Select New Date & Time</h4>
@@ -1216,7 +1205,6 @@ const validateTimeSlot = (time: string, duration: number) => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                 {(() => {
-                  // 🟢 Calculate "Today" for dynamic Happy Hour display
                   const currentDay = new Date().getDay();
                   const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
                   const isHappyHourActive = isWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
@@ -1249,7 +1237,6 @@ const validateTimeSlot = (time: string, duration: number) => {
                         {features.map(f => <li key={f} className="flex items-center gap-2 text-xs text-neutral-400"><CheckCircle size={12} className={color === 'emerald' ? 'text-emerald-500' : color === 'amber' ? 'text-amber-500' : 'text-neutral-600'} />{f}</li>)}
                       </ul>
                       
-                      {/* 🟢 Unified Button Handler conditional on Card Type */}
                       {name === 'Standard Play' ? (
                         <div className="mt-5 w-full py-2.5 rounded-xl text-xs font-semibold text-center bg-neutral-950/40 text-neutral-500 border border-neutral-800/40 select-none"> Walk-ins Welcome</div>
                       ) : name === 'Happy Hour' ? (
@@ -1418,7 +1405,6 @@ const validateTimeSlot = (time: string, duration: number) => {
           <div className="max-w-4xl mx-auto space-y-4">
             <div className="flex items-center justify-center gap-2.5 mb-3"><img src={logoImg} alt="One Shot Bar & Billiards" className="h-8 w-8 object-contain" /><span className="text-white font-bold text-sm">One Shot Bar & Billiards</span></div>
             
-            {/* 🟢 DYNAMIC FOOTER SETUP */}
             <p className="text-neutral-600 text-xs">
               {cms.address} · Mon–Thu {fmt12(rates?.weekdayStartTime || '12:00')}–{fmt12(rates?.weekdayEndTime || '02:00')} · Fri–Sun {fmt12(rates?.weekendStartTime || '12:00')}–{fmt12(rates?.weekendEndTime || '02:00')}
             </p>
@@ -1555,110 +1541,6 @@ const validateTimeSlot = (time: string, duration: number) => {
         )}
       </AnimatePresence>
 
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
-        {/* Floating Live Monitor */}
-        <AnimatePresence>
-          {isLiveMonitorOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl shadow-black/60 w-72 max-h-[70vh] overflow-hidden flex flex-col"
-            >
-              <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 bg-neutral-900/80 backdrop-blur-sm flex-shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-xs font-semibold text-neutral-200">Live Status</span>
-                </div>
-                <button onClick={() => setIsLiveMonitorOpen(false)} className="text-neutral-600 hover:text-neutral-300 transition-colors"><X size={14} /></button>
-              </div>
-
-              <div className="overflow-y-auto flex-1 p-4 space-y-4">
-                {/* 1. Tables Section (Updated with Maintenance logic) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Tables</p>
-                    <div className="flex items-center gap-2">
-                      {[{ c: 'bg-emerald-500', l: 'Free' }, { c: 'bg-amber-500', l: 'Rsv' }, { c: 'bg-rose-500', l: 'Busy' }, { c: 'bg-orange-500', l: 'Maint' }].map(s => (
-                        <span key={s.l} className="text-[9px] flex items-center gap-1 text-neutral-500">
-                          <span className={`w-1.5 h-1.5 rounded-full ${s.c}`} />{s.l}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-0.5">
-                    {tables.map((table: any) => {
-                      // Treat inactive tables OR tables explicitly set to maintenance as "Maintenance"
-                      const isMaintenance = !table.isActive || table.status === 'maintenance';
-                      const isAvail = table.status === 'available' && !isMaintenance;
-                      const isRes = table.status === 'reserved' && !isMaintenance;
-                      
-                      let statusLabel = isMaintenance ? 'Maintenance' : isAvail ? 'Free' : isRes ? 'Reserved' : 'Occupied';
-                      let dotColor = isMaintenance ? 'bg-orange-500' : isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
-                      let timeDetail = '';
-                      
-                      if (!isMaintenance && table.session) {
-                        if (table.session.isOpenTime || table.session.durationMinutes === null) {
-                          timeDetail = "Open Time";
-                        } else {
-                          const end = new Date(new Date(table.session.startTime).getTime() + table.session.durationMinutes * 60000);
-                          const remMs = end.getTime() - now.getTime();
-                          if (remMs < 0) {
-                            const otMins = Math.floor(Math.abs(remMs) / 60000);
-                            statusLabel = 'Overtime';
-                            timeDetail = `+${otMins}m`;
-                            dotColor = 'bg-rose-600 animate-pulse';
-                          } else {
-                            const endStr = end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            const rMins = Math.floor(remMs / 60000);
-                            timeDetail = `${rMins < 60 ? `${rMins}m` : `${Math.floor(rMins/60)}h${rMins % 60 > 0 ? ` ${rMins % 60}m` : ''}`} · ends ${endStr}`;
-                          }
-                        }
-                      }
-                      
-                      return (
-                        <div key={table.id} className="flex items-center justify-between py-1.5 border-b border-neutral-900 last:border-0">
-                          <div className="flex items-center gap-2">
-                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
-                            <span className={`text-[10px] font-semibold ${isMaintenance ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
-                            <span className={`text-[9px] font-medium ${isMaintenance ? 'text-orange-500' : isAvail ? 'text-emerald-500' : isRes ? 'text-amber-500' : statusLabel === 'Overtime' ? 'text-rose-400' : 'text-neutral-500'}`}>{statusLabel}</span>
-                          </div>
-                          {timeDetail && (
-                            <span className="text-[9px] text-neutral-600 text-right max-w-[90px] truncate">{timeDetail}</span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 2. Walk-in Queue Section (Restored) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Walk-in Queue</p>
-                    <span className="text-[10px] bg-neutral-800 text-neutral-300 px-2 py-0.5 rounded-full font-bold">
-                      {queue.filter((q: any) => q.status === 'waiting').length} waiting
-                    </span>
-                  </div>
-                  
-                  <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Sparkles size={14} className="text-emerald-400" />
-                      <span className="text-xs text-emerald-300 font-semibold">AI Est. Wait Time</span>
-                    </div>
-                    <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
-                  </div>
-                </div>
-              </div>  
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <button onClick={() => setIsLiveMonitorOpen(!isLiveMonitorOpen)} className="w-12 h-12 rounded-full bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 flex items-center justify-center text-white shadow-xl transition-all">
-          {isLiveMonitorOpen ? <X size={20} /> : <Users size={20} />}
-        </button>
-      </div>
     </div>
   );
-  
 }

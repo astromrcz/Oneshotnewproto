@@ -174,11 +174,7 @@ export function Layout() {
             <span className="flex-1 text-left">Admin Portal</span>
             <span className="text-[9px] text-amber-700 font-black">↗</span>
           </button>
-          <div className="flex items-center gap-2 text-neutral-600">
-            <Circle size={8} className="fill-emerald-500 text-emerald-500" />
-            <span className="text-xs">Mon–Sat 12PM–3AM · Sun 5PM–3AM</span>
-          </div>
-          <p className="text-[10px] text-neutral-700 mt-1 pl-3.5">Autobase OAX, San Juan, Cainta, Rizal</p>
+          
         </div>
       </aside>
 

@@ -47,6 +47,10 @@ const db = new sqlite3.Database(dbPath, (err) => {
         if (err) console.error('Error creating images table:', err);
       });
       
+      db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, email TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0)`, (err) => {
+         if (err) console.error('Error creating staff table:', err);
+      });
+
       // Step 2: Try to add sessionData column if it doesn't exist (will fail silently if exists)
       db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, (err) => {
         // Ignore error - column likely already exists
@@ -74,6 +78,13 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // ==========================================
 // 🚀 READ ROUTES (GET) 
 // ==========================================
+app.get('/api/staff', (req, res) => {
+    db.all(`SELECT * FROM staff`, [], (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1, isAdmin: r.isAdmin === 1 })));
+    });
+});
+
 app.get('/api/promo-codes', (req, res) => {
   db.all(`SELECT * FROM promo_codes`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -202,7 +213,6 @@ app.get('/api/cms', (req, res) => {
 // 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
 
-
 app.post('/api/promo-codes', (req, res) => {
   const { id, code, discountPercent, description, isActive, isLimitedUses, maxUsage, startDate, expiresAt } = req.body;
   db.run(`INSERT INTO promo_codes (id, code, discount_percent, description, is_active, is_limited_uses, max_usage, start_date, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
@@ -213,8 +223,22 @@ app.post('/api/promo-codes', (req, res) => {
 });
 
 app.put('/api/promo-codes/:id', (req, res) => {
-  const { isActive } = req.body;
-  db.run(`UPDATE promo_codes SET is_active = ? WHERE id = ?`, [isActive ? 1 : 0, req.params.id], function(err) {
+  const { code, discountPercent, description, isActive, isLimitedUses, maxUsage, startDate, expiresAt } = req.body;
+  let updates = [], params = [];
+
+  if (code !== undefined) { updates.push("code = ?"); params.push(code); }
+  if (discountPercent !== undefined) { updates.push("discount_percent = ?"); params.push(discountPercent); }
+  if (description !== undefined) { updates.push("description = ?"); params.push(description); }
+  if (isActive !== undefined) { updates.push("is_active = ?"); params.push(isActive ? 1 : 0); }
+  if (isLimitedUses !== undefined) { updates.push("is_limited_uses = ?"); params.push(isLimitedUses ? 1 : 0); }
+  if (maxUsage !== undefined) { updates.push("max_usage = ?"); params.push(maxUsage); }
+  if (startDate !== undefined) { updates.push("start_date = ?"); params.push(startDate); }
+  if (expiresAt !== undefined) { updates.push("expires_at = ?"); params.push(expiresAt); }
+
+  if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  params.push(req.params.id);
+
+  db.run(`UPDATE promo_codes SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Promo updated." });
   });
@@ -248,6 +272,20 @@ app.post('/api/tables', (req, res) => {
   db.run(sql, [id, name, status || 'available', isActive ? 1 : 0], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: 'Table created successfully', id: id });
+  });
+});
+
+app.delete('/api/tables/:id', (req, res) => {
+  db.run(`DELETE FROM tables WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Table deleted." });
+  });
+});
+
+app.delete('/api/inventory/:id', (req, res) => {
+  db.run(`DELETE FROM inventory WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Inventory item deleted." });
   });
 });
 
@@ -313,7 +351,6 @@ app.put('/api/events/:id', (req, res) => {
   if (slotsFull !== undefined) { updates.push("slotsFull = ?"); params.push(slotsFull ? 1 : 0); }
   if (attachments !== undefined) { 
     updates.push("attachments = ?"); 
-    // 🟢 Grabs the first image from the array to save in the DB
     params.push(attachments && attachments.length > 0 ? attachments[0] : null); 
   }
   
@@ -334,7 +371,7 @@ app.delete('/api/events/:id', (req, res) => {
 });
 
 app.put('/api/tables/:id', (req, res) => {
-  const { status, session, isActive, name } = req.body;
+  const { status, session, isActive, name, maintenanceReason } = req.body;
   const sessionData = session ? JSON.stringify(session) : null;
   
   let updates = [];
@@ -347,6 +384,7 @@ app.put('/api/tables/:id', (req, res) => {
   }
   if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
   if (name !== undefined) { updates.push("name = ?"); params.push(name); }
+  if (maintenanceReason !== undefined) { updates.push("maintenanceReason = ?"); params.push(maintenanceReason); }
   
   if (updates.length === 0) return res.json({ message: "Nothing to update" });
   params.push(req.params.id);
@@ -423,12 +461,14 @@ app.post('/api/inventory', (req, res) => {
 
 app.put('/api/inventory/:id', (req, res) => {
   const id = req.params.id;
-  const { name, category, price, stock } = req.body;
+  const { name, category, price, stock, isActive } = req.body;
   let updates = [], params = [];
-  if (name) { updates.push("name = ?"); params.push(name); }
-  if (category) { updates.push("category = ?"); params.push(category); }
+  if (name !== undefined) { updates.push("name = ?"); params.push(name); }
+  if (category !== undefined) { updates.push("category = ?"); params.push(category); }
   if (price !== undefined) { updates.push("price = ?"); params.push(price); }
   if (stock !== undefined) { updates.push("stock = ?"); params.push(stock); }
+  if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
+  
   if (updates.length === 0) return res.json({ message: "Nothing to update" });
   params.push(id);
   db.run(`UPDATE inventory SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
@@ -520,25 +560,35 @@ app.post('/api/activities', (req, res) => {
 // ==========================================
 // 🟢 STAFF / USER PROFILE ROUTES
 // ==========================================
-app.put('/api/staff/:username', (req, res) => {
-  const { fullName, email, phone, password, avatarImg } = req.body;
+app.post('/api/staff', (req, res) => {
+  const { id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin } = req.body;
+  db.run(`INSERT INTO staff (id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, username, password, fullName, email, role, phone, joinedDate, isActive ? 1 : 0, isAdmin ? 1 : 0], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Staff added to DB." });
+  });
+});
+
+app.put('/api/staff/:identifier', (req, res) => {
+  const { username, fullName, email, phone, password, avatarImg, isActive, role } = req.body;
   let updates = [], params = [];
   
+  if (username !== undefined) { updates.push("username = ?"); params.push(username); }
   if (fullName !== undefined) { updates.push("fullName = ?"); params.push(fullName); }
   if (email !== undefined) { updates.push("email = ?"); params.push(email); }
   if (phone !== undefined) { updates.push("phone = ?"); params.push(phone); }
   if (password !== undefined) { updates.push("password = ?"); params.push(password); }
   if (avatarImg !== undefined) { updates.push("avatarImg = ?"); params.push(avatarImg); }
+  if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
+  if (role !== undefined) { updates.push("role = ?"); params.push(role); }
   
   if (updates.length === 0) return res.json({ message: "Nothing to update" });
-  params.push(req.params.username);
+  params.push(req.params.identifier);
+  params.push(req.params.identifier);
   
-  // Auto-create table if missing
-  db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, email TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT)`, () => {
-     db.run(`UPDATE staff SET ${updates.join(', ')} WHERE username = ?`, params, function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: "Profile updated successfully." });
-    });
+  db.run(`UPDATE staff SET ${updates.join(', ')} WHERE id = ? OR username = ?`, params, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Profile updated successfully." });
   });
 });
 
@@ -590,13 +640,11 @@ app.put('/api/cms', (req, res) => {
   
   if (keys.length === 0) return res.json({ message: "No CMS updates" });
   
-  // Serialize database operations using a queue to prevent locking
   let index = 0;
   let errors = [];
   
   const processNextKey = () => {
     if (index >= keys.length) {
-      // All operations completed
       if (errors.length > 0) {
         console.error('❌ Errors during CMS update:', errors);
         return res.status(500).json({ error: "Some CMS settings failed to save.", details: errors });
@@ -617,7 +665,7 @@ app.put('/api/cms', (req, res) => {
         console.log(`✅ Saved CMS [${key}]`);
       }
       index++;
-      processNextKey(); // Process next key in queue
+      processNextKey(); 
     });
   };
   

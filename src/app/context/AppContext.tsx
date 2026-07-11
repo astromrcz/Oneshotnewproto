@@ -335,8 +335,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const fetchLocalDatabase = async () => {
       console.log("📡 Attempting to fetch data from localhost:3001...");
       try {
-        // 🟢 FIXED: Added closedDatesRes and eventsRes to the destructuring array
-        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, activitiesRes] = await Promise.all([
+        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, activitiesRes, staffRes] = await Promise.all([
           fetch('http://localhost:3001/api/tables').catch(e => { console.error("Table fetch failed:", e); return null; }),
           fetch('http://localhost:3001/api/reservations').catch(() => null),
           fetch('http://localhost:3001/api/inventory').catch(() => null),
@@ -349,6 +348,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fetch('http://localhost:3001/api/promo-codes').catch(() => null), 
           fetch('http://localhost:3001/api/events').catch(() => null),
           fetch('http://localhost:3001/api/activities').catch(() => null),
+          fetch('http://localhost:3001/api/staff').catch(() => null),
         ]);
 
         if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
@@ -361,6 +361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
         if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
         if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
+        if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
         
         if (eventsRes && eventsRes.ok) {
           const dbEvents = await eventsRes.json();
@@ -374,7 +375,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (ratesRes && ratesRes.ok) {
         const dbSettings = await ratesRes.json();
         setRates(prev => ({ ...prev, ...dbSettings }));
-        setReservationTerms(prev => ({ ...prev, ...dbSettings })); // 🟢 NEW: Load terms from DB
+        setReservationTerms(prev => ({ ...prev, ...dbSettings }));
       }
         
         console.log("✅ Local SQLite database successfully synchronized to state.");
@@ -489,17 +490,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const staffLogout = () => setStaffLoggedIn(false);
   const adminLogin = (u: string, p: string) => { if (u === 'admin' && p === 'admin123') { setAdminLoggedIn(true); return true; } return false; };
   const adminLogout = () => setAdminLoggedIn(false);
+  
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
     setStaffProfile(prev => {
       const updated = { ...prev, ...p };
-      
-      // 🟢 NEW: Push profile changes to the SQLite database
       fetch(`http://localhost:3001/api/staff/${updated.username}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(p)
       }).catch(e => console.error("Failed to update profile to DB"));
-      
       return updated;
     });
   };
@@ -533,6 +532,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   
   const setTableMaintenance = (tableId: string, reason: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`);
     addActivity('admin_action', `Table set to maintenance: ${reason}`, { tableId });
   };
 
@@ -553,7 +553,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
     });
   };
-  const deleteTable = (id: string) => setTables(prev => prev.filter(t => t.id !== id));
+  const deleteTable = (id: string) => {
+    setTables(prev => prev.filter(t => t.id !== id));
+    syncToDB(`/api/tables/${id}`, 'DELETE', {}, `Table deleted`);
+  };
 
   const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
     const newItem = { ...i, id: `inv${Date.now()}` };
@@ -568,13 +571,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Updated menu item details`);
   };
 
-  const deleteInventoryItem = (id: string) => setInventory(prev => prev.filter(i => i.id !== id));
+  const deleteInventoryItem = (id: string) => {
+    setInventory(prev => prev.filter(i => i.id !== id));
+    syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`);
+  };
   
   const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
+    let updatedTableSession: Session | undefined;
+
     setInventory(prev => prev.map(inv => {
       const cartItem = cart.find(c => c.id === inv.id);
-      return cartItem ? { ...inv, stock: inv.stock - cartItem.qty } : inv;
+      if (cartItem) {
+        const newStock = inv.stock - cartItem.qty;
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated for ${inv.name}`);
+        return { ...inv, stock: newStock };
+      }
+      return inv;
     }));
+
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const newOrders = [...(t.session.orders || [])];
@@ -583,23 +597,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (existing) existing.qty += cartItem.qty;
           else newOrders.push({ ...cartItem });
         });
-        return { ...t, session: { ...t.session, orders: newOrders } };
+        updatedTableSession = { ...t.session, orders: newOrders };
+        return { ...t, session: updatedTableSession };
       }
       return t;
     }));
+
+    if (updatedTableSession) {
+      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table orders updated`);
+    }
     addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
   const voidTableOrder = (tableId: string, orderIndex: number, order: SessionOrder) => {
-    setInventory(prev => prev.map(inv => inv.id === order.id ? { ...inv, stock: inv.stock + order.qty } : inv));
+    let updatedTableSession: Session | undefined;
+
+    setInventory(prev => prev.map(inv => {
+      if (inv.id === order.id) {
+        const newStock = inv.stock + order.qty;
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored for ${inv.name}`);
+        return { ...inv, stock: newStock };
+      }
+      return inv;
+    }));
+
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const newOrders = [...(t.session.orders || [])];
         newOrders.splice(orderIndex, 1);
-        return { ...t, session: { ...t.session, orders: newOrders } };
+        updatedTableSession = { ...t.session, orders: newOrders };
+        return { ...t, session: updatedTableSession };
       }
       return t;
     }));
+
+    if (updatedTableSession) {
+      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table order voided`);
+    }
     addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
@@ -624,22 +658,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`);
   };
 
- const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
+  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     setReservations(prev => [...prev, newRes]);
     syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`);
     syncToSupabase('RESERVATION_ADDED', newRes);
-    addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`); // 🟢 NEW
+    addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`); 
     return id;
   };
   
   const updateReservationStatus = (id: string, status: ReservationStatus) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`);
-    addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); // 🟢 NEW
+    addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); 
   };
 
+  // 🟢 RESTORED FUNCTION
   const updateReservation = (id: string, u: Partial<Reservation>) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`);
@@ -649,19 +684,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`);
-    addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); // 🟢 NEW
+    addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
   };
   
   const updateDownPayment = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`);
-    if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); // 🟢 NEW
+    if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
   };
   
   const updateBalance = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`);
-    if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); // 🟢 NEW
+    if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
   };
 
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
@@ -670,26 +705,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback");
   };
 
- 
- const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
+  const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
     const id = `p${Date.now()}`;
     const newPromo = { ...i, id, createdAt: new Date(), usageCount: 0 };
     setPromoCodes(prev => [...prev, newPromo]);
-    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`); // 🟢 NEW
+    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`);
     return id;
   };
+  
   const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => {
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
+    syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`);
   };
+  
   const togglePromoCode = (id: string) => {
     const target = promoCodes.find(p => p.id === id);
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
-    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo'); // 🟢 NEW
+    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo');
   };
+  
   const deletePromoCode = (id: string) => {
     setPromoCodes(prev => prev.filter(p => p.id !== id));
-    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo'); // 🟢 NEW
+    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo');
   };
+  
   const applyPromoCode = (code: string) => {
     const now = new Date();
     return promoCodes.find(p => {
@@ -701,10 +740,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }) || null;
   };
 
-  const addStaffUser = (u: Omit<StaffUser, 'id'|'createdAt'>) => setStaffUsers(prev => [...prev, { ...u, id: `su${Date.now()}`, createdAt: new Date() }]);
-  const updateStaffUser = (id: string, u: Partial<StaffUser>) => setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
-  const resetStaffUserPassword = (id: string) => setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: 'password123' } : u));
-  const toggleStaffUserActive = (id: string) => setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
+  const addStaffUser = (u: Omit<StaffUser, 'id'|'createdAt'>) => {
+    const id = `su${Date.now()}`;
+    const newUser = { ...u, id, createdAt: new Date() };
+    setStaffUsers(prev => [...prev, newUser]);
+    syncToDB('/api/staff', 'POST', newUser, `Added staff user`);
+  };
+  
+  const updateStaffUser = (id: string, u: Partial<StaffUser>) => {
+    setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
+    syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`);
+  };
+  
+  const resetStaffUserPassword = (id: string) => {
+    setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: 'password123' } : u));
+    syncToDB(`/api/staff/${id}`, 'PUT', { password: 'password123' }, `Reset staff password`);
+  };
+  
+  const toggleStaffUserActive = (id: string) => {
+    const target = staffUsers.find(u => u.id === id);
+    if (target) {
+      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
+      syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`);
+    }
+  };
 
   const updateRates = async (r: Partial<RatesConfig>) => {
     const sanitized = { ...r } as Partial<RatesConfig>;
@@ -738,7 +797,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     
     try {
       console.log('Updating reservation terms payload:', t);
-      // FIXED: Pointing to /api/settings/terms instead of /rates
       const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`); 
       addActivity('admin_action', 'Reservation terms updated');
       return res;
@@ -797,15 +855,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addEvent = (e: Omit<Event, 'id'>) => {
     const newEvent = { ...e, id: Date.now().toString() };
     setEvents(prev => [...prev, newEvent]);
-    syncToDB('/api/events', 'POST', newEvent, `Created new event`); // 🟢 NEW
+    syncToDB('/api/events', 'POST', newEvent, `Created new event`);
   };
+  
   const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => {
     setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`); // 🟢 NEW
+    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`);
   };
+  
   const deleteEvent = (id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
-    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`); // 🟢 NEW
+    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`);
   };
 
   if (isInitializing) {

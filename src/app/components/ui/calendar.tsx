@@ -80,8 +80,15 @@ function Calendar({
         DayContent: (dayProps: DayContentProps) => {
           const { date } = dayProps;
           const isHoliday = holidayDates.some((d) => isSameDay(d, date));
-          const isClosed = closedDates.some((d) => isSameDay(d, date));
-          const isEvent = eventDates.some((d) => isSameDay(d, date));
+          const isClosed = (date: Date) => closedDates.some((cd: any) => { 
+              if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
+              if (!cd.date) return false; // 🟢 FIX: Bypass empty dates
+              const d = new Date(cd.date); 
+              if (isNaN(d.getTime())) return false; // 🟢 FIX: Bypass invalid dates
+              d.setHours(0, 0, 0, 0); 
+              return d.getTime() === date.getTime(); 
+            });
+            const isEvent = eventDates.some((d) => isSameDay(d, date));
 
           return (
             <div className="relative flex h-full w-full flex-col items-center justify-center">

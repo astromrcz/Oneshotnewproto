@@ -18,6 +18,9 @@ import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+// 🟢 FIX: Added missing todayStart variable
+const todayStart = startOfDay(new Date());
+
 type Section = 'home' | 'reservations' | 'rates' | 'events' | 'about' | 'feedback';
 
 const QR_GCASH = [
@@ -54,7 +57,7 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
   );
 }
 
-function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: Date[]; }) {
+function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
@@ -72,7 +75,14 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
   for (let d = 1; d <= remaining; d++) { cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) }); }
 
   const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
-  const isClosed = (date: Date) => closedDates.some(cd => { const d = new Date(cd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
+  const isClosed = (date: Date) => closedDates.some((cd: any) => { 
+    if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
+    if (!cd.date) return false;
+    const d = new Date(cd.date); 
+    if (isNaN(d.getTime())) return false;
+    d.setHours(0, 0, 0, 0); 
+    return d.getTime() === date.getTime(); 
+  });
   const isPast = (date: Date) => date < today;
   const isSelected = (date: Date) => selectedDate ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })() : false;
   const isTodayDate = (date: Date) => date.getTime() === today.getTime();
@@ -111,8 +121,6 @@ export function HomePage() {
   const navigate = useNavigate();
   const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser } = useAppContext() as any;
 
-  // 🟢 NEW: Announcement State & Local Storage Tracking
-  // 🟢 NEW: Advanced Notification & First-Time User Tracking
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
   const [isFirstTime, setIsFirstTime] = useState(false);
@@ -122,7 +130,6 @@ export function HomePage() {
     if (stored) {
       try { setReadAnnouncements(JSON.parse(stored)); } catch(e) {}
     }
-    // Check if first time user
     const visited = localStorage.getItem('oneshot_visited');
     if (!visited) {
       setIsFirstTime(true);
@@ -130,10 +137,8 @@ export function HomePage() {
     }
   }, []);
 
-  // 1. Get CMS Announcements
   const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
   
-  // 2. Get User's Reservation Updates (if logged in)
   const userReservations = currentUser 
     ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()) 
     : [];
@@ -145,10 +150,8 @@ export function HomePage() {
     createdAt: r.createdAt
   }));
 
-  // 3. Merge & Sort
   const allNotifications = [...activeAnnouncements, ...resNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  // 4. Check Unread Status
   const hasUnread = isFirstTime || allNotifications.some((n: any) => !readAnnouncements.includes(n.id));
 
   const markAsRead = (id: string) => {
@@ -191,6 +194,20 @@ export function HomePage() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  
+  // 🟢 NEW: Registration Hook Modal State
+  const [showRegPromoModal, setShowRegPromoModal] = useState(false);
+
+  // Hook to show Reg Promo when visiting Reservations for the first time
+  useEffect(() => {
+    if (activeSection === 'reservations' && !currentUser) {
+      const seen = localStorage.getItem('oneshot_reg_promo_seen');
+      if (!seen) {
+        setShowRegPromoModal(true);
+        localStorage.setItem('oneshot_reg_promo_seen', 'true');
+      }
+    }
+  }, [activeSection, currentUser]);
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '', showPw: false, error: '' });
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '' });
@@ -220,7 +237,6 @@ export function HomePage() {
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', message: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
-  // Safely parse hero images from the siteConfig
   let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
   try {
     const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
@@ -296,6 +312,7 @@ export function HomePage() {
 
   const RES_DRAFT_KEY = 'oneshot_reservation_draft_v1';
 
+  // 🟢 FIX: Slate Wipe for Payment - Do not persist paymentRef and receiptImg
   const saveReservationDraft = useCallback(() => {
     try {
       const draft = {
@@ -304,14 +321,12 @@ export function HomePage() {
         resForm,
         promoCodeInput,
         appliedPromo,
-        paymentRef,
-        receiptImg,
         resTab,
         reservationStep
       };
       localStorage.setItem(RES_DRAFT_KEY, JSON.stringify(draft));
     } catch (e) { console.warn('Failed to save draft', e); }
-  }, [selectedDate, selectedTableId, resForm, promoCodeInput, appliedPromo, paymentRef, receiptImg, resTab, reservationStep]);
+  }, [selectedDate, selectedTableId, resForm, promoCodeInput, appliedPromo, resTab, reservationStep]);
 
   const loadReservationDraft = useCallback(() => {
     try {
@@ -323,9 +338,8 @@ export function HomePage() {
       if (d.resForm) setResForm(prev => ({ ...prev, ...(d.resForm || {}) }));
       if (d.promoCodeInput) setPromoCodeInput(d.promoCodeInput);
       if (d.appliedPromo) setAppliedPromo(d.appliedPromo);
-      if (d.paymentRef) setPaymentRef(d.paymentRef);
-      if (d.receiptImg) setReceiptImg(d.receiptImg);
       if (d.resTab) setResTab(d.resTab);
+      if (d.reservationStep !== undefined) setReservationStep(d.reservationStep);
     } catch (e) { console.warn('Failed to load draft', e); }
   }, []);
 
@@ -356,6 +370,7 @@ export function HomePage() {
       return;
     }
     const name = loginForm.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    // @ts-ignore
     setCurrentUser({ name, email: loginForm.email });
     setShowLoginModal(false);
     setLoginForm({ email: '', password: '', showPw: false, error: '' });
@@ -370,6 +385,7 @@ export function HomePage() {
       setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
       return;
     }
+    // @ts-ignore
     setCurrentUser({ name: registerForm.name, email: registerForm.email });
     setShowRegisterModal(false);
     setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '' });
@@ -510,6 +526,35 @@ export function HomePage() {
     requestedStart.setHours(h, m, 0, 0);
     const requestedEnd = addMinutes(requestedStart, duration * 60);
 
+    const sameDayEvents = events.filter((e: any) => {
+      if (e.allowReservations !== false) return false;
+      if (!e.date) return false;
+      const eventDates = e.date.split(',').map((d: string) => d.trim());
+      return eventDates.includes(format(requestedStart, 'yyyy-MM-dd'));
+    });
+
+    for (const ev of sameDayEvents) {
+      if (ev.duration === 'Whole Day') return 'event_blocked';
+      
+      const [eStartStr, eEndStr] = ev.duration?.split(' - ') || [];
+      if (eStartStr && eEndStr) {
+        const parseToMinsEv = (t: string) => {
+          const [hh = '0', mm = '0'] = t.split(':');
+          return Number(hh) * 60 + Number(mm || 0);
+        };
+        const eStartMins = parseToMinsEv(eStartStr.trim());
+        let eEndMins = parseToMinsEv(eEndStr.trim());
+        if (eEndMins <= eStartMins) eEndMins += 24 * 60;
+        
+        let reqStartMins = slotMins;
+        let reqEndMins = slotMins + (duration * 60);
+        
+        if (reqStartMins < eEndMins && reqEndMins > eStartMins) {
+           return 'event_blocked';
+        }
+      }
+    }
+
     let overlapCount = 0;
     const sameDayRes = reservations.filter((r: any) => 
       r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), requestedStart)
@@ -536,6 +581,12 @@ export function HomePage() {
   };
 
   const handlePaymentConfirm = () => {
+    // 🟢 FIX: GCash Fraud Validation
+    if (reservations.some((r: any) => r.paymentRef === paymentRef)) {
+      alert("This GCash reference number has already been recorded in our system. Please verify your transaction and enter a valid, unique reference number.");
+      return;
+    }
+
     setConfirmingPayment(true);
     setTimeout(() => {
       const reservationDate = new Date(selectedDate!);
@@ -574,6 +625,8 @@ export function HomePage() {
     setReservationStep(0);
     setAgreedToTerms(false);
     setGeneratedResId('');
+    setPaymentRef(''); // Clear for next time
+    setReceiptImg(null); // Clear for next time
     if (currentUser) setResTab('track');
   };
 
@@ -616,6 +669,21 @@ export function HomePage() {
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
 
   const publicEvents = events.filter((e: any) => e.type !== 'Holiday');
+  
+  const upcomingEvents = publicEvents.filter((e: any) => {
+    const dates = e.date ? e.date.split(',') : [];
+    const sortedDates = [...dates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+    const lastDate = sortedDates[sortedDates.length - 1];
+    return lastDate ? !isBefore(new Date(lastDate), todayStart) : true;
+  });
+
+  const pastEvents = publicEvents.filter((e: any) => {
+    const dates = e.date ? e.date.split(',') : [];
+    const sortedDates = [...dates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+    const lastDate = sortedDates[sortedDates.length - 1];
+    return lastDate ? isBefore(new Date(lastDate), todayStart) : false;
+  });
+
   const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
   const reservedDates = reservations.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date));
 
@@ -767,7 +835,6 @@ export function HomePage() {
           {activeSection === 'home' && (
             <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
               
-              {/* HERO SECTION FIX */}
               <div className="relative h-[70vh] min-h-[500px] overflow-hidden group bg-neutral-950">
                 <AnimatePresence mode="wait" custom={heroSlideDir}>
                   <motion.div
@@ -784,26 +851,29 @@ export function HomePage() {
                 </AnimatePresence>
                 <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/40 to-transparent pointer-events-none" />
 
-                {/* Left/Right controls (z-20 and pointer-events-auto) */}
                 <button onClick={prevHeroSlide} className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-emerald-600 hover:border-emerald-500 z-20 cursor-pointer shadow-xl"><ChevronLeft size={24} /></button>
                 <button onClick={nextHeroSlide} className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-emerald-600 hover:border-emerald-500 z-20 cursor-pointer shadow-xl"><ChevronRight size={24} /></button>
 
                 {/* Pointer-events-none on wrapper so it doesn't block the screen, auto on the actual text content */}
-                <div className="absolute inset-0 flex flex-col items-center justify-end pb-12 px-6 text-center z-10 pointer-events-none">
+                <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 px-6 text-center z-10 pointer-events-none">
                   <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center pointer-events-auto">
-                    <p className="text-emerald-400 text-sm uppercase tracking-[0.3em] font-semibold mb-4 drop-shadow-md">{cms.heroTitle}</p>
-                    {/* SCALED UP TITLE & SUBTITLE */}
-                    <h1 className="text-7xl md:text-[5.5rem] font-black text-white mb-4 tracking-tight leading-none drop-shadow-2xl">{cms.heroTitle}</h1>
-                    <p className="text-emerald-300 text-2xl md:text-3xl font-light mb-8 drop-shadow-lg">{cms.heroSubtitle}</p>
+                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">{cms.heroTitle}</p>
+                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight">{cms.heroTitle}</h1>
+                    <p className="text-emerald-300 text-xl font-light mb-5">{cms.heroSubtitle}</p>
+                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed">{cms.heroDescription}</p>
                     
-                    <p className="text-neutral-200 text-base max-w-lg mx-auto mb-10 leading-relaxed drop-shadow-md">{cms.heroDescription}</p>
-                    <div className="flex flex-wrap justify-center gap-4 mb-8">
-                      <button onClick={() => setActiveSection('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-full text-base font-semibold transition-all shadow-lg shadow-emerald-900/40 hover:shadow-emerald-800/60"><Calendar size={18} /> Book a Table</button>
-                      <button onClick={() => setActiveSection('about')} className="flex items-center gap-2 bg-neutral-900/80 backdrop-blur-sm hover:bg-neutral-800 text-neutral-100 px-8 py-4 rounded-full text-base font-semibold transition-all border border-neutral-700/50 hover:border-neutral-600"><Info size={18} /> Learn More</button>
+                    <div className="flex flex-wrap justify-center gap-3 mb-6">
+                      <button onClick={() => setActiveSection('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-900/40 hover:shadow-emerald-800/60">
+                        <Calendar size={15} /> Book a Table
+                      </button>
+                      <button onClick={() => setActiveSection('about')} className="flex items-center gap-2 bg-neutral-900/80 backdrop-blur-sm hover:bg-neutral-800 text-neutral-100 px-6 py-3 rounded-full text-sm font-semibold transition-all border border-neutral-700/50 hover:border-neutral-600">
+                        <Info size={15} /> Learn More
+                      </button>
                     </div>
+                    
                     <div className="flex gap-2">
                       {heroSlides.map((_, i) => (
-                        <button key={i} onClick={() => { setHeroSlideDir(i > heroSlideIdx ? 1 : -1); setHeroSlideIdx(i); }} className={`h-1.5 rounded-full transition-all ${i === heroSlideIdx ? 'bg-emerald-400 w-6' : 'bg-white/30 w-2 hover:bg-white/60'}`} />
+                        <button key={i} onClick={() => { setHeroSlideDir(i > heroSlideIdx ? 1 : -1); setHeroSlideIdx(i); }} className={`h-1.5 rounded-full transition-all ${i === heroSlideIdx ? 'bg-emerald-400 w-5' : 'bg-white/35 w-1.5 hover:bg-white/60'}`} />
                       ))}
                     </div>
                   </motion.div>
@@ -997,6 +1067,11 @@ export function HomePage() {
                             {timeValidation === 'full' && (
                               <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
                                 <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
+                              </p>
+                            )}
+                            {timeValidation === 'event_blocked' && (
+                              <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+                                <AlertTriangle size={12} className="flex-shrink-0" /> This time slot overlaps with a special event. Online reservations are temporarily disabled.
                               </p>
                             )}
                           </div>
@@ -1320,39 +1395,78 @@ export function HomePage() {
           {activeSection === 'events' && (
             <motion.div key="events" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="max-w-screen-md mx-auto px-5 pb-20">
               <div className="text-center mb-10 mt-6">
-                <h2 className="text-3xl font-black text-white tracking-tight uppercase mb-3">Upcoming Events</h2>
-                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and holiday promos.</p>
+                <h2 className="text-3xl font-black text-white tracking-tight uppercase mb-3">Events & Tournaments</h2>
+                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and special events.</p>
               </div>
 
-              <div className="space-y-6">
-                {publicEvents.length === 0 ? (
-                  <div className="text-center py-12 border border-dashed border-neutral-800 rounded-xl"><p className="text-neutral-500">No upcoming events at the moment. Check back soon!</p></div>
-                ) : (
-                  publicEvents.map((event: any) => (
-                    <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden relative group transition-all hover:border-emerald-600/30 flex flex-col">
-                      {event.attachments && event.attachments.length > 0 ? (
-                        <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative flex-shrink-0">
-                          <img src={event.attachments[0]} alt={event.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 to-transparent" />
-                        </div>
-                      ) : (
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
-                      )}
-                      <div className="p-6 relative z-10 flex-1 flex flex-col">
-                        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center mb-4">
-                          <div><span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2.5 py-1 rounded-md mb-2 inline-block">{event.type}</span><h3 className="text-xl font-bold text-neutral-100 mb-1">{event.title}</h3></div>
-                          <div className="text-left sm:text-right shrink-0"><p className="text-sm font-black text-emerald-500 bg-emerald-950/30 border border-emerald-900/50 px-3 py-1 rounded-lg">{new Date(event.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p></div>
-                        </div>
-                        <p className="text-sm text-neutral-400 mb-6 leading-relaxed flex-1">{event.description}</p>
-                        <div className="flex items-center justify-between border-t border-neutral-800/60 pt-4 mt-auto">
-                          <div className="text-xs text-neutral-500 font-medium">{event.maxParticipants ? (event.slotsFull ? <span className="text-rose-400 font-bold bg-rose-950/30 px-2 py-1 rounded">Sold Out</span> : <span>Max {event.maxParticipants} participants</span>) : <span>Open to all</span>}</div>
-                          {event.registrationLink ? <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-white text-black font-semibold px-4 py-2.5 rounded-full hover:bg-neutral-200 flex items-center gap-1.5">Register Now <ExternalLink size={12} strokeWidth={2.5} /></a> : <div className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">No Registration Required</div>}
+              {/* 🟢 NEW: Separation of Upcoming and Past Events */}
+              {upcomingEvents.length > 0 && (
+                <div className="mb-10">
+                  <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <Calendar size={16} /> Upcoming Events
+                  </h3>
+                  <div className="space-y-6">
+                    {upcomingEvents.map((event: any) => (
+                      <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden relative group transition-all hover:border-emerald-600/30 flex flex-col">
+                        {event.attachments && event.attachments.length > 0 ? (
+                          <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative flex-shrink-0">
+                            <img src={event.attachments[0]} alt={event.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 to-transparent" />
+                          </div>
+                        ) : (
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
+                        )}
+                        <div className="p-6 relative z-10 flex-1 flex flex-col">
+                          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center mb-4">
+                            <div><span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2.5 py-1 rounded-md mb-2 inline-block">{event.type}</span><h3 className="text-xl font-bold text-neutral-100 mb-1">{event.title}</h3></div>
+                            <div className="text-left sm:text-right shrink-0"><p className="text-sm font-black text-emerald-500 bg-emerald-950/30 border border-emerald-900/50 px-3 py-1 rounded-lg">{new Date(event.date.split(',')[0]).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p></div>
+                          </div>
+                          <p className="text-sm text-neutral-400 mb-6 leading-relaxed flex-1">{event.description}</p>
+                          <div className="flex items-center justify-between border-t border-neutral-800/60 pt-4 mt-auto">
+                            <div className="text-xs text-neutral-500 font-medium">{event.maxParticipants ? (event.slotsFull ? <span className="text-rose-400 font-bold bg-rose-950/30 px-2 py-1 rounded">Sold Out</span> : <span>Max {event.maxParticipants} participants</span>) : <span>Open to all</span>}</div>
+                            {event.registrationLink ? <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-white text-black font-semibold px-4 py-2.5 rounded-full hover:bg-neutral-200 flex items-center gap-1.5">Register Now <ExternalLink size={12} strokeWidth={2.5} /></a> : <div className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">No Registration Required</div>}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
-                )}
-              </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {pastEvents.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <Clock size={16} /> Past Events
+                  </h3>
+                  <div className="space-y-4">
+                    {pastEvents.map((event: any) => (
+                      <div key={event.id} className="bg-neutral-900/50 border border-neutral-800/60 rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center opacity-70 grayscale hover:grayscale-0 hover:opacity-100 transition-all">
+                        {event.attachments && event.attachments.length > 0 && (
+                          <img src={event.attachments[0]} alt={event.title} className="w-full sm:w-24 h-24 object-cover rounded-lg flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[9px] bg-neutral-800 text-neutral-400 px-1.5 py-0.5 rounded uppercase font-bold">{event.type}</span>
+                            <h4 className="font-bold text-neutral-200 truncate">{event.title}</h4>
+                          </div>
+                          <p className="text-xs text-neutral-500 line-clamp-2 mb-2">{event.description}</p>
+                          <p className="text-[10px] text-neutral-400 font-medium">Held on: {new Date(event.date.split(',')[0]).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                        </div>
+                        {event.bracketLink && (
+                          <a href={event.bracketLink} target="_blank" rel="noopener noreferrer" className="text-[10px] bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-3 py-1.5 rounded-md transition-colors flex-shrink-0 whitespace-nowrap">
+                            View Results
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {publicEvents.length === 0 && (
+                <div className="text-center py-12 border border-dashed border-neutral-800 rounded-xl"><p className="text-neutral-500">No events found. Check back soon!</p></div>
+              )}
+
             </motion.div>
           )}
 
@@ -1498,6 +1612,43 @@ export function HomePage() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {/* 🟢 NEW: First-Time Registration Modal */}
+        {showRegPromoModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-8 w-full max-w-md shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-500 to-sky-500" />
+              <button onClick={() => setShowRegPromoModal(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white"><X size={18} /></button>
+              
+              <div className="w-16 h-16 bg-neutral-900 rounded-full flex items-center justify-center mb-6 border border-neutral-800 shadow-inner">
+                <Sparkles size={28} className="text-emerald-400" />
+              </div>
+              
+              <h3 className="text-2xl font-black text-white mb-2">Wait! Don't book as a guest.</h3>
+              <p className="text-neutral-400 text-sm mb-6 leading-relaxed">Register an account with One Shot Bar & Billiards today and unlock an upgraded experience.</p>
+              
+              <div className="space-y-4 mb-8">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5"><CheckCircle size={14} className="text-emerald-400" /></div>
+                  <div><p className="text-sm font-bold text-neutral-200">Faster Checkout</p><p className="text-xs text-neutral-500">Your details are saved for your next game.</p></div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5"><BookOpen size={14} className="text-emerald-400" /></div>
+                  <div><p className="text-sm font-bold text-neutral-200">Track Bookings Easily</p><p className="text-xs text-neutral-500">View your active and past reservations instantly.</p></div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5"><Tag size={14} className="text-emerald-400" /></div>
+                  <div><p className="text-sm font-bold text-neutral-200">Exclusive Promos</p><p className="text-xs text-neutral-500">Get access to member-only discount codes.</p></div>
+                </div>
+              </div>
+              
+              <div className="flex flex-col gap-3">
+                <button onClick={() => { setShowRegPromoModal(false); setShowRegisterModal(true); }} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-emerald-900/30">Create an Account</button>
+                <button onClick={() => setShowRegPromoModal(false)} className="w-full bg-neutral-900 hover:bg-neutral-800 text-neutral-400 font-semibold py-3.5 rounded-xl border border-neutral-800 transition-colors">Continue as Guest</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {reservationStep === 2 && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[95vh] overflow-y-auto">

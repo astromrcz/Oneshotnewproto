@@ -18,7 +18,7 @@ const navItems = [
   { to: '/admin/policy-rates',      icon: DollarSign,      label: 'Policy & Rates' }, 
   { to: '/admin/announcements',     icon: Megaphone,       label: 'Announcements' },
   { to: '/admin/analytics',         icon: BarChart3,       label: 'Analytics' },
-  { to: '/admin/activity',          icon: Shield,          label: 'System Activity' },
+  { to: '/admin/activity',          icon: Shield,          label: 'Activity Log' },
   { to: '/admin/feedback',          icon: Tag,             label: 'Feedback' },
   { to: '/admin/site-settings',     icon: FileText,        label: 'Site Settings' },
   { to: '/admin/settings',          icon: Settings,        label: 'Settings' },
@@ -32,7 +32,7 @@ const pageTitles: Record<string, string> = {
   '/admin/policy-rates': 'Policy & Rates',
   '/admin/announcements': 'Announcements',
   '/admin/analytics': 'Analytics',
-  '/admin/activity': 'System Activity Log',
+  '/admin/activity': 'Activity Log',
   '/admin/feedback': 'Feedback',
   '/staff/settings': 'Settings',
 };

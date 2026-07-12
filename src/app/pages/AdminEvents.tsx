@@ -3,7 +3,7 @@ import {
   Calendar as CalendarIcon, Plus, Trash2, Edit2, Tag, Paperclip, X, Link,
   Users, ToggleLeft, ToggleRight, ChevronDown, ChevronUp,
   Wand2, Copy, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight,
-  RefreshCw, CalendarX2, List, Network, Clock, Mail
+  RefreshCw, CalendarX2, List, Network, Clock, Mail, SlidersHorizontal
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -12,7 +12,7 @@ import { useAppContext, generateRandomPromoCode } from '../context/AppContext';
 import type { Event, PromoCode, ClosedDate, Reservation } from '../context/AppContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
 
-const EVENT_TYPES = ['Tournament', 'League', 'Other']; // Removed Holiday so it can't be manually created as an event
+const EVENT_TYPES = ['Tournament', 'League', 'Other']; 
 const todayStart = startOfDay(new Date());
 
 // ── Types ────────────────────────────────────────────────────────
@@ -21,6 +21,9 @@ type FormState = {
   isWholeDay: boolean; startTime: string; endTime: string;
   registrationLink: string; bracketLink: string; maxParticipants: string; slotsFull: boolean;
   attachments: string[];
+  allowReservations: boolean; 
+  caterWalkIns: boolean;       
+  walkInTableCount: number;    
 };
 
 type PromoForm = {
@@ -30,26 +33,31 @@ type PromoForm = {
   hasStart: boolean; startDate: string;
 };
 
-type ClosureForm = { reason: string; isFullDay: boolean; openTime: string; closeTime: string; };
+type ClosureForm = { 
+  reason: string; isFullDay: boolean; openTime: string; closeTime: string; 
+  type: 'specific' | 'weekly'; dayOfWeek: number; 
+};
+const emptyClosureForm: ClosureForm = { reason: '', isFullDay: true, openTime: '12:00', closeTime: '22:00', type: 'specific', dayOfWeek: 0 };
 
-const emptyEventForm: FormState = { title: '', dates: [], type: 'Tournament', description: '', isWholeDay: false, startTime: '18:00', endTime: '22:00', registrationLink: '', bracketLink: '', maxParticipants: '', slotsFull: false, attachments: [] };
+const emptyEventForm: FormState = { 
+  title: '', dates: [], type: 'Tournament', description: '', isWholeDay: false, 
+  startTime: '18:00', endTime: '22:00', registrationLink: '', bracketLink: '', 
+  maxParticipants: '', slotsFull: false, attachments: [],
+  allowReservations: true, caterWalkIns: true, walkInTableCount: 10 
+};
 const emptyPromoForm: PromoForm = { code: '', discountPercent: 10, description: '', isLimitedUses: true, maxUsage: 100, deleteWhenDepleted: false, isActive: true, hasExpiry: false, expiresAt: '', hasStart: false, startDate: '' };
-const emptyClosureForm: ClosureForm = { reason: '', isFullDay: true, openTime: '12:00', closeTime: '22:00' };
 
 export function AdminEvents() {
   const { 
     events, addEvent, updateEvent, deleteEvent, 
     promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
     closedDates, addClosedDate, removeClosedDate, updateClosedDate,
-    reservations, updateReservation, updateReservationStatus
+    reservations, updateReservation, updateReservationStatus, tables,
+    rates // 🟢 FIX: Added rates here to resolve the ReferenceError
   } = useAppContext();
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
-
-  // Calendar State
   const [viewMonth, setViewMonth] = useState(new Date());
-  
-  // Modals State
   const [dayActionDate, setDayActionDate] = useState<Date | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -57,7 +65,7 @@ export function AdminEvents() {
   const [showEventModal, setShowEventModal] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [eventForm, setEventForm] = useState<FormState>(emptyEventForm);
-  const [modalMonth, setModalMonth] = useState(new Date()); // For the inline multi-select calendar
+  const [modalMonth, setModalMonth] = useState(new Date()); 
   const [expandedAttachments, setExpandedAttachments] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -79,9 +87,13 @@ export function AdminEvents() {
   // ── Mappers & Helpers ──────────────────────────────────────────
   const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
   
-  const closedMap = new Map(closedDates.map(c => [c.date, c]));
-  
-  // Map reservations by date
+  const closedMap = new Map(
+    closedDates
+      .filter(c => c.type !== 'weekly' && c.date && !isNaN(new Date(c.date).getTime()))
+      .map(c => [c.date, c])
+  );
+  const weeklyClosures = closedDates.filter(c => c.type === 'weekly');
+
   const resMap = reservations.reduce((acc, r) => {
     if (r.status !== 'cancelled') {
       const d = dateKey(new Date(r.date));
@@ -91,7 +103,6 @@ export function AdminEvents() {
     return acc;
   }, {} as Record<string, Reservation[]>);
 
-  // Map events that span multiple dates (comma separated)
   const eventsMap = events.reduce((acc, e) => {
     if (!e.date) return acc;
     const datesArray = e.date.split(',');
@@ -123,7 +134,7 @@ export function AdminEvents() {
   const openEventCreate = (prefillDate?: Date) => {
     setEditingEventId(null);
     const initialDates = prefillDate ? [dateKey(prefillDate)] : [];
-    setEventForm({ ...emptyEventForm, dates: initialDates });
+    setEventForm({ ...emptyEventForm, dates: initialDates, walkInTableCount: tables.length || 10 });
     setModalMonth(prefillDate || new Date());
     setDayActionDate(null);
     setShowEventModal(true);
@@ -147,7 +158,10 @@ export function AdminEvents() {
       bracketLink: ev.bracketLink ?? '', 
       maxParticipants: ev.maxParticipants?.toString() ?? '',
       slotsFull: ev.slotsFull ?? false, 
-      attachments: ev.attachments ?? []
+      attachments: ev.attachments ?? [],
+      allowReservations: ev.allowReservations !== false,
+      caterWalkIns: ev.caterWalkIns !== false,
+      walkInTableCount: ev.walkInTableCount ?? (tables.length || 10)
     });
     
     if (savedDates.length > 0) setModalMonth(new Date(savedDates[0]));
@@ -155,12 +169,29 @@ export function AdminEvents() {
   };
 
   const openClosureCreate = (d: Date) => {
-    setEditingClosureId(null); setClosureForm(emptyClosureForm);
-    setClosureDateStr(dateKey(d)); setDayActionDate(null); setShowClosureModal(true);
+    setEditingClosureId(null); 
+    
+    const isActionToday = isSameDay(d, new Date());
+    
+    setClosureForm({ 
+      ...emptyClosureForm, 
+      dayOfWeek: d.getDay(),
+      isFullDay: isActionToday ? true : emptyClosureForm.isFullDay,
+      type: isActionToday ? 'specific' : emptyClosureForm.type
+    });
+    
+    setClosureDateStr(dateKey(d)); 
+    setDayActionDate(null); 
+    setShowClosureModal(true);
   };
+  
   const openClosureEdit = (c: ClosedDate) => {
-    setEditingClosureId(c.id); setClosureForm({ reason: c.reason, isFullDay: c.isFullDay, openTime: c.openTime || '12:00', closeTime: c.closeTime || '22:00' });
-    setClosureDateStr(c.date); setDayActionDate(null); setShowClosureModal(true);
+    setEditingClosureId(c.id); 
+    setClosureForm({ 
+      reason: c.reason, isFullDay: c.isFullDay, openTime: c.openTime || '12:00', closeTime: c.closeTime || '22:00',
+      type: c.type || 'specific', dayOfWeek: c.dayOfWeek ?? 0
+    });
+    setClosureDateStr(c.date || dateKey(new Date())); setDayActionDate(null); setShowClosureModal(true);
   };
 
   const openPromoCreate = (prefillDate?: Date) => {
@@ -188,20 +219,27 @@ export function AdminEvents() {
       return;
     }
 
-  const hasClosedDate = eventForm.dates.some(d => closedMap.has(d));
-    if (hasClosedDate) {
+    if ((eventForm.type === 'Tournament' || eventForm.type === 'League') && !eventForm.maxParticipants) {
+      alert("Max Participants is required for Tournaments and Leagues.");
+      return;
+    }
+
+    const highwayClosed = eventForm.dates.some(d => closedMap.has(d));
+    if (highwayClosed) {
       alert("You cannot schedule an event on a date that is marked as Closed.");
       return;
     }
-    // 🟢 NEW: 24-hour advance validation
-    const hasInvalidDate = eventForm.dates.some(d => {
-      const eventDate = new Date(d);
-      return isSameDay(eventDate, todayStart) || isBefore(eventDate, todayStart);
-    });
 
-    if (hasInvalidDate && eventForm.type !== 'Holiday') {
-      alert("Events must be scheduled at least 24 hours in advance (tomorrow or later).");
-      return;
+    if (!editingEventId) {
+      const hasInvalidDate = eventForm.dates.some(d => {
+        const eventDate = new Date(d);
+        return isSameDay(eventDate, todayStart) || isBefore(eventDate, todayStart);
+      });
+
+      if (hasInvalidDate && eventForm.type !== 'Holiday') {
+        alert("New events must be scheduled at least 24 hours in advance (tomorrow or later).");
+        return;
+      }
     }
 
     const isConfirmed = window.confirm(
@@ -223,6 +261,9 @@ export function AdminEvents() {
       maxParticipants: eventForm.maxParticipants ? parseInt(eventForm.maxParticipants) : undefined,
       slotsFull: eventForm.slotsFull, 
       attachments: eventForm.attachments.length ? eventForm.attachments : undefined,
+      allowReservations: eventForm.allowReservations, 
+      caterWalkIns: eventForm.caterWalkIns,           
+      walkInTableCount: eventForm.caterWalkIns ? eventForm.walkInTableCount : 0 
     };
     if (editingEventId) updateEvent(editingEventId, payload);
     else addEvent(payload);
@@ -232,8 +273,12 @@ export function AdminEvents() {
 
   const saveClosure = (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingClosureId) updateClosedDate(editingClosureId, closureForm);
-    else addClosedDate({ date: closureDateStr, ...closureForm });
+    const payload = {
+      ...closureForm,
+      date: closureForm.type === 'weekly' ? '' : closureDateStr
+    };
+    if (editingClosureId) updateClosedDate(editingClosureId, payload);
+    else addClosedDate({ ...payload, date: payload.date || '' });
     setShowClosureModal(false); flash('Closure saved successfully!');
   };
 
@@ -241,15 +286,13 @@ export function AdminEvents() {
     e.preventDefault();
     if (!promoForm.code || !promoForm.description) return;
     
-    // Connect Start and Expiry Logic Validation
     if (promoForm.hasStart && promoForm.hasExpiry && promoForm.startDate && promoForm.expiresAt) {
       if (new Date(promoForm.expiresAt) <= new Date(promoForm.startDate)) {
         alert("Expiry date must be after the start date.");
         return;
       }
     }
-    
-    setShowPromoConfirm(true); // Open the confirmation modal
+    setShowPromoConfirm(true); 
   };
 
   const executePromoSave = () => {
@@ -276,15 +319,30 @@ export function AdminEvents() {
     return `attachment-${index + 1}.${match?.[1]?.split('/')[1] ?? 'bin'}`;
   };
 
+  // 🟢 FIX: Added 50MB and Image-Only Validation
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
+    
     files.forEach(file => {
+      // Image format check
+      if (!file.type.startsWith('image/')) {
+        alert(`File "${file.name}" is not a valid image format. Please upload JPG, PNG, WEBP, or GIF only.`);
+        return;
+      }
+      
+      // 50MB size limit check
+      if (file.size > 50 * 1024 * 1024) {
+        alert(`File "${file.name}" exceeds the maximum 50MB limit.`);
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = () => {
         setEventForm(prev => ({ ...prev, attachments: [...prev.attachments, reader.result as string] }));
       };
       reader.readAsDataURL(file);
     });
+    
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -324,7 +382,7 @@ export function AdminEvents() {
               const isPast = isBefore(day, todayStart);
               const isToday = isSameDay(day, new Date());
               
-              const dayCls = closedMap.get(key);
+              const dayCls = closedMap.get(key) || weeklyClosures.find(c => c.dayOfWeek === day.getDay());
               const dayEvs = eventsMap[key] || [];
               const dayPrs = promosMap[key] || [];
               const dayRes = resMap[key] || [];
@@ -332,9 +390,10 @@ export function AdminEvents() {
               return (
                 <button
                   key={key}
+                  disabled={isPast} 
                   onClick={() => setDayActionDate(day)}
                   className={`relative aspect-square rounded-xl p-1.5 flex flex-col items-start transition-all border
-                    ${isPast ? 'bg-neutral-900/40 border-neutral-800/40 text-neutral-700 cursor-default' : 'bg-neutral-900 border-neutral-800 hover:border-neutral-600 cursor-pointer'}
+                    ${isPast ? 'bg-neutral-950 border-neutral-900/40 text-neutral-700 cursor-not-allowed opacity-40' : 'bg-neutral-900 border-neutral-800 hover:border-neutral-600 cursor-pointer'}
                     ${isToday ? 'ring-1 ring-amber-500/50' : ''}
                     ${dayCls ? 'bg-rose-950/20 border-rose-900/30' : ''}
                   `}
@@ -391,14 +450,15 @@ export function AdminEvents() {
           {days.map(day => {
             const key = dateKey(day);
             const isSelected = eventForm.dates.includes(key);
-            // 🟢 NEW: Disables past dates AND the current date (requires 24h advance)
             const isPastOrToday = isBefore(day, todayStart) || isSameDay(day, todayStart);
+            
+            const isDisabled = isPastOrToday && !isSelected;
             
             return (
               <button
                 type="button"
                 key={key}
-                disabled={isPastOrToday}
+                disabled={isDisabled}
                 onClick={() => {
                   setEventForm(prev => {
                     const dates = prev.dates.includes(key) ? prev.dates.filter(d => d !== key) : [...prev.dates, key];
@@ -406,7 +466,7 @@ export function AdminEvents() {
                   });
                 }}
                 className={`aspect-square rounded-md text-[10px] font-semibold flex items-center justify-center transition-colors ${
-                  isSelected ? 'bg-amber-500 text-neutral-950' : isPastOrToday ? 'text-neutral-700 cursor-not-allowed border border-neutral-800' : 'bg-neutral-950 border border-neutral-800 text-neutral-300 hover:bg-neutral-800'
+                  isSelected ? 'bg-amber-500 text-neutral-950' : isDisabled ? 'text-neutral-700 cursor-not-allowed border border-neutral-800' : 'bg-neutral-950 border border-neutral-800 text-neutral-300 hover:bg-neutral-800'
                 }`}
               >
                 {format(day, 'd')}
@@ -419,7 +479,6 @@ export function AdminEvents() {
   };
 
   const renderEventsGrid = () => {
-    // 🟢 Filter out Holidays from the main editable cards
     const customEvents = events.filter((e: any) => e.type !== 'Holiday');
     const holidays = events.filter((e: any) => e.type === 'Holiday');
 
@@ -433,32 +492,42 @@ export function AdminEvents() {
             const fileAttachments = attachments.filter(a => !isImage(a));
             
             const eventDates = ev.date ? ev.date.split(',') : [];
+            const sortedDates = [...eventDates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+            const lastDate = sortedDates[sortedDates.length - 1];
+            
+            const isPastEvent = lastDate ? isBefore(new Date(lastDate), todayStart) : false;
+
             const dateDisplay = eventDates.length > 1 
               ? `${new Date(eventDates[0]).toLocaleDateString()} (+${eventDates.length - 1} days)` 
               : eventDates.length === 1 ? new Date(eventDates[0]).toLocaleDateString() : 'No date';
 
             return (
-              <Card key={ev.id} className="bg-neutral-900 border-neutral-800 overflow-hidden flex flex-col">
+              <Card key={ev.id} className={`bg-neutral-900 border-neutral-800 overflow-hidden flex flex-col ${isPastEvent ? 'opacity-70' : ''}`}>
                 {imageAttachments.length > 0 && (
                   <div className="h-32 w-full overflow-hidden bg-neutral-950">
-                    <img src={imageAttachments[0]} alt={ev.title} className="w-full h-full object-cover opacity-80" />
+                    <img src={imageAttachments[0]} alt={ev.title} className={`w-full h-full object-cover opacity-80 ${isPastEvent ? 'grayscale' : ''}`} />
                   </div>
                 )}
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start gap-2">
-                    <CardTitle className="text-base text-neutral-200">{ev.title}</CardTitle>
+                    <CardTitle className={`text-base ${isPastEvent ? 'text-neutral-400' : 'text-neutral-200'}`}>{ev.title}</CardTitle>
                     <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
                       <span className="text-[10px] px-2 py-1 rounded-full whitespace-nowrap bg-neutral-800 text-neutral-400">{ev.type}</span>
                       {ev.slotsFull && <span className="text-[10px] bg-rose-900/50 text-rose-400 border border-rose-800/40 px-2 py-1 rounded-full font-bold whitespace-nowrap">FULL</span>}
                     </div>
                   </div>
-                  <CardDescription className="text-xs font-medium flex items-center gap-2 text-amber-500">
+                  <CardDescription className={`text-xs font-medium flex items-center gap-2 ${isPastEvent ? 'text-neutral-600' : 'text-amber-500'}`}>
                     <CalendarIcon size={12}/> {dateDisplay}
                     {ev.duration && <><span className="text-neutral-600">·</span><Clock size={12}/> {ev.duration}</>}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col justify-between">
                   <p className="text-sm text-neutral-400 mb-3 line-clamp-3">{ev.description}</p>
+
+                  <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800/60 mb-3 space-y-1.5 text-xs text-neutral-400">
+                    <div className="flex justify-between"><span>Online Bookings:</span><span className={ev.allowReservations !== false ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{ev.allowReservations !== false ? 'Enabled' : 'Disabled'}</span></div>
+                    <div className="flex justify-between"><span>Walk-Ins Setup:</span><span className="text-neutral-200 font-medium">{ev.caterWalkIns !== false ? `${ev.walkInTableCount} Tables Dedicated` : 'Blocked'}</span></div>
+                  </div>
 
                   {ev.maxParticipants && (
                     <div className="flex items-center gap-1.5 text-xs text-neutral-500 mb-2">
@@ -499,12 +568,18 @@ export function AdminEvents() {
                   )}
 
                   <div className="flex justify-end gap-2 mt-auto pt-4">
-                    <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-blue-400 hover:bg-blue-950/30" onClick={() => openEventEdit(ev)}>
-                      <Edit2 size={14} />
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30" onClick={() => deleteEvent(ev.id)}>
-                      <Trash2 size={14} />
-                    </Button>
+                    {!isPastEvent ? (
+                      <>
+                        <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-blue-400 hover:bg-blue-950/30" onClick={() => openEventEdit(ev)}>
+                          <Edit2 size={14} />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30" onClick={() => deleteEvent(ev.id)}>
+                          <Trash2 size={14} />
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold bg-neutral-950 border border-neutral-800 px-3 py-1.5 rounded-lg w-full text-center">Event Completed</span>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -518,7 +593,6 @@ export function AdminEvents() {
           )}
         </div>
 
-        {/* 🟢 NEW: Holidays Locked List View */}
         {holidays.length > 0 && (
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
             <h3 className="text-sm font-bold text-sky-400 mb-4 flex items-center gap-2">
@@ -688,18 +762,6 @@ export function AdminEvents() {
               );
             })()}
 
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
-              <h3 className="text-sm font-bold text-neutral-200 mb-4">Quick Actions</h3>
-              <div className="space-y-2 text-xs">
-                <button onClick={() => openEventCreate()} className="w-full flex items-center gap-2 px-3 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg transition-colors font-semibold">
-                  <Plus size={14} /> Create Event
-                </button>
-                <button onClick={() => openPromoCreate()} className="w-full flex items-center gap-2 px-3 py-2.5 bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/20 rounded-lg transition-colors font-semibold">
-                  <Plus size={14} /> Create Promo Code
-                </button>
-              </div>
-            </div>
-
             {/* Upcoming Agenda */}
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden flex flex-col max-h-[400px]">
               <div className="px-5 py-3 border-b border-neutral-800 bg-neutral-900/50">
@@ -715,15 +777,37 @@ export function AdminEvents() {
                     </div>
                   </div>
                 ))}
-                {closedDates.filter(c => !isBefore(new Date(c.date), todayStart)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5).map(c => (
+                {/* 🟢 FIX: Ensure c.date exists and is a valid Date object before processing */}
+                {closedDates
+                  .filter(c => c.type !== 'weekly' && c.date && !isNaN(new Date(c.date).getTime()) && !isBefore(new Date(c.date), todayStart))
+                  .sort((a,b)=>a.date.localeCompare(b.date))
+                  .slice(0,5)
+                  .map(c => (
                   <div key={c.id} className="flex gap-3">
                     <div className="w-1 bg-rose-500 rounded-full" />
-                    <div>
-                      <p className="text-xs font-semibold text-neutral-200">{format(new Date(c.date), 'MMM d, yyyy')}</p>
-                      <p className="text-[11px] text-rose-400 font-medium">Closed: {c.reason}</p>
+                    <div className="flex-1 flex justify-between items-start">
+                      <div>
+                        <p className="text-xs font-semibold text-neutral-200">{format(new Date(c.date), 'MMM d, yyyy')}</p>
+                        <p className="text-[11px] text-rose-400 font-medium">Closed: {c.reason}</p>
+                      </div>
+                      <button onClick={() => openClosureEdit(c)} className="text-neutral-500 hover:text-white"><Edit2 size={12}/></button>
                     </div>
                   </div>
                 ))}
+                {weeklyClosures.map(c => {
+                  const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][c.dayOfWeek || 0];
+                  return (
+                  <div key={c.id} className="flex gap-3">
+                    <div className="w-1 bg-rose-500 rounded-full" />
+                    <div className="flex-1 flex justify-between items-start">
+                      <div>
+                        <p className="text-xs font-semibold text-neutral-200">Every {dayName}</p>
+                        <p className="text-[11px] text-rose-400 font-medium">Closed: {c.reason}</p>
+                      </div>
+                      <button onClick={() => openClosureEdit(c)} className="text-neutral-500 hover:text-white"><Edit2 size={12}/></button>
+                    </div>
+                  </div>
+                )})}
                 {promoCodes.filter(p => p.expiresAt && !isBefore(new Date(p.expiresAt), todayStart)).sort((a:any,b:any)=>a.expiresAt!.localeCompare(b.expiresAt!)).slice(0,3).map(p => (
                   <div key={p.id} className="flex gap-3">
                     <div className="w-1 bg-violet-500 rounded-full" />
@@ -745,7 +829,7 @@ export function AdminEvents() {
 
       {/* ════ MODALS ════ */}
 
-      {/* 1. Day Action Modal (Clicking on Calendar) */}
+      {/* 1. Day Action Modal */}
       {dayActionDate && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl w-full max-w-sm overflow-hidden shadow-2xl">
@@ -755,13 +839,12 @@ export function AdminEvents() {
             </div>
             
             <div className="p-5 space-y-4">
-              {/* Show existing items on this day */}
               {(() => {
                 const key = dateKey(dayActionDate);
                 const dayEvs = eventsMap[key] || [];
                 const dayPrs = promosMap[key] || [];
-                const dayCls = closedMap.get(key);
-                const dayRes = resMap[key] || []; // Grab reservations for this day
+                const dayCls = closedMap.get(key) || weeklyClosures.find(c => c.dayOfWeek === dayActionDate.getDay());
+                const dayRes = resMap[key] || []; 
                 const hasItems = dayEvs.length || dayPrs.length || dayCls;
 
                 return (
@@ -780,7 +863,6 @@ export function AdminEvents() {
                             <span className={`font-semibold truncate pr-2 ${e.type === 'Holiday' ? 'text-sky-400' : 'text-amber-400'}`}>
                               {e.type === 'Holiday' ? '🏛️ Holiday: ' : 'Event: '} {e.title}
                             </span>
-                            {/* Disable edit if it's a holiday */}
                             {e.type !== 'Holiday' && (
                                <button onClick={() => openEventEdit(e)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
                             )}
@@ -795,7 +877,6 @@ export function AdminEvents() {
                       </div>
                     ) : null}
 
-                    {/* Customer Reservations List */}
                     {dayRes.length > 0 && (
                       <div className="space-y-2 mb-4 bg-neutral-900/50 rounded-lg p-3 border border-neutral-800">
                         <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">Customer Reservations ({dayRes.length})</p>
@@ -831,20 +912,50 @@ export function AdminEvents() {
               })()}
 
               <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold border-t border-neutral-800 pt-4 mt-2">Add New</p>
-              <div className="grid grid-cols-1 gap-2">
-                <button onClick={() => openEventCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-amber-500/10 border border-neutral-800 hover:border-amber-500/30 text-left transition-colors group">
-                  <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:bg-amber-500/20"><CalendarIcon size={14}/></div>
-                  <div><p className="text-xs font-bold text-neutral-200">Event</p><p className="text-[10px] text-neutral-500">Tournament, league, etc.</p></div>
-                </button>
-                <button onClick={() => openClosureCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-rose-500/10 border border-neutral-800 hover:border-rose-500/30 text-left transition-colors group">
-                  <div className="w-8 h-8 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500 group-hover:bg-rose-500/20"><AlertTriangle size={14}/></div>
-                  <div><p className="text-xs font-bold text-neutral-200">Mark Closed</p><p className="text-[10px] text-neutral-500">Stop reservations.</p></div>
-                </button>
-                <button onClick={() => openPromoCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-violet-500/10 border border-neutral-800 hover:border-violet-500/30 text-left transition-colors group">
-                  <div className="w-8 h-8 rounded-full bg-violet-500/10 flex items-center justify-center text-violet-500 group-hover:bg-violet-500/20"><Tag size={14}/></div>
-                  <div><p className="text-xs font-bold text-neutral-200">Promo Code</p><p className="text-[10px] text-neutral-500">Set start/expiry for this day.</p></div>
-                </button>
-              </div>
+              
+              {/* 🟢 NEW: Strict Security Rules for "Today" */}
+              {(() => {
+                const isActionToday = isSameDay(dayActionDate, new Date());
+                const isWeekend = dayActionDate.getDay() === 0 || dayActionDate.getDay() === 5 || dayActionDate.getDay() === 6;
+                const openTimeStr = isWeekend ? rates?.weekendStartTime || '12:00' : rates?.weekdayStartTime || '12:00';
+                const [openH, openM] = openTimeStr.split(':').map(Number);
+                const openTimeDate = new Date(dayActionDate);
+                openTimeDate.setHours(openH, openM, 0, 0);
+                const isPastOpenTime = new Date() >= openTimeDate;
+
+                return (
+                  <div className="grid grid-cols-1 gap-2">
+                    {/* Hide Standard Event Creation for Today */}
+                    {!isActionToday && (
+                      <button onClick={() => openEventCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-amber-500/10 border border-neutral-800 hover:border-amber-500/30 text-left transition-colors group">
+                        <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:bg-amber-500/20"><CalendarIcon size={14}/></div>
+                        <div><p className="text-xs font-bold text-neutral-200">Event</p><p className="text-[10px] text-neutral-500">Tournament, league, etc.</p></div>
+                      </button>
+                    )}
+
+                    {/* Standard Closure vs Emergency Closure */}
+                    {!isActionToday ? (
+                      <button onClick={() => openClosureCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-rose-500/10 border border-neutral-800 hover:border-rose-500/30 text-left transition-colors group">
+                        <div className="w-8 h-8 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500 group-hover:bg-rose-500/20"><AlertTriangle size={14}/></div>
+                        <div><p className="text-xs font-bold text-neutral-200">Mark Closed</p><p className="text-[10px] text-neutral-500">Stop reservations.</p></div>
+                      </button>
+                    ) : (
+                      <button onClick={() => openClosureCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-rose-950/30 hover:bg-rose-900/40 border border-rose-900/50 hover:border-rose-500/50 text-left transition-colors group">
+                        <div className="w-8 h-8 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-500 group-hover:bg-rose-500/30"><AlertTriangle size={14}/></div>
+                        <div>
+                          <p className="text-xs font-bold text-rose-400">Emergency Closure</p>
+                          <p className="text-[10px] text-rose-500/80">For unforeseen forecasts {isPastOpenTime ? '(Active)' : '(Pre-open)'}</p>
+                        </div>
+                      </button>
+                    )}
+
+                    <button onClick={() => openPromoCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-violet-500/10 border border-neutral-800 hover:border-violet-500/30 text-left transition-colors group">
+                      <div className="w-8 h-8 rounded-full bg-violet-500/10 flex items-center justify-center text-violet-500 group-hover:bg-violet-500/20"><Tag size={14}/></div>
+                      <div><p className="text-xs font-bold text-neutral-200">Promo Code</p><p className="text-[10px] text-neutral-500">Set start/expiry for this day.</p></div>
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -895,6 +1006,52 @@ export function AdminEvents() {
                       </div>
                     )}
                   </div>
+
+                  {/* Tournament Venue Takeover Dashboard */}
+                  {(eventForm.type === 'Tournament' || eventForm.type === 'League') && (
+                    <div className="bg-neutral-950 p-4 rounded-xl border border-amber-900/30 space-y-4">
+                       <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-1.5"><SlidersHorizontal size={12}/> Venue Allocation Setup</p>
+                       
+                       <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
+                         <div>
+                           <p className="text-xs font-semibold text-neutral-300">Allow Online Reservations</p>
+                           <p className="text-[10px] text-neutral-500">Uncheck to block out online bookings for the event duration</p>
+                         </div>
+                         <button type="button" onClick={() => setEventForm(f=>({...f, allowReservations: !f.allowReservations}))}>
+                           {eventForm.allowReservations ? <ToggleRight size={26} className="text-amber-500" /> : <ToggleLeft size={26} className="text-neutral-600" />}
+                         </button>
+                       </div>
+
+                       <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
+                         <div>
+                           <p className="text-xs font-semibold text-neutral-300">Cater to Walk-In Play</p>
+                           <p className="text-[10px] text-neutral-500">Reserve a portion of the arena for standard walk-ins</p>
+                         </div>
+                         <button type="button" onClick={() => setEventForm(f=>({...f, caterWalkIns: !f.caterWalkIns}))}>
+                           {eventForm.caterWalkIns ? <ToggleRight size={26} className="text-amber-500" /> : <ToggleLeft size={26} className="text-neutral-600" />}
+                         </button>
+                       </div>
+
+                       {eventForm.caterWalkIns && (
+                         <div className="space-y-2 animate-in fade-in duration-200">
+                           <div className="flex justify-between text-xs font-medium text-neutral-400">
+                             <span>Tables Allocated for Walk-Ins Only</span>
+                             <span className="text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">{eventForm.walkInTableCount} Tables</span>
+                           </div>
+                           <input 
+                             type="range" 
+                             min="1" 
+                             max={tables.length || 10} 
+                             value={eventForm.walkInTableCount} 
+                             onChange={(e) => setEventForm(f => ({ ...f, walkInTableCount: parseInt(e.target.value) }))}
+                             className="w-full accent-amber-500 h-1.5 bg-neutral-900 rounded-lg appearance-none cursor-pointer" 
+                           />
+                           <p className="text-[10px] text-neutral-600 italic">Remaining {(tables.length || 10) - eventForm.walkInTableCount} table(s) will automatically flag as dedicated for the event.</p>
+                         </div>
+                       )}
+                    </div>
+                  )}
+
                 </div>
 
                 {/* Right Column: Event Details */}
@@ -930,17 +1087,21 @@ export function AdminEvents() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className={`grid ${editingEventId ? 'grid-cols-2' : 'grid-cols-1'} gap-4`}>
                     <div>
-                      <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Users size={11} /> Max Participants</label>
+                      <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5">
+                        <Users size={11} /> Max Participants {(eventForm.type === 'Tournament' || eventForm.type === 'League') && <span className="text-rose-500">*</span>}
+                      </label>
                       <Input type="number" value={eventForm.maxParticipants} onChange={e => setEventForm({...eventForm, maxParticipants: e.target.value})} placeholder="e.g. 32" min="1" className="bg-neutral-950 border-neutral-800" />
                     </div>
-                    <div>
-                      <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Slots Status</label>
-                      <button type="button" onClick={() => setEventForm(prev => ({ ...prev, slotsFull: !prev.slotsFull }))} className={`flex items-center gap-2 w-full h-10 px-3 rounded-md border text-sm font-semibold transition-all ${eventForm.slotsFull ? 'bg-rose-950/40 border-rose-700/50 text-rose-400' : 'bg-neutral-950 border-neutral-800 text-neutral-500'}`}>
-                        {eventForm.slotsFull ? <ToggleRight size={18} className="text-rose-400" /> : <ToggleLeft size={18} />} {eventForm.slotsFull ? 'Slots Full' : 'Open'}
-                      </button>
-                    </div>
+                    {editingEventId && (
+                      <div>
+                        <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Slots Status</label>
+                        <button type="button" onClick={() => setEventForm(prev => ({ ...prev, slotsFull: !prev.slotsFull }))} className={`flex items-center gap-2 w-full h-10 px-3 rounded-md border text-sm font-semibold transition-all ${eventForm.slotsFull ? 'bg-rose-950/40 border-rose-700/50 text-rose-400' : 'bg-neutral-950 border-neutral-800 text-neutral-500'}`}>
+                          {eventForm.slotsFull ? <ToggleRight size={18} className="text-rose-400" /> : <ToggleLeft size={18} />} {eventForm.slotsFull ? 'Slots Full' : 'Open'}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -981,67 +1142,100 @@ export function AdminEvents() {
       {showClosureModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-rose-900/30 rounded-2xl w-full max-w-sm shadow-2xl">
-            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center">
-              <div>
-                <h2 className="text-base font-bold text-neutral-100">{editingClosureId ? 'Edit Closure' : 'Mark as Closed'}</h2>
-                <p className="text-xs text-neutral-500">{format(new Date(closureDateStr), 'EEEE, MMMM d, yyyy')}</p>
-              </div>
-              <button onClick={() => setShowClosureModal(false)} className="p-2 text-neutral-500 hover:text-white"><X size={16} /></button>
-            </div>
-            <form onSubmit={saveClosure} className="p-6 space-y-4">
-              
-              {/* Conflict Warning block */}
-              {(() => {
-                const conflicts = resMap[closureDateStr] || [];
-                if (conflicts.length > 0) {
-                  return (
-                    <div className="bg-rose-950/40 border border-rose-800/50 rounded-xl p-4 space-y-3 mb-2">
-                      <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
-                        <AlertTriangle size={16} />
-                        <span>{conflicts.length} Reservation{conflicts.length > 1 ? 's' : ''} Affected</span>
-                      </div>
-                      <p className="text-xs text-rose-300/80 leading-relaxed">
-                        Closing this date conflicts with active customer reservations. 
+            {(() => {
+              const isActionToday = isSameDay(new Date(closureDateStr), new Date());
+              return (
+                <>
+                  <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center">
+                    <div>
+                      <h2 className="text-base font-bold text-neutral-100">{editingClosureId ? 'Edit Closure' : isActionToday ? 'Emergency Closure' : 'Mark as Closed'}</h2>
+                      <p className="text-xs text-neutral-500">
+                        {closureForm.type === 'weekly' 
+                          ? `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][closureForm.dayOfWeek]}`
+                          : (closureDateStr && !isNaN(new Date(closureDateStr).getTime()) ? format(new Date(closureDateStr), 'EEEE, MMMM d, yyyy') : '')}
                       </p>
-                      <button 
-                        type="button" 
-                        className="w-full bg-neutral-900 border border-rose-800/40 hover:border-rose-600 hover:bg-neutral-800 text-neutral-200 text-xs py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 font-semibold"
-                      >
-                        <Mail size={13} className="text-rose-400" /> Email Customers to Reschedule
-                      </button>
                     </div>
-                  );
-                }
-                return null;
-              })()}
+                    <button onClick={() => setShowClosureModal(false)} className="p-2 text-neutral-500 hover:text-white"><X size={16} /></button>
+                  </div>
+                  <form onSubmit={saveClosure} className="p-6 space-y-4">
+                    
+                    {(() => {
+                      const conflicts = resMap[closureDateStr] || [];
+                      if (conflicts.length > 0) {
+                        return (
+                          <div className="bg-rose-950/40 border border-rose-800/50 rounded-xl p-4 space-y-3 mb-2">
+                            <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
+                              <AlertTriangle size={16} />
+                              <span>{conflicts.length} Reservation{conflicts.length > 1 ? 's' : ''} Affected</span>
+                            </div>
+                            <p className="text-xs text-rose-300/80 leading-relaxed">
+                              Closing this date conflicts with active customer reservations. 
+                            </p>
+                            <button   
+                              type="button" 
+                              className="w-full bg-neutral-900 border border-rose-800/40 hover:border-rose-600 hover:bg-neutral-800 text-neutral-200 text-xs py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 font-semibold"
+                            >
+                              <Mail size={13} className="text-rose-400" /> Email Customers to Reschedule
+                            </button>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
 
-              <div>
-                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Reason *</label>
-                <input type="text" value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder="e.g. Holiday, Private Event" />
-              </div>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <div className={`w-10 h-5 rounded-full relative transition-colors ${closureForm.isFullDay ? 'bg-rose-700' : 'bg-neutral-700'}`} onClick={() => setClosureForm(f=>({...f, isFullDay: !f.isFullDay}))}>
-                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${closureForm.isFullDay ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                </div>
-                <span className="text-xs text-neutral-300 font-medium">Full day closure</span>
-              </label>
-              {!closureForm.isFullDay && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Open Time</label>
-                    <input type="time" value={closureForm.openTime} onChange={e => setClosureForm(f=>({...f,openTime:e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Close Time</label>
-                    <input type="time" value={closureForm.closeTime} onChange={e => setClosureForm(f=>({...f,closeTime:e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" />
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowClosureModal(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
-                <button type="submit" className="flex-1 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold py-2.5 transition-colors">Save</button>
-              </div>
-            </form>
+                    {!isActionToday && (
+                      <div className="bg-neutral-900 p-1 rounded-lg flex mb-4 border border-neutral-800">
+                        <button type="button" onClick={() => setClosureForm(f => ({ ...f, type: 'specific' }))} className={`flex-1 text-xs py-1.5 rounded-md font-semibold transition-colors ${closureForm.type === 'specific' ? 'bg-rose-600 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>Specific Date</button>
+                        <button type="button" onClick={() => setClosureForm(f => ({ ...f, type: 'weekly' }))} className={`flex-1 text-xs py-1.5 rounded-md font-semibold transition-colors ${closureForm.type === 'weekly' ? 'bg-rose-600 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>Every {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(closureDateStr).getDay()]}</button>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Reason *</label>
+                      <input type="text" value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder={isActionToday ? "e.g. Bad Weather, Power Outage" : "e.g. Holiday, Private Event"} />
+                    </div>
+                    
+                    {!isActionToday && (
+                      <>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <div className={`w-10 h-5 rounded-full relative transition-colors ${closureForm.isFullDay ? 'bg-rose-700' : 'bg-neutral-700'}`} onClick={() => setClosureForm(f=>({...f, isFullDay: !f.isFullDay}))}>
+                            <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${closureForm.isFullDay ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                          </div>
+                          <span className="text-xs text-neutral-300 font-medium">Full day closure</span>
+                        </label>
+                        {!closureForm.isFullDay && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Open Time</label>
+                              <input type="time" value={closureForm.openTime} onChange={e => setClosureForm(f=>({...f,openTime:e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Close Time</label>
+                              <input type="time" value={closureForm.closeTime} onChange={e => setClosureForm(f=>({...f,closeTime:e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" />
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {isActionToday && (
+                       <div className="bg-rose-950/20 border border-rose-900/40 p-3 rounded-lg flex items-start gap-2">
+                          <AlertTriangle size={14} className="text-rose-500 flex-shrink-0 mt-0.5" />
+                          <p className="text-[10px] text-rose-400 leading-relaxed">This emergency closure will instantly block all online reservations for the remainder of the day.</p>
+                       </div>
+                    )}
+
+                    <div className="flex gap-2 pt-2">
+                      {editingClosureId && (
+                        <button type="button" onClick={() => { removeClosedDate(editingClosureId); setShowClosureModal(false); flash('Closure deleted.'); }} className="px-3 py-2.5 bg-rose-950/40 hover:bg-rose-900/50 text-rose-400 border border-rose-800/50 text-sm rounded-xl transition-colors"><Trash2 size={16} /></button>
+                      )}
+                      <button type="button" onClick={() => setShowClosureModal(false)} className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
+                      <button type="submit" className="flex-[2] bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold py-2.5 transition-colors">Save</button>
+                    </div>
+                  </form>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1064,7 +1258,6 @@ export function AdminEvents() {
                 <button type="button" onClick={() => setPromoForm(f=>({...f, code: generateRandomPromoCode()}))} className="px-3 bg-violet-600/20 text-violet-400 rounded-lg hover:bg-violet-600/30"><Wand2 size={15} /></button>
               </div>
 
-              {/* 🟢 NEW: High percentage limit & color change */}
               <div>
                 <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex justify-between">
                   <span>Discount Percentage *</span>
@@ -1106,7 +1299,6 @@ export function AdminEvents() {
                 )}
               </div>
 
-              {/* 🟢 NEW: Start Date Linkage */}
               <div className="space-y-4 p-4 rounded-xl border border-neutral-800 bg-neutral-900/50">
                 <div>
                   <label className="flex items-center gap-3 cursor-pointer mb-2">

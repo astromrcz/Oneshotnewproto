@@ -20,9 +20,10 @@ type CustomerSource =
   | { kind: 'reservation'; id: string; name: string; partySize: number; contact: string; durationHours: number; timeSlot: string };
 
 export function Tables() {
-  const { 
+ const { 
     tables, queue, reservations, assignTable, extendSession, freeTable, 
-    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile, rates, reservationTerms
+    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile, rates, reservationTerms,
+    addSessionHistory, addActivity, addWatchlistItem // 🟢 Added these
   } = useAppContext() as any;
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
@@ -238,8 +239,79 @@ export function Tables() {
     setPaymentOption('payNow');
   };
 
-  const handleConfirmEnd = () => {
-    if (!endingTableId || !endInfo) return;
+const handleConfirmEnd = () => {
+    if (!endingTableId || !endInfo || !endingTable?.session) return;
+    
+    // Calculate exact payments for this checkout
+    const partialPaid = parseFloat(endPartialAmount) || 0;
+    const totalPaidNow = endPayStatus === 'paid' ? endInfo.balance : endPayStatus === 'partial' ? partialPaid : 0;
+    const remainingBalance = endInfo.balance - totalPaidNow;
+
+    // 🟢 NEW: Auto-add to watchlist if there is an unpaid debt
+    if (remainingBalance > 0 && addWatchlistItem) {
+      const targetName = debtName || endingTable.session.customerName;
+      addWatchlistItem({
+        name: targetName,
+        reason: 'debt',
+        description: `Unpaid balance of ${formatPHP(remainingBalance)} from table session (${endingTable.name}). ${debtContact ? `Contact details provided: ${debtContact}` : ''}`,
+        status: 'active',
+        dateAdded: new Date()
+      });
+      if (addActivity) {
+        addActivity('admin_action', `Automatically added ${targetName} to Watchlist for unpaid debt of ${formatPHP(remainingBalance)}.`);
+      }
+    }
+
+    // Log the session to history before freeing the table
+    addSessionHistory({
+      customerName: endingTable.session.customerName,
+      tableId: endingTable.id,
+      tableName: endingTable.name,
+      startTime: endingTable.session.startTime,
+      endTime: new Date(),
+      durationMinutes: endInfo.elapsedMins,
+      totalAmount: endInfo.totalDue,
+      amountPaid: endInfo.alreadyPaid + totalPaidNow,
+      orders: endingTable.session.orders || []
+    });
+
+    freeTable(endingTableId);
+    setEndingTableId(null);
+  };
+
+  // 🟢 NEW: Walkout / Absconded Handler
+  const handleWalkout = () => {
+    if (!endingTableId || !endInfo || !endingTable?.session) return;
+    const customer = endingTable.session.customerName;
+    
+    // Log session history as unpaid
+    addSessionHistory({
+      customerName: customer,
+      tableId: endingTable.id,
+      tableName: endingTable.name,
+      startTime: endingTable.session.startTime,
+      endTime: new Date(),
+      durationMinutes: endInfo.elapsedMins,
+      totalAmount: endInfo.totalDue,
+      amountPaid: endInfo.alreadyPaid, // 0 new payment
+      orders: endingTable.session.orders || []
+    });
+
+    // Automatically push to Security Watchlist
+    if (addWatchlistItem) {
+      addWatchlistItem({
+        name: customer,
+        reason: 'theft',
+        description: `Customer walked out without paying balance of ${formatPHP(endInfo.balance)} at ${endingTable.name}.`,
+        status: 'active',
+        dateAdded: new Date()
+      });
+    }
+
+    if (addActivity) {
+      addActivity('admin_action', `ALERT: Customer ${customer} walked out without paying ${formatPHP(endInfo.balance)} at ${endingTable.name}. Added to Watchlist.`);
+    }
+
     freeTable(endingTableId);
     setEndingTableId(null);
   };
@@ -370,6 +442,22 @@ export function Tables() {
 
   const availableDurations = getAvailableDurations();
 
+  const isOpenTimeDisabled = (() => {
+    const now = new Date();
+    const isWeekend = now.getDay() === 5 || now.getDay() === 6; 
+    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    if (!closeTimeStr) return false;
+    
+    const [hr, min] = closeTimeStr.split(':').map(Number);
+    const closeDate = new Date(now);
+    closeDate.setHours(hr, min, 0, 0);
+    if (hr <= 12 && now.getHours() >= 12) closeDate.setDate(closeDate.getDate() + 1);
+    
+    const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
+    const cutoff = rates?.bookingCutoffMinutes || 60;
+    return minsLeft <= cutoff;
+  })();
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const assignCustomer = sessionStorage.getItem('assignCustomer');
@@ -418,8 +506,7 @@ export function Tables() {
             { label: 'Available',   value: available,   color: 'text-emerald-400' },
             { label: 'Occupied',    value: occupied,    color: 'text-rose-400' },
             { label: 'Reserved',    value: reserved,    color: 'text-amber-400' },
-            // 🟢 FIX: Replaced Maintenance with In Queue
-            { label: 'In Queue',    value: waitingCustomers.length, color: 'text-purple-400' }, 
+            { label: 'Maintenance', value: maintenance, color: 'text-orange-400' },
           ].map(s => (
             <div key={s.label} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center">
               <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
@@ -858,7 +945,9 @@ export function Tables() {
                     {availableDurations.map(d => (
                       <option key={d} value={d}>{d / 60} Hour{d / 60 > 1 ? 's' : ''}</option>
                     ))}
-                    <option value="open">Open Time</option>
+                    <option value="open" disabled={isOpenTimeDisabled}>
+                      Open Time {isOpenTimeDisabled ? '(Disabled near cut-off)' : ''}
+                    </option>
                   </select>
                 </div>
 
@@ -1053,7 +1142,6 @@ export function Tables() {
             <form onSubmit={handleConfirmExtend} className="overflow-y-auto flex-1 p-6 space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Extra Time</label>
-                {/* 🟢 NEW: Clean Dropdown for Extend Session */}
                 <select 
                   value={extendMinutes}
                   onChange={e => setExtendMinutes(Number(e.target.value))}
@@ -1100,10 +1188,39 @@ export function Tables() {
                 </div>
               )}
 
-              <div className="flex gap-3">
-                <button type="button" onClick={() => setExtendingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 text-neutral-300 text-sm rounded-xl">Cancel</button>
-                <button type="submit" className="flex-1 px-4 py-2.5 bg-amber-600 text-white text-sm rounded-xl font-semibold shadow-lg"><Zap size={15} className="inline mr-1" /> Confirm</button>
-              </div>
+              {/* 🟢 NEW: Dynamic Action Buttons & Validation */}
+              {(() => {
+                let canExtend = true;
+                
+                if (extendPayStatus === 'paid') {
+                  if (extendPayMethod === 'cash') canExtend = !!extendCashTendered && parseFloat(extendCashTendered) >= extendCharge;
+                  if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length === 13;
+                } else if (extendPayStatus === 'partial') {
+                  const partial = parseFloat(extendPartialAmount) || 0;
+                  if (partial <= 0) canExtend = false;
+                  else if (extendPayMethod === 'cash') canExtend = !!extendCashTendered && parseFloat(extendCashTendered) >= partial;
+                  else if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length === 13;
+                }
+
+                return (
+                  <div className="flex gap-3 pt-2">
+                    <button type="button" onClick={() => setExtendingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit" 
+                      disabled={!canExtend}
+                      className={`flex-1 px-4 py-2.5 text-sm rounded-xl font-semibold transition-all flex items-center justify-center ${
+                        canExtend 
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-900/30' 
+                          : 'bg-neutral-800 text-neutral-500 cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      <Zap size={15} className="inline mr-1.5" /> Confirm
+                    </button>
+                  </div>
+                );
+              })()}
             </form>
           </div>
         </div>

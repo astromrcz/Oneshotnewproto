@@ -97,7 +97,7 @@ export function ActivityLog() {
       {/* ── Filters Header ── */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-neutral-950 p-6 rounded-2xl border border-neutral-800">
         <div>
-          <h2 className="text-2xl font-black text-white">System Activity</h2>
+          <h2 className="text-2xl font-black text-white">Activity Log History</h2>
           <p className="text-sm text-neutral-500 mt-1">Audit log for all staff and system actions.</p>
         </div>
         

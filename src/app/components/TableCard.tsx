@@ -14,7 +14,12 @@ interface TableCardProps {
 
 export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReservation }: TableCardProps) {
   const [now, setNow] = useState(new Date());
+  const isEvent = table.status === 'event';
 
+  const backgroundCls = isEvent 
+    ? 'bg-purple-950/40 border-purple-800/50 text-purple-400 opacity-90' 
+    : '...';
+    
   // Update timer every second if the table is occupied
   useEffect(() => {
     if (table.status !== 'occupied') return;

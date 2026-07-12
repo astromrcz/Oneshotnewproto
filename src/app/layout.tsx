@@ -5,7 +5,7 @@ import {
   Tag, Shield, Palette,
   Menu, X, Bell, ChevronRight,
   Circle, LogOut, Settings,
-  Monitor, ShieldCheck, Lock
+  Monitor, ShieldCheck, Lock, ShieldAlert, Package, History
 } from 'lucide-react';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
@@ -17,6 +17,9 @@ const navItems = [
   { to: '/staff/reservations',        icon: Calendar,    label: 'Reservations' },
   { to: '/staff/queue',               icon: UserPlus,    label: 'Queue' },
   { to: '/staff/promo-codes',         icon: Tag,         label: 'Promo Codes' },
+  { to: '/staff/history',             icon: History,     label: 'Session History' }, // 🟢 NEW
+  { to: '/staff/lost-found',          icon: Package,     label: 'Lost & Found' },
+  { to: '/staff/watchlist',           icon: ShieldAlert, label: 'Security Watchlist' },
   { to: '/staff/settings',            icon: Settings,    label: 'Settings' },
 ];
 
@@ -25,7 +28,10 @@ const pageTitles: Record<string, string> = {
   '/staff/tables': 'Table Monitor',
   '/staff/reservations': 'Reservations',
   '/staff/queue': 'Queue Management',
+  '/staff/lost-found': 'Lost & Found',       
+  '/staff/watchlist': 'Security Watchlist',
   '/staff/promo-codes': 'Promo Codes',
+  '/staff/history': 'Session History',
   '/staff/settings': 'Settings',
 };
 

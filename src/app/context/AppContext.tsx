@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode, useCallback 
 import { toast } from 'sonner';
 
 // ── Types ──────────────────────────────────────────────────────
-export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
+export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
 
 export type SessionOrder = {
   id: string;
@@ -10,12 +10,15 @@ export type SessionOrder = {
   price: number;
   qty: number;
 };
+export type SessionHistoryItem = {
+  id: string; customerName: string; tableId: string; tableName: string; startTime: Date; endTime: Date; durationMinutes: number; totalAmount: number; amountPaid: number; orders: SessionOrder[];
+};
 
 export type Session = {
   customerName: string;
   startTime: Date;
-  durationMinutes: number | null; // Null means "Open Time"
-  isOpenTime: boolean; // Flag to track if it's pay-as-you-go
+  durationMinutes: number | null; 
+  isOpenTime: boolean; 
   isPaid: boolean;
   hourlyRate: number;
   amountPaid: number;
@@ -32,63 +35,29 @@ export type Table = {
   isActive: boolean;
   maintenanceReason?: string;
 };
+export type LostItem = {
+  id: string; itemName: string; description: string; foundDate: Date; status: 'found' | 'claimed'; image?: string; claimedBy?: string; claimedDate?: Date; isArchived?: boolean;
+};
+export type WatchlistItem = {
+  id: string; name: string; reason: 'debt' | 'theft' | 'banned' | 'other'; description: string; status: 'active' | 'resolved'; evidenceLink?: string; dateAdded: Date; resolvedDate?: Date; isArchived?: boolean;
+};
 
 export type InventoryItem = {
-  id: string;
-  name: string;
-  category: string;
-  price: number;
-  stock: number;
-  isActive: boolean;
+  id: string; name: string; category: string; price: number; stock: number; isActive: boolean;
 };
 
 export type QueueItem = {
-  id: string;
-  customerName: string;
-  contactNumber: string;
-  partySize: number;
-  arrivalTime: Date;
-  notes?: string;
-  status: 'waiting' | 'called' | 'seated';
-  queueNumber: number;
-  prioritySource?: 'reservation';
+  id: string; customerName: string; contactNumber: string; partySize: number; arrivalTime: Date; notes?: string; status: 'waiting' | 'called' | 'seated'; queueNumber: number; prioritySource?: 'reservation';
 };
 
 export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'completed' | 'cancelled';
 
 export type Reservation = {
-  id: string;
-  customerName: string;
-  contactNumber: string;
-  email?: string;
-  date: Date;
-  timeSlot: string;
-  durationHours: number;
-  partySize: number;
-  tableId?: string;
-  status: ReservationStatus;
-  totalAmount: number;
-  downPaymentAmount: number;
-  downPaymentPaid: boolean;
-  balancePaid: boolean;
-  createdAt: Date;
-  cancellationReason?: string;
-  promoCode?: string;
-  discountAmount?: number;
-  paymentRef?: string;
-  receiptImg?: string;
+  id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
 };
 
 export type Feedback = {
-  id: string;
-  customerName: string;
-  contactInfo?: string;
-  rating: number;
-  feedbackType?: 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other';
-  comment: string;
-  date: Date;
-  reservationId?: string;
-  tags: string[];
+  id: string; customerName: string; contactInfo?: string; rating: number; feedbackType?: 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other'; comment: string; date: Date; reservationId?: string; tags: string[];
 };
 
 export type ActivityType =
@@ -99,136 +68,53 @@ export type ActivityType =
   | 'admin_action' | 'tako_action' | 'pos_order';
 
 export type Activity = {
-  id: string;
-  type: ActivityType;
-  description: string;
-  timestamp: Date;
-  metadata?: Record<string, any>;
+  id: string; type: ActivityType; description: string; timestamp: Date; metadata?: Record<string, any>;
 };
 
 export type PromoCode = {
-  id: string;
-  code: string;
-  discountPercent: number;
-  description: string;
-  isActive: boolean;
-  maxUsage: number;
-  usageCount: number;
-  startDate?: Date;
-  expiresAt?: Date;
-  createdAt: Date;
+  id: string; code: string; discountPercent: number; description: string; isActive: boolean; maxUsage: number; usageCount: number; startDate?: Date; expiresAt?: Date; createdAt: Date;
 };
 
 export type Event = {
-  id: string;
-  title: string;
-  date: string;
-  type: string;
-  description: string;
-  registrationLink?: string;
-  maxParticipants?: number;
-  slotsFull?: boolean;
-  attachments?: string[];
-  promoCodeId?: string;
+  id: string; title: string; date: string; type: string; description: string; registrationLink?: string; maxParticipants?: number; slotsFull?: boolean; attachments?: string[]; promoCodeId?: string;
+  allowReservations?: boolean;
+  caterWalkIns?: boolean;
+  walkInTableCount?: number;
 };
 
 export type StaffProfile = {
-  username: string;
-  password: string;
-  fullName: string;
-  email: string;
-  role: string;
-  phone: string;
-  joinedDate: string;
-  avatarImg?: string;
+  username: string; password: string; fullName: string; email: string; role: string; phone: string; joinedDate: string; avatarImg?: string;
 };
 
 export type StaffUser = {
-  id: string;
-  username: string;
-  password: string;
-  fullName: string;
-  email: string;
-  role: 'manager' | 'cashier';
-  isAdmin: boolean;
-  phone: string;
-  isActive: boolean;
-  createdAt: Date;
+  id: string; username: string; password: string; fullName: string; email: string; role: 'manager' | 'cashier'; isAdmin: boolean; phone: string; isActive: boolean; createdAt: Date;
 };
 
 export type RatesConfig = {
-  // Base Settings
-  hourlyRate: number;
-  overtimeRate: number;
-  downPaymentPercent: number;
-
-  // Weekday Settings
-  bookingCutoffMinutes: number;
-  weekdayStartTime: string;
-  weekdayEndTime: string;
-  isWeekdayHappyHourActive: boolean;
-  weekdayHappyHourRate: number;
-  weekdayHappyHourStart: string;
-  weekdayHappyHourEnd: string;
-  weekdayOnlineCapacityLimit: number;
-
-  // Weekend Settings
-  weekendStartTime: string;
-  weekendEndTime: string;
-  isWeekendHappyHourActive: boolean;
-  weekendHappyHourRate: number;
-  weekendHappyHourStart: string;
-  weekendHappyHourEnd: string;
-  weekendOnlineCapacityLimit: number;
+  hourlyRate: number; overtimeRate: number; downPaymentPercent: number;
+  bookingCutoffMinutes: number; weekdayStartTime: string; weekdayEndTime: string; isWeekdayHappyHourActive: boolean; weekdayHappyHourRate: number; weekdayHappyHourStart: string; weekdayHappyHourEnd: string; weekdayOnlineCapacityLimit: number;
+  weekendStartTime: string; weekendEndTime: string; isWeekendHappyHourActive: boolean; weekendHappyHourRate: number; weekendHappyHourStart: string; weekendHappyHourEnd: string; weekendOnlineCapacityLimit: number;
 };
 
 export type ReservationTerms = {
-  // General Terms
-  minHours: number;
-  maxHours: number;
-  cancellationHours: number;
-  advanceBookingHours: number;
-  cancellationPolicy: string;
-  termsAndConditions: string;
-
-  // Weekday Constraints
-  weekdayMinPartySize: number;
-  weekdayMaxPartySize: number;
-
-  // Weekend Constraints
-  weekendMinPartySize: number;
-  weekendMaxPartySize: number;
+  minHours: number; maxHours: number; cancellationHours: number; advanceBookingHours: number; cancellationPolicy: string; termsAndConditions: string;
+  weekdayMinPartySize: number; weekdayMaxPartySize: number;
+  weekendMinPartySize: number; weekendMaxPartySize: number;
 };
 
 export type AnnouncementType = 'info' | 'warning' | 'promo' | 'event';
 export type Announcement = {
-  id: string;
-  title: string;
-  content: string;
-  type: AnnouncementType;
-  isActive: boolean;
-  createdAt: Date;
-  expiresAt?: Date;
+  id: string; title: string; content: string; type: AnnouncementType; isActive: boolean; createdAt: Date; expiresAt?: Date;
 };
 
 export type ClosedDate = {
-  id: string;
-  date: string; 
-  reason: string;
-  isFullDay: boolean;
-  openTime?: string;
-  closeTime?: string;
+  id: string; date: string; reason: string; isFullDay: boolean; openTime?: string; closeTime?: string; type?: 'specific' | 'weekly'; dayOfWeek?: number; 
 };
 
 export type WeatherData = {
-  temp: number;
-  condition: string;
-  isRaining: boolean;
-  code: number;
-  locationName: string;
+  temp: number; condition: string; isRaining: boolean; code: number; locationName: string;
 };
 
-// Zeroed out but kept to prevent breaking imports
 export const HOURLY_RATE = 0;
 export const DOWN_PAYMENT_RATE = 0;
 
@@ -237,13 +123,12 @@ export const generateRandomPromoCode = () => {
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 };
 
-// ── Context Type ───────────────────────────────────────────────
 type AppContextType = {
   tables: Table[]; queue: QueueItem[]; reservations: Reservation[]; feedback: Feedback[]; activities: Activity[]; promoCodes: PromoCode[]; staffUsers: StaffUser[]; inventory: InventoryItem[]; rates: RatesConfig; reservationTerms: ReservationTerms; announcements: Announcement[]; closedDates: ClosedDate[]; weather: WeatherData | null; updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => boolean; staffLogout: () => void; adminLogin: (u: string, p: string) => boolean; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
-  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; setTableMaintenance: (id: string, reason: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
   addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
@@ -252,9 +137,17 @@ type AppContextType = {
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => void; toggleStaffUserActive: (id: string) => void;
   updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
-  siteConfig: any;
-  updateSiteConfig: (config: any) => void;
-  refreshLiveMonitor: () => void;
+  siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
+  lostItems: LostItem[];
+  addLostItem: (i: Omit<LostItem, 'id'>) => void;
+  updateLostItem: (id: string, u: Partial<LostItem>) => void;
+  deleteLostItem: (id: string) => void;
+  watchlist: WatchlistItem[];
+  addWatchlistItem: (i: Omit<WatchlistItem, 'id'>) => void;
+  updateWatchlistItem: (id: string, u: Partial<WatchlistItem>) => void;
+  deleteWatchlistItem: (id: string) => void;
+  sessionHistory: SessionHistoryItem[];
+  addSessionHistory: (i: Omit<SessionHistoryItem, 'id'>) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -268,89 +161,56 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
-  
-  // Safe fallbacks for UI while loading
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
-  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([
-    { id: 'u1', username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'manager', isAdmin: true, phone: '09171234567', isActive: true, createdAt: new Date() }
-  ]);
-  
-  const [rates, setRates] = useState<RatesConfig>({ 
-    hourlyRate: 0, overtimeRate: 0, downPaymentPercent: 0,
-    weekdayStartTime: '', weekdayEndTime: '',
-    isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0,
-    weekendStartTime: '', weekendEndTime: '',
-    isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0,   bookingCutoffMinutes: 60,    weekdayStartTime: '',
-  });
-  
-  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ 
-    minHours: 0, maxHours: 0, cancellationHours: 0, advanceBookingHours: 1, // 🟢 NEW
-    cancellationPolicy: '', termsAndConditions: '',
-    weekdayMinPartySize: 0, weekdayMaxPartySize: 0,
-    weekendMinPartySize: 0, weekendMaxPartySize: 0
-  });
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
+  const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 0, overtimeRate: 0, downPaymentPercent: 0, weekdayStartTime: '', weekdayEndTime: '', isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0, weekendStartTime: '', weekendEndTime: '', isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0, bookingCutoffMinutes: 60 });
+  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 0, maxHours: 0, cancellationHours: 0, advanceBookingHours: 1, cancellationPolicy: '', termsAndConditions: '', weekdayMinPartySize: 0, weekdayMaxPartySize: 0, weekendMinPartySize: 0, weekendMaxPartySize: 0 });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
-  
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [weatherConfig, setWeatherConfig] = useState({ lat: '', lon: '', name: '' });
-
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
-  
   const [staffLoggedIn, setStaffLoggedIn] = useState(false);
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [staffProfile, setStaffProfile] = useState<StaffProfile>({ username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15' });
   const [siteConfig, setSiteConfig] = useState<any>(null);
-  const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => {
-    setWeatherConfig({ lat, lon, name });
-  }, []);
+  const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
+  const [lostItems, setLostItems] = useState<LostItem[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
 
-  // 🟢 SILENT BACKGROUND REFRESH (Zero Online Egress)
   const refreshLiveMonitor = async () => {
     try {
-      const [tablesRes, queueRes] = await Promise.all([
-        fetch('http://localhost:3001/api/tables').catch(() => null),
-        fetch('http://localhost:3001/api/queue').catch(() => null),
-      ]);
-
-      if (tablesRes && tablesRes.ok) {
-        const newTables = await tablesRes.json();
-        setTables(prev => JSON.stringify(prev) !== JSON.stringify(newTables) ? newTables : prev);
-      }
-      
-      if (queueRes && queueRes.ok) {
-        const newQueue = await queueRes.json();
-        setQueue(prev => JSON.stringify(prev) !== JSON.stringify(newQueue) ? newQueue : prev);
-      }
-    } catch (error) {
-      // Fail silently - it will just try again on the next tick
-    }
+      const [tablesRes, queueRes] = await Promise.all([ fetch('http://localhost:3001/api/tables').catch(() => null), fetch('http://localhost:3001/api/queue').catch(() => null) ]);
+      if (tablesRes && tablesRes.ok) { const newTables = await tablesRes.json(); setTables(prev => JSON.stringify(prev) !== JSON.stringify(newTables) ? newTables : prev); }
+      if (queueRes && queueRes.ok) { const newQueue = await queueRes.json(); setQueue(prev => JSON.stringify(prev) !== JSON.stringify(newQueue) ? newQueue : prev); }
+    } catch (error) {}
   };
 
-  // 🟢 FETCH LOCAL DATABASE ON MOUNT
   useEffect(() => {
     const fetchLocalDatabase = async () => {
-      console.log("📡 Attempting to fetch data from localhost:3001...");
       try {
-        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, activitiesRes, staffRes] = await Promise.all([
-          fetch('http://localhost:3001/api/tables').catch(e => { console.error("Table fetch failed:", e); return null; }),
-          fetch('http://localhost:3001/api/reservations').catch(() => null),
-          fetch('http://localhost:3001/api/inventory').catch(() => null),
-          fetch('http://localhost:3001/api/queue').catch(() => null),
-          fetch('http://localhost:3001/api/settings/rates').catch(() => null),
-          fetch('http://localhost:3001/api/feedback').catch(() => null),
-          fetch('http://localhost:3001/api/announcements').catch(() => null),
-          fetch('http://localhost:3001/api/cms').catch(() => null),
-          fetch('http://localhost:3001/api/closed-dates').catch(() => null),
+        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, activitiesRes, staffRes, lostRes, watchlistRes, sessionHistoryRes] = await Promise.all([
+          fetch('http://localhost:3001/api/tables').catch(() => null), 
+          fetch('http://localhost:3001/api/reservations').catch(() => null), 
+          fetch('http://localhost:3001/api/inventory').catch(() => null), 
+          fetch('http://localhost:3001/api/queue').catch(() => null), 
+          fetch('http://localhost:3001/api/settings/rates').catch(() => null), 
+          fetch('http://localhost:3001/api/feedback').catch(() => null), 
+          fetch('http://localhost:3001/api/announcements').catch(() => null), 
+          fetch('http://localhost:3001/api/cms').catch(() => null), 
+          fetch('http://localhost:3001/api/closed-dates').catch(() => null), 
           fetch('http://localhost:3001/api/promo-codes').catch(() => null), 
-          fetch('http://localhost:3001/api/events').catch(() => null),
-          fetch('http://localhost:3001/api/activities').catch(() => null),
-          fetch('http://localhost:3001/api/staff').catch(() => null),
+          fetch('http://localhost:3001/api/events').catch(() => null), 
+          fetch('http://localhost:3001/api/activities').catch(() => null), 
+          fetch('http://localhost:3001/api/staff').catch(() => null), 
+          fetch('http://localhost:3001/api/lost-and-found').catch(() => null),
+          fetch('http://localhost:3001/api/watchlist').catch(() => null),
+          fetch('http://localhost:3001/api/session-history').catch(() => null),
         ]);
-
         if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
         if (resRes && resRes.ok) setReservations(await resRes.json());
         if (invRes && invRes.ok) setInventory(await invRes.json());
@@ -362,7 +222,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
         if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
         if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
-        
+        if (arguments[13] && arguments[13].ok) setLostItems(await arguments[13].json());
+        if (arguments[14] && arguments[14].ok) setWatchlist(await arguments[14].json());
+        if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
+        if (watchlistRes && watchlistRes.ok) setWatchlist(await watchlistRes.json());
+        if (sessionHistoryRes && sessionHistoryRes.ok) setSessionHistory(await sessionHistoryRes.json());
         if (eventsRes && eventsRes.ok) {
           const dbEvents = await eventsRes.json();
           setEvents(prev => {
@@ -371,25 +235,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return [...prev, ...newEvents];
           });
         }
-        
         if (ratesRes && ratesRes.ok) {
-        const dbSettings = await ratesRes.json();
-        setRates(prev => ({ ...prev, ...dbSettings }));
-        setReservationTerms(prev => ({ ...prev, ...dbSettings }));
-      }
-        
-        console.log("✅ Local SQLite database successfully synchronized to state.");
-      } catch (err) {
-        console.error("❌ Failed to connect to local SQLite Edge Server.", err);
-      } finally {
-        setTimeout(() => setIsInitializing(false), 800);
-      }
+          const dbSettings = await ratesRes.json();
+          setRates(prev => ({ ...prev, ...dbSettings }));
+          setReservationTerms(prev => ({ ...prev, ...dbSettings }));
+        }
+      } catch (err) { } finally { setTimeout(() => setIsInitializing(false), 800); }
     };
-
     fetchLocalDatabase();
   }, []);
 
-  // Fetch Weather
   useEffect(() => {
     const fetchWeather = async () => {
       if (!weatherConfig.lat || !weatherConfig.lon) return;
@@ -397,26 +252,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${weatherConfig.lat}&longitude=${weatherConfig.lon}&current=temperature_2m,weather_code&timezone=Asia%2FManila`);
         if (!res.ok) return;
         const data = await res.json();
-        
         const code = data.current.weather_code;
         const temp = data.current.temperature_2m;
         const isRaining = code >= 50; 
-        
         let condition = "Clear";
         if (code >= 1 && code <= 3) condition = "Cloudy";
         if (code >= 50 && code <= 69) condition = "Raining";
         if (code >= 80 && code <= 82) condition = "Heavy Rain";
         if (code >= 95) condition = "Thunderstorm";
-
         setWeather({ temp, condition, isRaining, code, locationName: weatherConfig.name });
-      } catch (err) {
-        console.error("Weather API failed:", err);
-      }
+      } catch (err) { }
     };
     fetchWeather();
   }, [weatherConfig]);
 
-  // Fetch Philippine Holidays
   useEffect(() => {
     const fetchHolidays = async () => {
       try {
@@ -424,73 +273,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${currentYear}/PH`);
         if (!res.ok) return;
         const data = await res.json();
-        
         const fetchedHolidays: Event[] = data.map((item: any) => ({
-          id: `hol_${item.date}`,
-          title: item.name,
-          date: item.date,
-          type: 'Holiday',
-          description: `Nationwide Public Holiday. ML predicts high walk-in traffic and extended play duration.`,
+          id: `hol_${item.date}`, title: item.name, date: item.date, type: 'Holiday', description: `Nationwide Public Holiday. ML predicts high walk-in traffic and extended play duration.`,
         }));
-
         setEvents(prev => {
           const existingIds = new Set(prev.map(e => e.id));
           const newHolidays = fetchedHolidays.filter(h => !existingIds.has(h.id));
           return [...prev, ...newHolidays];
         });
-      } catch (err) {
-        console.error("Holiday API failed:", err);
-      }
+      } catch (err) {}
     };
     fetchHolidays();
   }, []);
 
   const syncToDB = async (endpoint: string, method: 'POST' | 'PUT' | 'DELETE', payload: any, successMsg: string) => {
     try {
-      const res = await fetch(`http://localhost:3001${endpoint}`, {
-        method: method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const res = await fetch(`http://localhost:3001${endpoint}`, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const text = await res.text();
       let json: any = null;
       try { json = text ? JSON.parse(text) : null; } catch (e) { json = text; }
-      if (res.ok) {
-        console.log(`💾 [DB SAVED]: ${successMsg} fully inputted into SQLite Database.`);
-        return json;
-      } else {
-        console.error(`❌ [DB ERROR]: Failed to save ${endpoint}`, text);
-        toast.error("Database sync failed. Check server.js");
-        throw new Error(`DB error: ${res.status} ${text}`);
-      }
-    } catch (e) {
-      console.error("Network error. Is server.js running?", e);
-      toast.error("Offline Mode: Changes saved to RAM, but database server is unreachable.");
-      throw e;
-    }
+      if (res.ok) { return json; } else { throw new Error(`DB error: ${res.status} ${text}`); }
+    } catch (e) { throw e; }
   };
 
-  const syncToSupabase = useCallback((action: string, payload: any) => {
-    console.log(`📤 PUSH CHANGE [${action}]: Sending only major event back to Supabase to save egress:`, payload);
-  }, []);
+  const syncToSupabase = useCallback((action: string, payload: any) => {}, []);
 
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
-    // 🟢 NEW: Identify exactly who is performing the action
     let actor = 'Customer / System';
     if (adminLoggedIn) actor = 'Admin';
     else if (staffLoggedIn && staffProfile?.fullName) actor = staffProfile.fullName;
-
-    // Append the actor to the log
     const detailedDescription = `${description} (Action by: ${actor})`;
-
     const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description: detailedDescription, timestamp: new Date(), metadata };
     setActivities(prev => [newActivity, ...prev]);
-    
-    fetch('http://localhost:3001/api/activities', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newActivity)
-    }).catch(e => console.error("Failed to log activity"));
+    fetch('http://localhost:3001/api/activities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newActivity) }).catch(e => {});
+  };
+
+  const addLostItem = (i: Omit<LostItem, 'id'>) => {
+    const newItem = { ...i, id: `lf${Date.now()}` };
+    setLostItems(prev => [newItem, ...prev]);
+    syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`);
+    addActivity('admin_action', `Added lost item: ${i.itemName}`);
+  };
+  const updateLostItem = (id: string, u: Partial<LostItem>) => {
+    setLostItems(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`);
+  };
+  const deleteLostItem = (id: string) => {
+    setLostItems(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
+    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`);
+  };
+
+  const addWatchlistItem = (i: Omit<WatchlistItem, 'id'>) => {
+    const newItem = { ...i, id: `wl${Date.now()}` };
+    setWatchlist(prev => [newItem, ...prev]);
+    syncToDB('/api/watchlist', 'POST', newItem, `Added to watchlist`);
+    addActivity('admin_action', `Added ${i.name} to Watchlist`);
+  };
+  const updateWatchlistItem = (id: string, u: Partial<WatchlistItem>) => {
+    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`);
+  };
+  const deleteWatchlistItem = (id: string) => {
+    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
+    syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`);
+  };
+
+  const addSessionHistory = (i: Omit<SessionHistoryItem, 'id'>) => {
+    const newItem = { ...i, id: `sh${Date.now()}` };
+    setSessionHistory(prev => [newItem, ...prev]);
+    syncToDB('/api/session-history', 'POST', newItem, `Logged session history`);
   };
 
   const staffLogin = (u: string, p: string) => { const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive); if (valid || (u==='staff' && p==='staff123')) { setStaffLoggedIn(true); return true; } return false; };
@@ -501,11 +352,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
     setStaffProfile(prev => {
       const updated = { ...prev, ...p };
-      fetch(`http://localhost:3001/api/staff/${updated.username}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(p)
-      }).catch(e => console.error("Failed to update profile to DB"));
+      fetch(`http://localhost:3001/api/staff/${updated.username}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).catch(e => {});
       return updated;
     });
   };
@@ -543,6 +390,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Table set to maintenance: ${reason}`, { tableId });
   };
 
+  const setTableEvent = (tableId: string, eventName: string) => {
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'event', maintenanceReason: eventName } : t));
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`);
+    addActivity('admin_action', `Table marked for event: ${eventName}`, { tableId });
+  };
+
   const addTable = (name: string) => {
     const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
     setTables(prev => [...prev, newTable]);
@@ -554,9 +407,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toggleTableActive = (id: string) => {
     setTables(prev => {
       const target = prev.find(t => t.id === id);
-      if (target) {
-        syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`);
-      }
+      if (target) syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`);
       return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
     });
   };
@@ -585,7 +436,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   
   const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
     let updatedTableSession: Session | undefined;
-
     setInventory(prev => prev.map(inv => {
       const cartItem = cart.find(c => c.id === inv.id);
       if (cartItem) {
@@ -595,7 +445,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return inv;
     }));
-
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const newOrders = [...(t.session.orders || [])];
@@ -609,16 +458,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return t;
     }));
-
-    if (updatedTableSession) {
-      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table orders updated`);
-    }
+    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table orders updated`);
     addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
   const voidTableOrder = (tableId: string, orderIndex: number, order: SessionOrder) => {
     let updatedTableSession: Session | undefined;
-
     setInventory(prev => prev.map(inv => {
       if (inv.id === order.id) {
         const newStock = inv.stock + order.qty;
@@ -627,7 +472,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return inv;
     }));
-
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const newOrders = [...(t.session.orders || [])];
@@ -637,10 +481,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return t;
     }));
-
-    if (updatedTableSession) {
-      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table order voided`);
-    }
+    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table order voided`);
     addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
@@ -681,7 +522,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); 
   };
 
-  // 🟢 RESTORED FUNCTION
   const updateReservation = (id: string, u: Partial<Reservation>) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`);
@@ -740,9 +580,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const now = new Date();
     return promoCodes.find(p => {
       if (p.code.toUpperCase() !== code.toUpperCase() || !p.isActive) return false;
-      if (p.startDate && new Date(p.startDate) > now) return false; // Not started yet
-      if (p.expiresAt && new Date(p.expiresAt) < now) return false; // Expired
-      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; // Depleted
+      if (p.startDate && new Date(p.startDate) > now) return false; 
+      if (p.expiresAt && new Date(p.expiresAt) < now) return false; 
+      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
   };
@@ -774,43 +614,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateRates = async (r: Partial<RatesConfig>) => {
     const sanitized = { ...r } as Partial<RatesConfig>;
-    
-    // Coerce numeric fields to numbers and clamp where needed
     if (sanitized.hourlyRate !== undefined) sanitized.hourlyRate = Number(sanitized.hourlyRate) || 0;
     if (sanitized.overtimeRate !== undefined) sanitized.overtimeRate = Number(sanitized.overtimeRate) || 0;
     if (sanitized.weekdayHappyHourRate !== undefined) sanitized.weekdayHappyHourRate = Number(sanitized.weekdayHappyHourRate) || 0;
     if (sanitized.weekendHappyHourRate !== undefined) sanitized.weekendHappyHourRate = Number(sanitized.weekendHappyHourRate) || 0;
-    
     if (sanitized.downPaymentPercent !== undefined && sanitized.downPaymentPercent !== null) {
       let dp = Number(sanitized.downPaymentPercent) || 0;
       dp = Math.max(0, Math.min(100, dp));
       sanitized.downPaymentPercent = dp;
     }
-
     setRates(prev => ({ ...prev, ...sanitized }));
     try {
-      console.log('Updating rates payload:', sanitized);
       const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
       addActivity('admin_action', 'System rates updated');
       return res;
-    } catch (e) {
-      console.error('Failed to sync rates to DB', e);
-      throw e;
-    }
+    } catch (e) { throw e; }
   };
 
   const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
     setReservationTerms(prev => ({ ...prev, ...t }));
-    
     try {
-      console.log('Updating reservation terms payload:', t);
       const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`); 
       addActivity('admin_action', 'Reservation terms updated');
       return res;
-    } catch (e) {
-      console.error('Failed to sync reservation terms to DB', e);
-      throw e;
-    }
+    } catch (e) { throw e; }
   };
 
  const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {
@@ -887,21 +714,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       </div>
     );
   }
-
-  return (
+return (
     <AppContext.Provider value={{
       tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
-      assignTable, freeTable, reserveTable, extendSession, setTableMaintenance, addTable, updateTable, toggleTableActive, deleteTable,
+      assignTable, freeTable, reserveTable, extendSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,
       addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,
       addFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
-      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor
+      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
+      // 🟢 FIX: Exposing these below so they can be consumed by LostAndFound & Watchlist components
+      lostItems, addLostItem, updateLostItem, deleteLostItem,
+      watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory,
     }}>
       {children}
     </AppContext.Provider>

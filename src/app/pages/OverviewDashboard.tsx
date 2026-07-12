@@ -1,10 +1,10 @@
-import { useAppContext, HOURLY_RATE } from '../context/AppContext';
+import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router';
 import {
   TableProperties, Users, Calendar, TrendingUp,
-  AlertTriangle, Clock, ChevronRight, Palette, CheckCircle2, Circle
+  AlertTriangle, Clock, ChevronRight, CheckCircle2, CloudRain, Sun, Cloud
 } from 'lucide-react';
-import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isTomorrow, isFuture } from 'date-fns';
+import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isFuture } from 'date-fns';
 
 const formatPHP = (amount: number) =>
   `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
@@ -31,7 +31,7 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
 }
 
 export function OverviewDashboard() {
-  const { tables, queue, reservations } = useAppContext();
+  const { tables, queue, reservations, weather } = useAppContext();
   const navigate = useNavigate();
 
   const available = tables.filter(t => t.isActive && t.status === 'available').length;
@@ -97,6 +97,34 @@ export function OverviewDashboard() {
 
   return (
     <div className="space-y-6">
+      
+      {/* Live Weather Widget for Staff */}
+      {weather && (
+        <div className={`border rounded-xl px-5 py-4 flex items-center justify-between transition-colors ${
+          weather.isRaining ? 'bg-blue-950/20 border-blue-900/40' : 'bg-neutral-950 border-neutral-800'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${weather.isRaining ? 'bg-blue-500/20 text-blue-400' : weather.condition === 'Clear' ? 'bg-amber-500/20 text-amber-400' : 'bg-neutral-800 text-neutral-400'}`}>
+              {weather.isRaining ? <CloudRain size={20} /> : weather.condition === 'Clear' ? <Sun size={20} /> : <Cloud size={20} />}
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white flex items-center gap-2">
+                {Math.round(weather.temp)}°C · {weather.condition}
+              </p>
+              <p className="text-[10px] text-neutral-400 uppercase tracking-widest font-semibold mt-0.5">Live Local Weather</p>
+            </div>
+          </div>
+          {weather.isRaining && (
+            <div className="text-right">
+              <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
+                <AlertTriangle size={12} /> High Traffic Alert
+              </p>
+              <p className="text-[10px] text-neutral-500 mt-0.5">Expect increased walk-ins due to rain.</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Alerts */}
       {(overtimeTables.length > 0 || alertTables.length > 0) && (
         <div className="space-y-2">
@@ -128,9 +156,10 @@ export function OverviewDashboard() {
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Available Tables" value={available} sub={`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
-        <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-rose-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
-        <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-amber-400" icon={Users} onClick={() => navigate('/staff/queue')} />
-        <StatCard label="Today's Revenue" value={formatPHP(todayRevenue)} sub="table rentals only" color="text-blue-400" icon={TrendingUp} />
+        <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-amber-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
+        <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-purple-400" icon={Users} onClick={() => navigate('/staff/queue')} />
+        {/* 🟢 NEW: Swapped Revenue for Overtime tracker */}
+        <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables')} />
       </div>
 
       {/* Table Grid Quick View */}
@@ -143,25 +172,29 @@ export function OverviewDashboard() {
         </div>
         <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
           {tables.filter(t => t.isActive).map(t => {
-            const isOvertime = t.status === 'occupied' && t.session && (() => {
-              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+            const isOpenTime = t.status === 'occupied' && t.session && (t.session.isOpenTime || t.session.durationMinutes === null);
+            const isOvertime = !isOpenTime && t.status === 'occupied' && t.session && (() => {
+              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
               return new Date() > end;
             })();
-            const isAlert = t.status === 'occupied' && t.session && (() => {
-              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
+            const isAlert = !isOpenTime && !isOvertime && t.status === 'occupied' && t.session && (() => {
+              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
               const secs = differenceInSeconds(end, new Date());
               return secs > 0 && secs <= 900;
             })();
+            
             return (
               <div
                 key={t.id}
                 onClick={() => navigate('/staff/tables')}
-                title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''}`}
+                title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''} (${t.status})`}
                 className={`aspect-square rounded-lg flex flex-col items-center justify-center cursor-pointer border transition-all text-[10px] font-bold
-                  ${isOvertime ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' :
-                    isAlert ? 'bg-amber-500/20 border-amber-500 text-amber-400' :
-                    t.status === 'occupied' ? 'bg-rose-950/40 border-rose-800/40 text-rose-400' :
-                    t.status === 'reserved' ? 'bg-amber-950/40 border-amber-800/40 text-amber-400' :
+                  ${t.status === 'maintenance' ? 'bg-orange-950/40 border-orange-800/40 text-orange-500 opacity-60' :
+                    isOvertime ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' :
+                    isOpenTime ? 'bg-blue-950/40 border-blue-800/40 text-blue-400' :
+                    isAlert ? 'bg-rose-950/40 border-rose-500/50 text-rose-400' :
+                    t.status === 'occupied' ? 'bg-amber-950/40 border-amber-800/40 text-amber-400' :
+                    t.status === 'reserved' ? 'bg-sky-950/40 border-sky-800/40 text-sky-400' :
                     'bg-emerald-950/20 border-emerald-800/30 text-emerald-500'}
                 `}
               >
@@ -170,15 +203,20 @@ export function OverviewDashboard() {
             );
           })}
         </div>
-        <div className="flex items-center gap-4 mt-3">
+        
+        {/* 🟢 NEW: Comprehensive Legend mapping to the updated colors */}
+        <div className="flex flex-wrap items-center gap-4 mt-4">
           {[
-            { color: 'bg-emerald-500', label: 'Available' },
-            { color: 'bg-rose-500', label: 'Occupied' },
-            { color: 'bg-amber-500', label: 'Reserved' },
+            { color: 'bg-emerald-500', label: 'Open' },
+            { color: 'bg-amber-500', label: 'In Use' },
+            { color: 'bg-blue-500', label: 'Open Time' },
+            { color: 'bg-rose-500', label: 'Overtime' },
+            { color: 'bg-sky-500', label: 'Reserved' },
+            { color: 'bg-orange-500', label: 'Maintenance' },
           ].map(item => (
             <div key={item.label} className="flex items-center gap-1.5">
               <span className={`w-2.5 h-2.5 rounded-sm ${item.color}`} />
-              <span className="text-xs text-neutral-500">{item.label}</span>
+              <span className="text-xs text-neutral-500 font-medium">{item.label}</span>
             </div>
           ))}
         </div>
@@ -220,53 +258,50 @@ export function OverviewDashboard() {
         </div>
 
         {/* Queue Snapshot */}
-        <div className="space-y-4">
-          {/* Queue */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                <Users size={15} className="text-neutral-500" /> Walk-in Queue
-                {waiting > 0 && <span className="bg-amber-500 text-black text-[10px] font-black rounded-full w-4 h-4 flex items-center justify-center">{waiting}</span>}
-              </h2>
-              <button onClick={() => navigate('/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
-                Manage <ChevronRight size={12} />
-              </button>
-            </div>
-            {waitingQueue.length === 0 ? (
-              <div className="flex items-center gap-2 py-2">
-                <CheckCircle2 size={16} className="text-emerald-500" />
-                <p className="text-sm text-neutral-500">No customers waiting</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {waitingQueue.slice(0, 3).map((q, i) => {
-                  const est = estimateWaitForPosition(i + 1);
-                  const isNow = est === 'Now';
-                  return (
-                    <div key={q.id} className="flex items-center gap-2.5 text-sm">
-                      <span className="w-5 h-5 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-[10px] font-bold text-neutral-400 flex-none">{i + 1}</span>
-                      <span className="text-neutral-300 font-medium flex-1 truncate">{q.customerName}</span>
-                      <span className="text-xs text-neutral-500 flex-none">{q.partySize} pax</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-none ${isNow ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>
-                        {isNow ? '✓ Now' : est}
-                      </span>
-                    </div>
-                  );
-                })}
-                {waitingQueue.length > 3 && (
-                  <p className="text-xs text-neutral-600 pl-7">+{waitingQueue.length - 3} more</p>
-                )}
-                <div className="flex items-center justify-between pt-2 mt-1 border-t border-neutral-800/60">
-                  <span className="text-[10px] text-neutral-600 flex items-center gap-1">
-                    <Clock size={10} /> Est. max wait
-                  </span>
-                  <span className={`text-[10px] font-semibold ${overallWait === 'Now' ? 'text-emerald-400' : overallWait === 'TBD' ? 'text-neutral-500' : 'text-amber-400'}`}>
-                    {overallWait}
-                  </span>
-                </div>
-              </div>
-            )}
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
+              <Users size={15} className="text-neutral-500" /> Walk-in Queue
+              {waiting > 0 && <span className="bg-amber-500 text-black text-[10px] font-black rounded-full w-4 h-4 flex items-center justify-center">{waiting}</span>}
+            </h2>
+            <button onClick={() => navigate('/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
+              Manage <ChevronRight size={12} />
+            </button>
           </div>
+          {waitingQueue.length === 0 ? (
+            <div className="flex items-center gap-2 py-2">
+              <CheckCircle2 size={16} className="text-emerald-500" />
+              <p className="text-sm text-neutral-500">No customers waiting</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {waitingQueue.slice(0, 3).map((q, i) => {
+                const est = estimateWaitForPosition(i + 1);
+                const isNow = est === 'Now';
+                return (
+                  <div key={q.id} className="flex items-center gap-2.5 text-sm">
+                    <span className="w-5 h-5 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-[10px] font-bold text-neutral-400 flex-none">{i + 1}</span>
+                    <span className="text-neutral-300 font-medium flex-1 truncate">{q.customerName}</span>
+                    <span className="text-xs text-neutral-500 flex-none">{q.partySize} pax</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-none ${isNow ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>
+                      {isNow ? '✓ Now' : est}
+                    </span>
+                  </div>
+                );
+              })}
+              {waitingQueue.length > 3 && (
+                <p className="text-xs text-neutral-600 pl-7">+{waitingQueue.length - 3} more</p>
+              )}
+              <div className="flex items-center justify-between pt-2 mt-1 border-t border-neutral-800/60">
+                <span className="text-[10px] text-neutral-600 flex items-center gap-1">
+                  <Clock size={10} /> Est. max wait
+                </span>
+                <span className={`text-[10px] font-semibold ${overallWait === 'Now' ? 'text-emerald-400' : overallWait === 'TBD' ? 'text-neutral-500' : 'text-amber-400'}`}>
+                  {overallWait}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

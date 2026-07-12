@@ -1,224 +1,226 @@
-import { useEffect, useState } from 'react';
-import { Clock, Play, X, User, Zap, Calendar, Wrench } from 'lucide-react';
-import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isTomorrow } from 'date-fns';
-import { Table, HOURLY_RATE } from '../context/AppContext';
-import clsx from 'clsx';
+import { useState, useEffect } from 'react';
+import { Table } from '../context/AppContext';
+import { Play, XSquare, Clock, Calendar, Wrench, ShoppingCart, Plus, Infinity as InfinityIcon } from 'lucide-react';
+import { addMinutes, differenceInSeconds } from 'date-fns';
 
 interface TableCardProps {
   table: Table;
   onAssign: () => void;
-  onEnd?: () => void;
-  onExtend?: () => void;
-  onMaintenance?: () => void;
-  onClearMaintenance?: () => void;
-  nextReservation?: { date: Date; customerName: string; timeSlot: string } | null;
+  onExtend: () => void;
+  onEnd: () => void;
+  onOrder: () => void;
+  nextReservation: { date: Date; customerName: string; timeSlot: string } | null;
 }
 
-const formatPHP = (amount: number) => `₱${amount.toFixed(2)}`;
-
-export function TableCard({ table, onAssign, onEnd, onExtend, onMaintenance, onClearMaintenance, nextReservation }: TableCardProps) {
+export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReservation }: TableCardProps) {
   const [now, setNow] = useState(new Date());
+  const isEvent = table.status === 'event';
 
+  const backgroundCls = isEvent 
+    ? 'bg-purple-950/40 border-purple-800/50 text-purple-400 opacity-90' 
+    : '...';
+    
+  // Update timer every second if the table is occupied
   useEffect(() => {
+    if (table.status !== 'occupied') return;
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [table.status]);
 
+  // Timer Calculation Logic
   const getTimerInfo = () => {
     if (!table.session) return null;
-    const { startTime, durationMinutes } = table.session;
-    const endTime = addMinutes(new Date(startTime), durationMinutes);
-    const totalSecsLeft = differenceInSeconds(endTime, now);
-    const isOvertime = totalSecsLeft < 0;
-    const absSecs = Math.abs(totalSecsLeft);
-    const mins = Math.floor(absSecs / 60);
-    const secs = absSecs % 60;
-    const isAlert = !isOvertime && totalSecsLeft <= 900;
+    
+    // 🟢 NEW: Intercept Open Time Logic
+    if (table.session.isOpenTime || table.session.durationMinutes === null) {
+      const elapsedSecs = Math.max(0, differenceInSeconds(now, new Date(table.session.startTime)));
+      const hrs = String(Math.floor(elapsedSecs / 3600)).padStart(2, '0');
+      const mm = String(Math.floor((elapsedSecs % 3600) / 60)).padStart(2, '0');
+      const ss = String(elapsedSecs % 60).padStart(2, '0');
+      
+      return { 
+        isOvertime: false, 
+        percentLeft: 100, // Keeps the progress bar solid
+        display: `${hrs}:${mm}:${ss}`, // Count UP instead of down
+        isOpenTime: true 
+      };
+    }
 
-    const overMins = isOvertime ? Math.ceil(absSecs / 60) : 0;
-    const overtimeCharge = (overMins / 60) * HOURLY_RATE;
+    // Standard Countdown Logic
+    const endTime = addMinutes(new Date(table.session.startTime), table.session.durationMinutes);
+    const secsLeft = differenceInSeconds(endTime, now);
+    const isOvertime = secsLeft < 0;
+    const absSecs = Math.abs(secsLeft);
+    
+    const hrs = Math.floor(absSecs / 3600);
+    const mm = String(Math.floor((absSecs % 3600) / 60)).padStart(2, '0');
+    const ss = String(absSecs % 60).padStart(2, '0');
+    
+    const display = hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
 
-    return {
-      formatted: `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`,
-      isAlert, isOvertime, overtimeCharge,
-      elapsed: Math.floor(differenceInSeconds(now, new Date(startTime)) / 60),
-      endTime,
-    };
+    // Calculate progress bar percentage
+    const totalSecs = table.session.durationMinutes * 60;
+    const percentLeft = Math.max(0, Math.min(100, (secsLeft / totalSecs) * 100));
+
+    return { display, isOvertime, percentLeft, isOpenTime: false };
   };
 
   const timer = getTimerInfo();
 
-  // Format next reservation display
-  const getNextReservationLabel = () => {
-    if (!nextReservation) return null;
-    const resDate = new Date(nextReservation.date);
-    const minsUntil = differenceInMinutes(resDate, now);
-    if (minsUntil <= 0) return { label: 'Now', color: 'text-rose-400', urgent: true };
-    if (minsUntil <= 30) return { label: `in ${minsUntil}m`, color: 'text-rose-400', urgent: true };
-    if (minsUntil <= 60) return { label: `in ${minsUntil}m`, color: 'text-amber-400', urgent: false };
-    if (isToday(resDate)) return { label: `Today ${nextReservation.timeSlot}`, color: 'text-amber-400', urgent: false };
-    if (isTomorrow(resDate)) return { label: `Tomorrow ${nextReservation.timeSlot}`, color: 'text-neutral-400', urgent: false };
-    return { label: format(resDate, 'MMM d, h:mm a'), color: 'text-neutral-400', urgent: false };
-  };
-
-  const nextResLabel = getNextReservationLabel();
-
-  const getBorderColor = () => {
-    if (table.status === 'maintenance') return 'border-orange-700/60';
-    if (timer?.isOvertime) return 'border-rose-500/60';
-    if (timer?.isAlert) return 'border-amber-500/60';
-    if (table.status === 'occupied') return 'border-rose-800/40';
-    if (table.status === 'reserved') return nextResLabel?.urgent ? 'border-rose-700/50' : 'border-amber-800/40';
-    return 'border-neutral-800';
+  // Smart click handler for the whole card
+  const handleCardClick = () => {
+    if (table.status === 'available' || table.status === 'reserved') {
+      onAssign();
+    } else if (table.status === 'occupied') {
+      onOrder();
+    }
+    // If maintenance, do nothing.
   };
 
   return (
-    <div className={clsx(
-      'relative rounded-xl border p-4 flex flex-col gap-3 h-52 transition-all shadow-md',
-      'bg-neutral-950',
-      getBorderColor(),
-      timer?.isOvertime && 'shadow-rose-900/20',
-      timer?.isAlert && 'shadow-amber-900/20',
-    )}>
+    <div 
+      onClick={handleCardClick}
+      className={`relative flex flex-col bg-neutral-900 border-2 rounded-2xl overflow-hidden transition-all duration-200 
+      ${table.status !== 'maintenance' ? 'cursor-pointer hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50' : 'opacity-80'}
+      ${table.status === 'available' ? 'border-emerald-900/50 hover:border-emerald-500/50' :
+        table.status === 'reserved' ? 'border-blue-900/50 hover:border-blue-500/50' :
+        table.status === 'maintenance' ? 'border-orange-900/50' :
+        timer?.isOvertime ? 'border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:border-rose-400' : 
+        timer?.isOpenTime ? 'border-blue-500/50 hover:border-blue-400' : 'border-neutral-800 hover:border-neutral-600'
+      }`}
+    >
+      
+      {/* Overtime Pulse Background */}
+      {timer?.isOvertime && <div className="absolute inset-0 bg-rose-500/5 animate-pulse pointer-events-none" />}
+
       {/* Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h3 className="text-sm font-bold text-neutral-200">{table.name}</h3>
-          {table.session && (
-            <div className="flex items-center gap-1.5 text-neutral-500 mt-0.5">
-              <User size={11} />
-              <span className="text-xs truncate max-w-[120px]">{table.session.customerName}</span>
-            </div>
-          )}
-          {table.status === 'reserved' && nextReservation && (
-            <div className="flex items-center gap-1 mt-0.5">
-              <User size={11} className="text-amber-500/70" />
-              <span className="text-xs text-amber-500/80 truncate max-w-[110px]">{nextReservation.customerName}</span>
-            </div>
-          )}
+      <div className="px-5 py-4 border-b border-neutral-800/60 flex items-start justify-between bg-neutral-950/30">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center font-black text-lg text-white">
+            {table.name.replace('Table ', '')}
+          </div>
+          <div>
+            <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">{table.name}</p>
+            {table.status === 'available' && <span className="text-sm font-bold text-emerald-400 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Open</span>}
+            {table.status === 'reserved' && <span className="text-sm font-bold text-blue-400 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" /> Reserved</span>}
+            {table.status === 'maintenance' && <span className="text-sm font-bold text-orange-400 flex items-center gap-1.5"><Wrench size={12}/> Maintenance</span>}
+            {table.status === 'occupied' && (
+              <span className={`text-sm font-bold flex items-center gap-1.5 ${timer?.isOvertime ? 'text-rose-400' : timer?.isOpenTime ? 'text-blue-400' : 'text-amber-400'}`}>
+                <span className={`w-2 h-2 rounded-full ${timer?.isOvertime ? 'bg-rose-500 animate-pulse' : timer?.isOpenTime ? 'bg-blue-500' : 'bg-amber-500'}`} />
+                {timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
+              </span>
+            )}
+          </div>
         </div>
-        <span className={clsx(
-          'px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1',
-          table.status === 'available' && 'bg-emerald-500/15 text-emerald-400',
-          table.status === 'occupied' && !timer?.isOvertime && !timer?.isAlert && 'bg-rose-500/15 text-rose-400',
-          timer?.isAlert && !timer?.isOvertime && 'bg-amber-500/15 text-amber-400',
-          timer?.isOvertime && 'bg-rose-500/20 text-rose-300',
-          table.status === 'reserved' && 'bg-amber-500/15 text-amber-400',
-          table.status === 'maintenance' && 'bg-orange-500/15 text-orange-400',
-        )}>
-          {table.status === 'maintenance' && <Wrench size={9} />}
-          {timer?.isOvertime ? 'Overtime' : timer?.isAlert ? 'Ending Soon' : table.status}
-        </span>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 flex flex-col justify-end gap-2">
-        {table.status === 'maintenance' ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 bg-orange-950/20 rounded-lg border border-orange-800/30 p-3">
-            <Wrench size={20} className="text-orange-400" />
-            <p className="text-xs text-orange-300 font-semibold text-center">Under Maintenance</p>
-            {table.maintenanceReason && (
-              <p className="text-[10px] text-orange-500/80 text-center leading-snug">{table.maintenanceReason}</p>
-            )}
-            <button
-              onClick={onClearMaintenance}
-              className="mt-1 text-[10px] bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 px-3 py-1.5 rounded-lg transition-colors"
-            >
-              Clear Maintenance
-            </button>
-          </div>
-        ) : table.status === 'occupied' && table.session && timer ? (
-          <>
-            {/* Timer */}
-            <div className="text-center py-1">
-              <p className="text-[10px] text-neutral-600 uppercase tracking-wider mb-0.5">
-                {timer.isOvertime ? '⚠ Overtime' : timer.isAlert ? '⚡ Time Left' : 'Time Left'}
-              </p>
-              <p className={clsx(
-                'font-mono text-2xl font-black tabular-nums tracking-tight',
-                timer.isOvertime ? 'text-rose-400' : timer.isAlert ? 'text-amber-400' : 'text-emerald-400'
-              )}>
-                {timer.isOvertime && '+'}
-                {timer.formatted}
-              </p>
-              {timer.isOvertime ? (
-                <p className="text-[10px] text-rose-500 mt-0.5">+{formatPHP(timer.overtimeCharge)} overtime</p>
-              ) : (
-                <p className="text-[10px] text-neutral-600 mt-0.5">
-                  ends {format(timer.endTime, 'h:mm a')}
-                </p>
-              )}
-            </div>
-            {/* Payment info */}
-            <div className="flex justify-between text-[10px] text-neutral-600 border-t border-neutral-800/60 pt-2">
-              <span>Paid: <span className="text-neutral-400">{formatPHP(table.session.amountPaid)}</span></span>
-              <span>Rate: <span className="text-neutral-400">₱{HOURLY_RATE}/hr</span></span>
-            </div>
-            {/* Actions */}
-            <div className="flex gap-1.5">
-              <button
-                onClick={onExtend}
-                className="flex-1 flex items-center justify-center gap-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs py-1.5 rounded-lg transition-colors border border-neutral-700"
-              >
-                <Zap size={11} /> Extend
-              </button>
-              <button
-                onClick={onEnd}
-                className="flex-1 flex items-center justify-center gap-1 bg-rose-950/40 hover:bg-rose-900/40 text-rose-400 text-xs py-1.5 rounded-lg transition-colors border border-rose-900/40"
-              >
-                <X size={11} /> End
-              </button>
-              {onMaintenance && (
-                <button
-                  onClick={onMaintenance}
-                  title="Mark as maintenance"
-                  className="flex items-center justify-center px-2 bg-neutral-900 hover:bg-orange-950/30 border border-neutral-800 hover:border-orange-800/50 text-neutral-600 hover:text-orange-400 rounded-lg transition-colors"
-                >
-                  <Wrench size={11} />
-                </button>
-              )}
-            </div>
-          </>
-        ) : table.status === 'available' ? (
-          <div className="flex-1 flex flex-col gap-1.5">
-            <button
-              onClick={onAssign}
-              className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-neutral-800 rounded-lg hover:border-emerald-600/50 hover:bg-emerald-950/10 transition-all group cursor-pointer"
-            >
-              <Play size={22} className="text-neutral-600 group-hover:text-emerald-500 transition-colors mb-1" />
-              <span className="text-xs text-neutral-600 group-hover:text-emerald-500 font-medium transition-colors">Start Session</span>
-            </button>
-            {onMaintenance && (
-              <button
-                onClick={onMaintenance}
-                className="w-full flex items-center justify-center gap-1.5 bg-neutral-900 hover:bg-orange-950/30 border border-neutral-800 hover:border-orange-800/50 text-neutral-600 hover:text-orange-400 text-[10px] py-1.5 rounded-lg transition-colors"
-              >
-                <Wrench size={10} /> Mark Maintenance
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center gap-1.5">
-            <Clock size={18} className="text-amber-500/60" />
-            <p className="text-xs text-amber-500/80 font-medium">Reserved</p>
-            {/* Next reservation time */}
-            {nextResLabel ? (
-              <div className={clsx(
-                'flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg',
-                nextResLabel.urgent ? 'bg-rose-500/10 border border-rose-500/20' : 'bg-amber-500/10 border border-amber-500/20'
-              )}>
-                <Calendar size={9} className={nextResLabel.color} />
-                <span className={nextResLabel.color}>{nextResLabel.label}</span>
+      {/* Body Content */}
+      <div className="p-5 flex-1 flex flex-col justify-center">
+        
+        {/* Available State */}
+        {table.status === 'available' && (
+          <div className="text-center space-y-4 my-2">
+            {nextReservation ? (
+              <div className="bg-blue-950/20 border border-blue-900/30 rounded-lg p-3 text-left">
+                <p className="text-[10px] text-blue-400 uppercase tracking-wider font-semibold mb-1 flex items-center gap-1"><Calendar size={10}/> Next Reservation</p>
+                <p className="text-sm text-neutral-200 font-semibold truncate">{nextReservation.customerName}</p>
+                <p className="text-xs text-neutral-500">{nextReservation.timeSlot}</p>
               </div>
             ) : (
-              <p className="text-[10px] text-neutral-600">No reservation found</p>
+              <p className="text-xs text-neutral-500 pointer-events-none">Ready for walk-in or reservation.</p>
             )}
-            <button
-              onClick={onAssign}
-              className="text-[10px] text-neutral-500 hover:text-emerald-400 border border-neutral-800 hover:border-emerald-700 px-3 py-1 rounded-lg transition-colors mt-0.5"
+            <button 
+              onClick={(e) => { e.stopPropagation(); onAssign(); }} 
+              className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-xl text-sm font-semibold transition-colors"
             >
-              Check In
+              <Play size={14} /> Start Session
             </button>
+          </div>
+        )}
+
+        {/* Maintenance State */}
+        {table.status === 'maintenance' && (
+          <div className="text-center my-4">
+            <Wrench size={24} className="mx-auto text-orange-500/50 mb-2" />
+            <p className="text-sm text-neutral-300 font-medium">Under Maintenance</p>
+            <p className="text-xs text-neutral-500 mt-1">{table.maintenanceReason || 'No reason specified'}</p>
+          </div>
+        )}
+
+        {/* Reserved State */}
+        {table.status === 'reserved' && (
+          <div className="text-center space-y-4 my-2">
+            <p className="text-xs text-blue-400">Reserved table. Awaiting customer arrival.</p>
+            <button 
+              onClick={(e) => { e.stopPropagation(); onAssign(); }} 
+              className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-600/30 text-blue-400 rounded-xl text-sm font-semibold transition-colors"
+            >
+              <Play size={14} /> Check-in Customer
+            </button>
+          </div>
+        )}
+
+        {/* Occupied State */}
+        {table.status === 'occupied' && table.session && timer && (
+          <div className="space-y-4 relative z-10">
+            <div className="text-center">
+              <p className="text-xs text-neutral-400 font-medium truncate px-2">{table.session.customerName}</p>
+              
+              <div className="flex items-center justify-center gap-2 mt-1">
+                {timer.isOpenTime && <InfinityIcon size={24} className="text-blue-400/50" />}
+                <div className={`text-4xl font-black tabular-nums tracking-tight ${timer.isOvertime ? 'text-rose-400' : timer.isOpenTime ? 'text-blue-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'}`}>
+                  {timer.isOvertime && '+'}{timer.display}
+                </div>
+              </div>
+              
+              {/* Progress Bar */}
+              <div className="mt-3 h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden">
+                {timer.isOpenTime ? (
+                  <div className="h-full w-full bg-blue-500/80" />
+                ) : !timer.isOvertime ? (
+                  <div 
+                    className={`h-full transition-all duration-1000 ${timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
+                    style={{ width: `${timer.percentLeft}%` }} 
+                  />
+                ) : (
+                  <div className="h-full w-full bg-rose-500/50 animate-pulse" />
+                )}
+              </div>
+            </div>
+
+            {/* F&B Total Indicator */}
+            {table.session.orders && table.session.orders.length > 0 && (
+              <div className="flex justify-between items-center px-3 py-2 bg-neutral-950 rounded-lg border border-neutral-800">
+                <span className="text-[10px] text-neutral-500 flex items-center gap-1"><ShoppingCart size={10}/> Orders</span>
+                <span className="text-xs font-bold text-emerald-400">
+                  ₱{table.session.orders.reduce((sum, o) => sum + (o.price * o.qty), 0).toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-neutral-800/60">
+              <button 
+                onClick={(e) => { e.stopPropagation(); onOrder(); }} 
+                className="col-span-2 flex items-center justify-center gap-2 py-2 bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/30 text-emerald-400 rounded-lg text-xs font-semibold transition-colors"
+              >
+                <Plus size={13} /> Add F&B Orders
+              </button>
+              
+              <button 
+                onClick={(e) => { e.stopPropagation(); onExtend(); }} 
+                disabled={timer.isOpenTime} // Cannot extend an open-ended session
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors ${timer.isOpenTime ? 'bg-neutral-900 text-neutral-600 opacity-50 cursor-not-allowed' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
+              >
+                <Clock size={13} /> Extend
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onEnd(); }} 
+                className="flex items-center justify-center gap-1.5 py-2.5 bg-rose-950/30 hover:bg-rose-900/40 border border-rose-800/30 text-rose-400 rounded-lg text-xs font-semibold transition-colors"
+              >
+                <XSquare size={13} /> End
+              </button>
+            </div>
           </div>
         )}
       </div>

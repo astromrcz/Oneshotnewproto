@@ -1,51 +1,84 @@
 import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Table, QueueItem } from '../context/AppContext';
-import { Clock, Users, X, Maximize2 } from 'lucide-react';
+import { Clock, Users, X, Sparkles } from 'lucide-react';
+import { addMinutes, differenceInSeconds } from 'date-fns';
 
 // ── Helpers ────────────────────────────────────────────────────
 function getSessionTimer(table: Table): {
-  mm: string; ss: string; isOvertime: boolean; percentLeft: number; label: string;
+  mm: string; ss: string; isOvertime: boolean; percentLeft: number; label: string; isOpenTime: boolean;
 } {
-  if (!table.session) return { mm: '--', ss: '--', isOvertime: false, percentLeft: 0, label: '' };
+  if (!table.session || !table.session.startTime) {
+    return { mm: '--', ss: '--', isOvertime: false, percentLeft: 0, label: '', isOpenTime: false };
+  }
+
   const start = new Date(table.session.startTime).getTime();
-  const totalMs = table.session.durationMinutes * 60000;
   const elapsed = Date.now() - start;
+
+  // Handle "Open Time" (Pay-as-you-go, counting UP)
+  if (table.session.durationMinutes === null || table.session.isOpenTime) {
+    const abs = elapsed;
+    const hh = String(Math.floor(abs / 3600000)).padStart(2, '0');
+    const mm = String(Math.floor((abs % 3600000) / 60000)).padStart(2, '0');
+    const ss = String(Math.floor((abs % 60000) / 1000)).padStart(2, '0');
+    
+    return { 
+      mm: hh !== '00' ? hh : mm, // Show hours if over 60 mins, otherwise minutes
+      ss: hh !== '00' ? mm : ss, // Show minutes if over 60 mins, otherwise seconds
+      isOvertime: false, 
+      percentLeft: 100, 
+      label: 'Elapsed Time', 
+      isOpenTime: true 
+    };
+  }
+
+  // Handle "Fixed Duration" (Counting DOWN)
+  const totalMs = table.session.durationMinutes * 60000;
   const remaining = totalMs - elapsed;
   const isOvertime = remaining < 0;
-  const abs = Math.abs(remaining);
-  const mm = String(Math.floor(abs / 60000)).padStart(2, '0');
-  const ss = String(Math.floor((abs % 60000) / 1000)).padStart(2, '0');
+  const absRemaining = Math.abs(remaining);
+  
+  const mm = String(Math.floor(absRemaining / 60000)).padStart(2, '0');
+  const ss = String(Math.floor((absRemaining % 60000) / 1000)).padStart(2, '0');
   const percentLeft = Math.max(0, Math.min(100, (remaining / totalMs) * 100));
   const label = isOvertime ? `+${mm}:${ss} Overtime` : `${mm}:${ss} remaining`;
-  return { mm, ss, isOvertime, percentLeft, label };
-}
-
-function formatWaitTime(arrivalTime: Date, position: number): string {
-  const avgMinutesPerTable = 60;
-  const waitMinutes = position * avgMinutesPerTable;
-  if (waitMinutes < 60) return `~${waitMinutes} min`;
-  const h = Math.floor(waitMinutes / 60);
-  const m = waitMinutes % 60;
-  return m > 0 ? `~${h}h ${m}m` : `~${h}h`;
+  
+  return { mm, ss, isOvertime, percentLeft, label, isOpenTime: false };
 }
 
 // ── Single Table Card ──────────────────────────────────────────
-function TableCard({ table, tick }: { table: Table; tick: number }) {
+function TableCard({ table }: { table: Table }) {
   const timer = getSessionTimer(table);
+
+  if (table.status === 'maintenance') {
+    return (
+      <div className="bg-orange-950/40 border-2 border-orange-800/40 rounded-2xl p-5 flex flex-col items-center gap-3 opacity-60">
+        <div className="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-600/30 flex items-center justify-center">
+          <span className="text-orange-500 font-black text-lg">{table.name.replace('Table ', '')}</span>
+        </div>
+        <div className="text-center">
+          <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
+          <div className="flex items-center justify-center gap-1.5 mt-2">
+            <span className="w-2 h-2 rounded-full bg-orange-500" />
+            <span className="text-orange-500 font-black text-lg">MAINTENANCE</span>
+          </div>
+          <p className="text-[11px] text-orange-600 mt-1">{table.maintenanceReason || 'Unavailable'}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (table.status === 'available') {
     return (
-      <div className="relative bg-emerald-950/30 border-2 border-emerald-700/50 rounded-2xl p-5 flex flex-col items-center gap-3 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/5 to-transparent pointer-events-none" />
+      <div className="relative bg-emerald-950/20 border-2 border-emerald-800/30 rounded-2xl p-5 flex flex-col items-center gap-3 overflow-hidden">
         <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center">
-          <span className="text-emerald-400 font-black text-lg">{table.name.replace('Table ', '')}</span>
+          <span className="text-emerald-500 font-black text-lg">{table.name.replace('Table ', '')}</span>
         </div>
         <div className="text-center">
           <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
           <div className="flex items-center justify-center gap-1.5 mt-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-            <span className="text-emerald-400 font-black text-lg">OPEN</span>
+            <span className="text-emerald-500 font-black text-lg">OPEN</span>
           </div>
           <p className="text-[11px] text-emerald-600 mt-1">Walk-in Welcome</p>
         </div>
@@ -55,76 +88,77 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
 
   if (table.status === 'reserved') {
     return (
-      <div className="bg-blue-950/30 border-2 border-blue-700/40 rounded-2xl p-5 flex flex-col items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-600/30 flex items-center justify-center">
-          <span className="text-blue-400 font-black text-lg">{table.name.replace('Table ', '')}</span>
+      <div className="bg-sky-950/40 border-2 border-sky-800/40 rounded-2xl p-5 flex flex-col items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-sky-600/20 border border-sky-600/30 flex items-center justify-center">
+          <span className="text-sky-400 font-black text-lg">{table.name.replace('Table ', '')}</span>
         </div>
         <div className="text-center">
           <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
           <div className="flex items-center justify-center gap-1.5 mt-2">
-            <span className="w-2 h-2 rounded-full bg-blue-500" />
-            <span className="text-blue-300 font-black text-lg">RESERVED</span>
+            <span className="w-2 h-2 rounded-full bg-sky-500" />
+            <span className="text-sky-400 font-black text-lg">RESERVED</span>
           </div>
-          <p className="text-[11px] text-blue-600 mt-1">Pre-booked</p>
+          <p className="text-[11px] text-sky-600 mt-1">Pre-booked</p>
         </div>
       </div>
     );
   }
 
-  // Occupied
+  // Occupied Status (In Use, Open Time, Overtime)
+  const isOvertime = timer.isOvertime;
+  const isOpenTime = timer.isOpenTime;
+  
+  const colorClass = isOvertime 
+    ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse'
+    : isOpenTime
+    ? 'bg-blue-950/40 border-blue-800/40 text-blue-400'
+    : 'bg-amber-950/40 border-amber-800/40 text-amber-400';
+    
+  const badgeClass = isOvertime
+    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+    : isOpenTime
+    ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+    : 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+
+  const barClass = isOvertime
+    ? 'bg-rose-500/40'
+    : isOpenTime
+    ? 'bg-blue-400/50'
+    : timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500';
+
   return (
-    <div className={`relative border-2 rounded-2xl p-5 flex flex-col gap-3 overflow-hidden ${
-      timer.isOvertime
-        ? 'bg-rose-950/40 border-rose-600/60'
-        : 'bg-neutral-900/80 border-neutral-700/50'
-    }`}>
-      {timer.isOvertime && (
-        <div className="absolute inset-0 bg-rose-500/5 animate-pulse pointer-events-none" />
-      )}
-
-      {/* Table number + customer */}
+    <div className={`relative border-2 rounded-2xl p-5 flex flex-col gap-3 overflow-hidden ${colorClass}`}>
       <div className="flex items-start justify-between">
-        <div className="w-9 h-9 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center flex-shrink-0">
-          <span className="text-white font-black">{table.name.replace('Table ', '')}</span>
+        <div className="w-9 h-9 rounded-xl bg-black/20 border border-white/10 flex items-center justify-center flex-shrink-0">
+          <span className="font-black text-white">{table.name.replace('Table ', '')}</span>
         </div>
-        <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
-          timer.isOvertime
-            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-            : 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
-        }`}>
-          {timer.isOvertime ? '⚠ OVERTIME' : 'IN USE'}
+        <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${badgeClass}`}>
+          {isOvertime ? '⚠ OVERTIME' : isOpenTime ? 'OPEN TIME' : 'IN USE'}
         </div>
       </div>
 
-      {/* Customer name */}
       <div>
-        <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Customer</p>
-        <p className="text-white font-bold text-sm mt-0.5 truncate">{table.session?.customerName || '—'}</p>
+        <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70">Customer</p>
+        <p className="font-bold text-sm mt-0.5 truncate text-white">{table.session?.customerName || '—'}</p>
       </div>
 
-      {/* Countdown */}
       <div className="text-center">
-        <p className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">
-          {timer.isOvertime ? 'Overtime' : 'Time Left'}
+        <p className="text-[10px] uppercase tracking-wider mb-1 opacity-70">
+          {isOpenTime ? 'Time Elapsed' : isOvertime ? 'Overtime' : 'Time Left'}
         </p>
-        <div className={`font-black text-4xl tabular-nums tracking-tight ${
-          timer.isOvertime ? 'text-rose-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'
-        }`}>
+        <div className="font-black text-4xl tabular-nums tracking-tight text-white">
           {timer.mm}:{timer.ss}
         </div>
 
-        {/* Progress bar */}
-        <div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-          {!timer.isOvertime && (
-            <div
-              className={`h-full rounded-full transition-all duration-1000 ${
-                timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500'
-              }`}
-              style={{ width: `${timer.percentLeft}%` }}
-            />
+        <div className="mt-2 h-1.5 bg-black/40 rounded-full overflow-hidden relative">
+          {!isOvertime && !isOpenTime && (
+            <div className={`h-full rounded-full transition-all duration-1000 ${barClass}`} style={{ width: `${timer.percentLeft}%` }} />
           )}
-          {timer.isOvertime && (
-            <div className="h-full w-full bg-rose-500/40 animate-pulse" />
+          {isOvertime && <div className={`h-full w-full ${barClass}`} />}
+          {isOpenTime && (
+            <div className="h-full w-full bg-blue-900/50 overflow-hidden relative">
+              <div className={`absolute inset-0 w-1/2 ${barClass} animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] skew-x-12`} />
+            </div>
           )}
         </div>
       </div>
@@ -133,7 +167,7 @@ function TableCard({ table, tick }: { table: Table; tick: number }) {
 }
 
 // ── Queue Row ──────────────────────────────────────────────────
-function QueueRow({ item, position }: { item: QueueItem; position: number }) {
+function QueueRow({ item, position, estWait }: { item: QueueItem; position: number; estWait: string }) {
   return (
     <div className={`flex items-center gap-4 px-4 py-3 rounded-xl border ${
       item.status === 'called'
@@ -161,11 +195,12 @@ function QueueRow({ item, position }: { item: QueueItem; position: number }) {
           <span className="text-xs text-emerald-400 font-semibold">Proceed to Table</span>
         </div>
       ) : (
-        <div className="text-right flex-shrink-0">
-          <p className="text-xs font-semibold text-neutral-400">
-            {formatWaitTime(item.arrivalTime, position)}
-          </p>
-          <p className="text-[10px] text-neutral-600">est. wait</p>
+        <div className="text-right flex-shrink-0 flex flex-col items-end">
+          <div className="flex items-center gap-1 text-emerald-400 font-semibold text-xs">
+            <Sparkles size={10} />
+            <span>{estWait}</span>
+          </div>
+          <p className="text-[9px] text-neutral-600 uppercase tracking-wider font-semibold">AI Estimate</p>
         </div>
       )}
     </div>
@@ -173,19 +208,49 @@ function QueueRow({ item, position }: { item: QueueItem; position: number }) {
 }
 
 // ── Main Component ─────────────────────────────────────────────
+// ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
-  const { tables, queue } = useAppContext();
+  // 🟢 Extract refreshLiveMonitor and rates from context
+  const { tables, queue, refreshLiveMonitor, rates } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
 
-  // Refresh timers every second
+  // Refresh timers and check for database updates
   useEffect(() => {
     const id = setInterval(() => {
-      setTick(t => t + 1);
+      setTick(t => {
+        // 🟢 Every 3 seconds (ticks), silently fetch new data from local SQLite
+        if (t % 3 === 0) {
+          refreshLiveMonitor();
+        }
+        return t + 1;
+      });
       setNow(new Date());
     }, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [refreshLiveMonitor]);
+
+  // --- GLOBAL AI WAIT-TIME ESTIMATOR ---
+  const calculateAIWaitTime = (position: number) => {
+    const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
+    if (activeTables.length === 0) return "0 mins";
+
+    const remainingTimes = activeTables.map(t => {
+      // If it's an open time, assume a default 2 hour block for estimation purposes
+      const duration = t.session?.durationMinutes || 120;
+      const endTime = addMinutes(new Date(t.session!.startTime), duration);
+      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
+    }).sort((a, b) => a - b);
+
+    // AI Pattern: Soonest table free + 2 mins turnaround + 15 mins step penalty per position ahead
+    const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
+    const estimatedMinutes = baseWait + 2 + ((position - 1) * 15);
+
+    if (estimatedMinutes < 60) return `${estimatedMinutes} mins`;
+    const h = Math.floor(estimatedMinutes / 60);
+    const m = estimatedMinutes % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  };
 
   const availableCount = tables.filter(t => t.status === 'available').length;
   const occupiedCount = tables.filter(t => t.status === 'occupied').length;
@@ -196,8 +261,8 @@ export function LiveMonitor() {
   const dateStr = now.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="min-h-screen bg-neutral-950 flex flex-col overflow-auto">
-      {/* ── Header Bar ── */}
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col overflow-auto">
+      {/* Header Bar */}
       <header className="flex-none bg-black/60 border-b border-neutral-800/80 px-6 py-4 flex items-center justify-between backdrop-blur-sm">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-950">
@@ -216,7 +281,7 @@ export function LiveMonitor() {
         </div>
       </header>
 
-      {/* ── Status Summary Bar ── */}
+      {/* Status Summary Bar */}
       <div className="flex-none bg-neutral-900/50 border-b border-neutral-800/50 px-6 py-3 flex items-center gap-6">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)]" />
@@ -227,8 +292,8 @@ export function LiveMonitor() {
           <span className="text-sm font-semibold text-amber-300">{occupiedCount} In Use</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-          <span className="text-sm font-semibold text-blue-300">{reservedCount} Reserved</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+          <span className="text-sm font-semibold text-sky-300">{reservedCount} Reserved</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -236,7 +301,7 @@ export function LiveMonitor() {
         </div>
       </div>
 
-      {/* ── Main Body ── */}
+      {/* Main Body */}
       <div className="flex-1 flex flex-col lg:flex-row gap-0 overflow-hidden">
 
         {/* Tables Section */}
@@ -247,16 +312,18 @@ export function LiveMonitor() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
             {tables.map(table => (
-              <TableCard key={table.id} table={table} tick={tick} />
+              <TableCard key={table.id} table={table} />
             ))}
           </div>
 
           {/* Legend */}
-          <div className="mt-6 flex flex-wrap gap-4 text-[11px] text-neutral-600">
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-emerald-700" /> Available — walk up to any open table</div>
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-neutral-700" /> In Use — countdown shows remaining time</div>
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-blue-800" /> Reserved — pre-booked slot</div>
-            <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-rose-800" /> Overtime — please see staff</div>
+          <div className="mt-6 flex flex-wrap gap-4 text-[11px] text-neutral-600 font-medium">
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Open</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> In Use</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /> Open Time</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500" /> Overtime</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500" /> Reserved</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-orange-500" /> Maintenance</div>
           </div>
         </div>
 
@@ -267,7 +334,9 @@ export function LiveMonitor() {
               <div className="w-1 h-5 bg-amber-500 rounded-full" />
               <h2 className="text-sm font-bold text-neutral-300 uppercase tracking-widest">Walk-in Queue</h2>
             </div>
-            <p className="text-[11px] text-neutral-600 pl-3.5">First Come, First Served</p>
+            <p className="text-[11px] text-neutral-600 pl-3.5 flex items-center gap-1">
+              <Sparkles size={11} className="text-emerald-400" /> Powered by Predictive AI
+            </p>
           </div>
 
           <div className="flex-1 overflow-auto p-4">
@@ -284,7 +353,7 @@ export function LiveMonitor() {
             ) : (
               <div className="space-y-2">
                 {waitingQueue.map((item, i) => (
-                  <QueueRow key={item.id} item={item} position={i + 1} />
+                  <QueueRow key={item.id} item={item} position={i + 1} estWait={calculateAIWaitTime(i + 1)} />
                 ))}
               </div>
             )}
@@ -298,12 +367,8 @@ export function LiveMonitor() {
                 <span className="text-neutral-300 font-semibold">{waitingQueue.length}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-neutral-600">Rate per hour</span>
-                <span className="text-neutral-300 font-semibold">₱250 / hr</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-neutral-600">Happy Hour (6–8PM)</span>
-                <span className="text-amber-400 font-semibold">₱200 / hr</span>
+                <span className="text-neutral-600">Base Rate per hour</span>
+                <span className="text-emerald-400 font-semibold">₱{rates?.hourlyRate || 0} / hr</span>
               </div>
             </div>
             <p className="text-[10px] text-neutral-700 text-center mt-3 leading-relaxed">
@@ -312,17 +377,6 @@ export function LiveMonitor() {
           </div>
         </div>
       </div>
-
-      {/* ── Footer ── */}
-      <footer className="flex-none bg-black/40 border-t border-neutral-800/50 px-6 py-2 flex items-center justify-between">
-        <p className="text-[11px] text-neutral-700">Autobase OAX, San Juan, Cainta, Rizal · Mon–Sat 12PM–3AM · Sun 5PM–3AM</p>
-        <a
-          href="/staff"
-          className="text-[11px] text-neutral-700 hover:text-neutral-500 transition-colors"
-        >
-          ← Staff Dashboard
-        </a>
-      </footer>
     </div>
   );
 }

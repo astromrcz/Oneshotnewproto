@@ -1,11 +1,24 @@
 {
-  "name": "@figma/my-make-file",
+  "name": "oneshot-bar-billiards-app",
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
+    "dev": "vite",
     "build": "vite build",
-    "dev": "vite"
+    "electron:dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.oneshot.pos",
+    "productName": "One Shot POS",
+    "directories": {
+      "output": "release/"
+    },
+    "win": {
+      "target": "nsis"
+    }
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -72,8 +85,13 @@
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "tailwindcss": "4.1.12",
-    "vite": "6.3.5"
+    "vite": "6.3.5",
+    "wait-on": "^9.0.10"
   },
   "peerDependencies": {
     "react": "18.3.1",

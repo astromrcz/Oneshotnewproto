@@ -5,9 +5,10 @@ import {
   Tag, Shield, Palette,
   Menu, X, Bell, ChevronRight,
   Circle, LogOut, Settings,
-  Monitor, ShieldCheck
+  Monitor, ShieldCheck, Lock, ShieldAlert, Package, History
 } from 'lucide-react';
 import { useAppContext } from './context/AppContext';
+import { LockScreen } from './components/LockScreen';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
 const navItems = [
@@ -16,7 +17,9 @@ const navItems = [
   { to: '/staff/reservations',        icon: Calendar,    label: 'Reservations' },
   { to: '/staff/queue',               icon: UserPlus,    label: 'Queue' },
   { to: '/staff/promo-codes',         icon: Tag,         label: 'Promo Codes' },
-  { to: '/staff/activity',            icon: Shield,      label: 'Activity Log' },
+  { to: '/staff/history',             icon: History,     label: 'Session History' }, // 🟢 NEW
+  { to: '/staff/lost-found',          icon: Package,     label: 'Lost & Found' },
+  { to: '/staff/watchlist',           icon: ShieldAlert, label: 'Security Watchlist' },
   { to: '/staff/settings',            icon: Settings,    label: 'Settings' },
 ];
 
@@ -25,8 +28,10 @@ const pageTitles: Record<string, string> = {
   '/staff/tables': 'Table Monitor',
   '/staff/reservations': 'Reservations',
   '/staff/queue': 'Queue Management',
+  '/staff/lost-found': 'Lost & Found',       
+  '/staff/watchlist': 'Security Watchlist',
   '/staff/promo-codes': 'Promo Codes',
-  '/staff/activity': 'Activity Log',
+  '/staff/history': 'Session History',
   '/staff/settings': 'Settings',
 };
 
@@ -34,7 +39,8 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const { queue, tables, activities, staffLoggedIn, staffLogout } = useAppContext();
+  const [isLocked, setIsLocked] = useState(false);
+  const { queue, tables, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -69,6 +75,8 @@ export function Layout() {
 
   return (
     <div className="flex h-screen bg-neutral-900 text-neutral-100 overflow-hidden">
+      <LockScreen isLocked={isLocked} onUnlock={() => setIsLocked(false)} userType="staff" />
+      
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div
@@ -176,18 +184,14 @@ export function Layout() {
             <span className="flex-1 text-left">Admin Portal</span>
             <span className="text-[9px] text-amber-700 font-black">↗</span>
           </button>
-          <div className="flex items-center gap-2 text-neutral-600">
-            <Circle size={8} className="fill-emerald-500 text-emerald-500" />
-            <span className="text-xs">Mon–Sat 12PM–3AM · Sun 5PM–3AM</span>
-          </div>
-          <p className="text-[10px] text-neutral-700 mt-1 pl-3.5">Autobase OAX, San Juan, Cainta, Rizal</p>
+          
         </div>
       </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header */}
-        <header className="h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
+        <header className="relative z-50 h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <button
               className="lg:hidden text-neutral-400 hover:text-neutral-200 p-1"
@@ -259,15 +263,15 @@ export function Layout() {
                 className="flex items-center gap-2 bg-neutral-800/60 rounded-full pl-1 pr-3 py-1 border border-neutral-700/50 hover:bg-neutral-800 transition-colors"
               >
                 <div className="w-7 h-7 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold">
-                  S
+                  {staffProfile?.fullName?.charAt(0) || 'S'}
                 </div>
-                <span className="text-xs text-neutral-400 font-medium">Staff</span>
+                <span className="text-xs text-neutral-400 font-medium">{staffProfile?.fullName || 'Staff'}</span>
               </button>
               {showUserMenu && (
                 <div className="absolute right-0 top-full mt-2 w-48 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
                   <div className="px-4 py-3 border-b border-neutral-800">
-                    <p className="text-sm font-semibold text-neutral-200">Staff User</p>
-                    <p className="text-xs text-neutral-500">admin@oneshot.com</p>
+                    <p className="text-sm font-semibold text-neutral-200">{staffProfile?.fullName || 'Staff User'}</p>
+                    <p className="text-xs text-neutral-500">{staffProfile?.email || 'staff@oneshot.com'}</p>
                   </div>
                   <NavLink
                     to="/staff/settings"
@@ -277,6 +281,13 @@ export function Layout() {
                     <Settings size={14} />
                     Settings
                   </NavLink>
+                  <button
+                    onClick={() => { setIsLocked(true); setShowUserMenu(false); }}
+                    className="w-full px-4 py-2.5 text-left text-sm text-amber-400 hover:bg-neutral-900/60 transition-colors flex items-center gap-2 border-t border-neutral-800"
+                  >
+                    <Lock size={14} />
+                    Lock Device
+                  </button>
                   <button
                     onClick={handleLogout}
                     className="w-full px-4 py-2.5 text-left text-sm text-rose-400 hover:bg-neutral-900/60 transition-colors flex items-center gap-2 border-t border-neutral-800"

@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, Calendar as CalendarIcon, AlertCircle, Star } from 'lucide-react';
-import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes } from 'date-fns';
+import { 
+  UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, 
+  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Info, Plus, Minus 
+} from 'lucide-react';
+import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, addMinutes, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
 
 export function Queue() {
@@ -17,11 +20,43 @@ export function Queue() {
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
 
+  // Live clock for AI calculation
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Priority queue: checked-in reservation customers jump ahead
   const checkedInReservations = reservations.filter((r: any) => r.status === 'checked-in');
   const waiting = queue.filter((q: any) => q.status === 'waiting');
   const called = queue.filter((q: any) => q.status === 'called');
   const availableTables = tables.filter((t: any) => t.status === 'available');
+
+  // --- AI WAIT-TIME ESTIMATOR (PROTOTYPE LOGIC) ---
+  const calculateAIWaitTime = () => {
+    if (waiting.length === 0) return "No wait";
+
+    // Get all occupied tables and find how many minutes they have left
+    const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
+    if (activeTables.length === 0) return "Available immediately";
+
+    const remainingTimes = activeTables.map((t: any) => {
+      const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
+      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
+    }).sort((a: number, b: number) => a - b); // Sort from ending soonest to longest
+
+    // Prototype "AI" Math: Grab the table ending soonest, add 2 mins for cleaning, 
+    // and add 15 mins penalty for every person ahead in the queue.
+    const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
+    const estimatedMinutes = baseWait + 2 + (waiting.length * 15);
+
+    if (estimatedMinutes < 60) return `~${estimatedMinutes} mins`;
+    const hrs = Math.floor(estimatedMinutes / 60);
+    const mins = estimatedMinutes % 60;
+    return `~${hrs}h ${mins}m`;
+  };
 
   // Get upcoming reservations (today and future)
   const upcomingReservations = reservations
@@ -94,6 +129,7 @@ export function Queue() {
               <input
                 type="text"
                 value={name}
+                maxLength={20}
                 onChange={e => setName(e.target.value)}
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
                 placeholder="Customer name"
@@ -106,6 +142,7 @@ export function Queue() {
               <input
                 type="tel"
                 value={contact}
+                maxLength={20}
                 onChange={e => setContact(e.target.value)}
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
                 placeholder="09xx-xxx-xxxx"
@@ -113,21 +150,10 @@ export function Queue() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Party Size</label>
-              <div className="flex gap-2">
-                {[1, 2, 3, 4, 5, 6].map(n => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setPartySize(n)}
-                    className={`flex-1 py-2 rounded-lg border text-xs font-bold transition-all ${
-                      partySize === n
-                        ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
-                        : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
+              <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-lg p-1.5">
+                <button type="button" onClick={() => setPartySize(p => Math.max(1, p - 1))} className="flex-1 h-8 flex items-center justify-center bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-md transition-colors"><Minus size={14}/></button>
+                <span className="w-12 text-center text-sm font-bold text-neutral-200">{partySize}</span>
+                <button type="button" onClick={() => setPartySize(p => p + 1)} className="flex-1 h-8 flex items-center justify-center bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-md transition-colors"><Plus size={14}/></button>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -135,6 +161,7 @@ export function Queue() {
               <input
                 type="text"
                 value={notes}
+                maxLength={100}
                 onChange={e => setNotes(e.target.value)}
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
                 placeholder="Special requests..."
@@ -206,9 +233,20 @@ export function Queue() {
             </div>
           )}
 
-          <h2 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400" /> Walk-in Queue ({waiting.length})
-          </h2>
+          <div className="flex items-center justify-between mb-2 mt-4">
+            <h2 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400" /> Walk-in Queue ({waiting.length})
+            </h2>
+          </div>
+
+          {/* AI WAIT TIME CARD */}
+          <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles size={14} className="text-emerald-400" />
+              <span className="text-xs text-emerald-300 font-semibold">AI Est. Wait Time</span>
+            </div>
+            <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
+          </div>
 
           {waiting.length === 0 ? (
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 text-center">
@@ -336,10 +374,21 @@ export function Queue() {
                   </div>
                   {waiting.length > 0 && (
                     <button
-                      onClick={() => navigate('/staff/tables')}
+                      onClick={() => {
+                        sessionStorage.setItem('assignCustomer', JSON.stringify({
+                          kind: 'queue',
+                          id: waiting[0].id,
+                          name: waiting[0].customerName,
+                          partySize: waiting[0].partySize,
+                          contact: waiting[0].contactNumber,
+                          notes: waiting[0].notes
+                        }));
+                        sessionStorage.setItem('assignTableId', table.id);
+                        navigate('/staff/tables');
+                      }}
                       className="w-full text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-700/30 py-2 rounded-lg transition-colors font-medium"
                     >
-                      Assign to {waiting[0]?.customerName}
+                      Assign {waiting[0]?.customerName} to {table.name}
                     </button>
                   )}
                 </div>

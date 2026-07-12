@@ -1,24 +1,26 @@
 // Staff view: Read-only promo codes. Creation/deletion is managed in the Admin portal.
 import { useAppContext, PromoCode } from '../context/AppContext';
-import { Tag, Copy, CheckCircle, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { Tag, ShieldCheck } from 'lucide-react';
 import { format } from 'date-fns';
 
 export function PromoCodesPage() {
   const { promoCodes } = useAppContext();
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  const handleCopy = (code: string, id: string) => {
-    navigator.clipboard.writeText(code).catch(() => {});
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
 
   const getStatus = (p: PromoCode) => {
     if (!p.isActive) return { label: 'Inactive', color: 'bg-neutral-700/40 text-neutral-500 border-neutral-700' };
     if (p.usageCount >= p.maxUsage) return { label: 'Exhausted', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
     if (p.expiresAt && new Date() > new Date(p.expiresAt)) return { label: 'Expired', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
     return { label: 'Active', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
+  };
+
+  // 🟢 NEW: Function to mask the promo code (e.g., WELCOME20 -> W***O***0)
+  const maskCode = (code: string) => {
+    if (!code) return '';
+    if (code.length <= 3) return '***';
+    const mid = Math.floor(code.length / 2);
+    return code.split('').map((char, i) => 
+      (i === 0 || i === mid || i === code.length - 1) ? char : '*'
+    ).join('');
   };
 
   const activeCount = promoCodes.filter(p => p.isActive).length;
@@ -31,7 +33,7 @@ export function PromoCodesPage() {
         <ShieldCheck size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
         <p className="text-xs text-amber-600/80 leading-relaxed">
           Promo codes are managed in the <strong className="text-amber-500">Admin Portal</strong>. This page is read-only.
-          Contact your administrator to create, edit, or delete codes.
+          Exact codes are hidden for security purposes. Contact your administrator to issue new codes.
         </p>
       </div>
 
@@ -72,24 +74,22 @@ export function PromoCodesPage() {
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <div className="flex items-center gap-1.5 bg-neutral-800 rounded-lg px-3 py-1">
                       <Tag size={11} className="text-neutral-400" />
-                      <span className="text-sm font-black text-white tracking-wider">{pc.code}</span>
+                      {/* 🟢 NEW: Code is now run through the mask helper */}
+                      <span className="text-sm font-black text-white tracking-widest">{maskCode(pc.code)}</span>
                     </div>
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${status.color}`}>{status.label}</span>
                   </div>
                   <p className="text-xs text-neutral-400 mb-2">{pc.description}</p>
                   <div className="flex items-center gap-4 text-[11px] text-neutral-600">
-                    <span>Used: <strong className="text-neutral-400">{pc.usageCount}</strong> / {pc.maxUsage}</span>
+                    <span>Used: <strong className="text-neutral-400">{pc.usageCount}</strong> / {pc.isLimitedUses === false ? 'Unlimited' : pc.maxUsage}</span>
                     {pc.expiresAt && <span>Expires: <strong className="text-neutral-400">{format(new Date(pc.expiresAt), 'MMM d, yyyy')}</strong></span>}
-                    <span>Created: {format(new Date(pc.createdAt), 'MMM d')}</span>
+                    {pc.createdAt && <span>Created: {format(new Date(pc.createdAt), 'MMM d')}</span>}
                   </div>
                   <div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden w-full max-w-xs">
                     <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: `${Math.min((pc.usageCount/pc.maxUsage)*100,100)}%` }} />
                   </div>
                 </div>
-                <button onClick={() => handleCopy(pc.code, pc.id)} title="Copy code"
-                  className="p-2 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors flex-shrink-0">
-                  {copiedId === pc.id ? <CheckCircle size={15} className="text-emerald-400" /> : <Copy size={15} />}
-                </button>
+                {/* 🟢 NEW: Removed the Copy to Clipboard button entirely to ensure security */}
               </div>
             </div>
           );

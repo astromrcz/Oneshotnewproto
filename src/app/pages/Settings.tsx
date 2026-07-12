@@ -1,21 +1,26 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
-  User, Lock, Mail, Phone, Shield, Eye, EyeOff,
+  User, Lock, Mail, Phone, Eye, EyeOff,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
-  AlertTriangle, LogOut
+  AlertTriangle, UploadCloud, BarChart2, CalendarCheck, 
+  ShoppingCart, LayoutGrid, Clock
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { formatDistanceToNow } from 'date-fns';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
-type Section = 'profile' | 'security' | 'account';
+type Section = 'overview' | 'profile' | 'security';
 
 export function SettingsPage() {
-  const { staffProfile, updateStaffProfile, staffLogout } = useAppContext();
+  const { staffProfile, updateStaffProfile, staffLogout, activities } = useAppContext();
   const navigate = useNavigate();
 
-  const [activeSection, setActiveSection] = useState<Section>('profile');
+  const [activeSection, setActiveSection] = useState<Section>('overview');
   const [saved, setSaved] = useState<string | null>(null);
+  
+  // Profile Picture State
+  const [avatarImg, setAvatarImg] = useState<string | null>(staffProfile.avatarImg || null);
 
   // ── Profile Form ────────────────────────────────────────────
   const [profileEdit, setProfileEdit] = useState(false);
@@ -37,6 +42,21 @@ export function SettingsPage() {
   const [showPw, setShowPw] = useState({ current: false, new: false, confirm: false });
   const [secError, setSecError] = useState('');
 
+  // ── Performance Stats (Derived from Activity Logs) ──────────
+  const userActivities = useMemo(() => {
+    // Filter activities where the action was performed by the current user
+    return activities.filter(a => a.description.includes(`(Action by: ${staffProfile.fullName})`));
+  }, [activities, staffProfile.fullName]);
+
+  const stats = useMemo(() => {
+    return {
+      total: userActivities.length,
+      reservations: userActivities.filter(a => a.type.includes('reservation')).length,
+      posOrders: userActivities.filter(a => a.type === 'pos_order').length,
+      tablesAssigned: userActivities.filter(a => a.type === 'table_assigned').length,
+    };
+  }, [userActivities]);
+
   // ── Save helpers ────────────────────────────────────────────
   const flashSaved = (key: string) => {
     setSaved(key);
@@ -48,7 +68,7 @@ export function SettingsPage() {
       fullName: profileForm.fullName,
       email:    profileForm.email,
       phone:    profileForm.phone,
-      role:     profileForm.role,
+      avatarImg: avatarImg || undefined, 
     });
     setProfileEdit(false);
     flashSaved('profile');
@@ -75,24 +95,46 @@ export function SettingsPage() {
   };
 
   const tabs: { id: Section; label: string; icon: React.ElementType }[] = [
+    { id: 'overview', label: 'Overview', icon: BarChart2 },
     { id: 'profile',  label: 'Profile',  icon: User },
     { id: 'security', label: 'Security', icon: Lock },
-    { id: 'account',  label: 'Account',  icon: Shield },
   ];
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6 pb-12">
       {/* ── Header card ── */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex items-center gap-5">
-        <img
-          src={logoImg}
-          alt="One Shot Bar & Billiards"
-          className="w-16 h-16 object-contain rounded-2xl flex-shrink-0"
-        />
+        
+        {/* Profile Picture Changer */}
+        <div className="relative group w-20 h-20 rounded-2xl flex-shrink-0 overflow-hidden border border-neutral-800 bg-neutral-900">
+          <img
+            src={avatarImg || logoImg}
+            alt="Profile Avatar"
+            className="w-full h-full object-cover"
+          />
+          <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity">
+            <input 
+              type="file" 
+              accept="image/*" 
+              className="hidden" 
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) setAvatarImg(URL.createObjectURL(file));
+              }}
+            />
+            <UploadCloud size={16} className="text-white mb-1" />
+            <span className="text-[10px] text-white font-semibold">Change</span>
+          </label>
+        </div>
+
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-black text-neutral-100">{staffProfile.fullName}</h2>
-          <p className="text-sm text-neutral-400">{staffProfile.role} · @{staffProfile.username}</p>
-          <p className="text-xs text-neutral-600 mt-0.5">{staffProfile.email}</p>
+          <h2 className="text-xl font-black text-neutral-100">{staffProfile.fullName}</h2>
+          <p className="text-sm text-neutral-400 font-medium">{staffProfile.role} · @{staffProfile.username}</p>
+          <div className="flex items-center gap-3 mt-1.5">
+            <span className="text-xs text-neutral-500 bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded-md flex items-center gap-1.5">
+              <Mail size={10} /> {staffProfile.email}
+            </span>
+          </div>
         </div>
         {saved && (
           <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-xs px-3 py-2 rounded-xl">
@@ -121,6 +163,74 @@ export function SettingsPage() {
       </div>
 
       {/* ════════════════════════════════════════════════════════
+          OVERVIEW / STATS TAB
+      ════════════════════════════════════════════════════════ */}
+      {activeSection === 'overview' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col justify-between">
+               <div className="flex justify-between items-start mb-2">
+                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Total Actions</p>
+                 <BarChart2 size={14} className="text-emerald-500" />
+               </div>
+               <p className="text-3xl font-black text-white">{stats.total}</p>
+             </div>
+             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col justify-between">
+               <div className="flex justify-between items-start mb-2">
+                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Bookings</p>
+                 <CalendarCheck size={14} className="text-blue-500" />
+               </div>
+               <p className="text-3xl font-black text-white">{stats.reservations}</p>
+             </div>
+             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col justify-between">
+               <div className="flex justify-between items-start mb-2">
+                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">POS Orders</p>
+                 <ShoppingCart size={14} className="text-amber-500" />
+               </div>
+               <p className="text-3xl font-black text-white">{stats.posOrders}</p>
+             </div>
+             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col justify-between">
+               <div className="flex justify-between items-start mb-2">
+                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Tables Seated</p>
+                 <LayoutGrid size={14} className="text-purple-500" />
+               </div>
+               <p className="text-3xl font-black text-white">{stats.tablesAssigned}</p>
+             </div>
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden p-6">
+            <h3 className="text-sm font-bold text-neutral-100 mb-4 flex items-center gap-2">
+              <Clock size={16} className="text-emerald-500" /> Your Recent Activity
+            </h3>
+            
+            <div className="space-y-3">
+              {userActivities.length === 0 ? (
+                <p className="text-xs text-neutral-500 italic">No recent activity found under your profile.</p>
+              ) : (
+                userActivities.slice(0, 5).map(act => (
+                  <div key={act.id} className="flex items-start gap-3 p-3 bg-neutral-900 border border-neutral-800/60 rounded-xl hover:border-neutral-700 transition-colors">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-neutral-300 font-medium mb-1">
+                        {/* Remove the (Action by: Name) tag for a cleaner display since this is their personal log */}
+                        {act.description.replace(/\s*\(Action by:.*?\)/, '')}
+                      </p>
+                      <div className="flex items-center gap-2 text-[10px] text-neutral-500">
+                        <span className="uppercase tracking-wider font-bold bg-neutral-800 px-1.5 py-0.5 rounded border border-neutral-700">
+                          {act.type.replace('_', ' ')}
+                        </span>
+                        <span>{formatDistanceToNow(new Date(act.timestamp), { addSuffix: true })}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════
           PROFILE TAB
       ════════════════════════════════════════════════════════ */}
       {activeSection === 'profile' && (
@@ -144,49 +254,37 @@ export function SettingsPage() {
           </div>
 
           <div className="p-6 space-y-4">
-            {/* Full Name */}
             <FieldRow icon={User} label="Full Name" value={staffProfile.fullName}
               editing={profileEdit}
               input={<input type="text" value={profileForm.fullName} onChange={e => setProfileForm(f => ({ ...f, fullName: e.target.value }))}
                 className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50 focus:ring-1 focus:ring-emerald-600/20 transition-colors" />}
             />
 
-            {/* Email */}
             <FieldRow icon={Mail} label="Email Address" value={staffProfile.email}
               editing={profileEdit}
               input={<input type="email" value={profileForm.email} onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))}
                 className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50 focus:ring-1 focus:ring-emerald-600/20 transition-colors" />}
             />
 
-            {/* Phone */}
             <FieldRow icon={Phone} label="Phone Number" value={staffProfile.phone}
               editing={profileEdit}
               input={<input type="tel" value={profileForm.phone} onChange={e => setProfileForm(f => ({ ...f, phone: e.target.value }))}
                 className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50 focus:ring-1 focus:ring-emerald-600/20 transition-colors" />}
             />
 
-            {/* Role */}
             <FieldRow icon={Tag} label="Role / Position" value={staffProfile.role}
-              editing={profileEdit}
-              input={
-                <select value={profileForm.role} onChange={e => setProfileForm(f => ({ ...f, role: e.target.value }))}
-                  className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50 focus:ring-1 focus:ring-emerald-600/20 transition-colors">
-                  <option value="Manager">Manager</option>
-                  <option value="Supervisor">Supervisor</option>
-                  <option value="Staff">Staff</option>
-                  <option value="Cashier">Cashier</option>
-                </select>
-              }
+              editing={false}
+              input={null}
             />
 
-            {/* Joined */}
             <FieldRow icon={Calendar} label="Date Joined" value={new Date(staffProfile.joinedDate).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}
               editing={false}
               input={null}
             />
 
             {profileEdit && (
-              <div className="pt-2">
+              <div className="pt-2 flex items-center justify-between">
+                <p className="text-[10px] text-amber-500/80 italic">* Role updates must be requested from the Administrator.</p>
                 <button onClick={handleSaveProfile}
                   className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30">
                   <Save size={14} /> Save Changes
@@ -269,6 +367,15 @@ export function SettingsPage() {
                       {showPw.current ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
                   </div>
+                  <div className="flex justify-end mt-1.5">
+                    <button 
+                      type="button" 
+                      onClick={() => alert("Please contact the Administrator to reset your password.")}
+                      className="text-[10px] text-emerald-500 hover:text-emerald-400 font-semibold transition-colors"
+                    >
+                      Forgot current password?
+                    </button>
+                  </div>
                 </div>
 
                 {/* New password */}
@@ -317,7 +424,7 @@ export function SettingsPage() {
             )}
 
             {secEdit && (
-              <div className="pt-1">
+              <div className="pt-1 flex justify-end">
                 <button onClick={handleSaveSecurity}
                   className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30">
                   <Save size={14} /> Save Credentials
@@ -325,38 +432,6 @@ export function SettingsPage() {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════════════════════
-          ACCOUNT TAB
-      ════════════════════════════════════════════════════════ */}
-      {activeSection === 'account' && (
-        <div className="space-y-4">
-          {/* Account Overview */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4">
-            <h3 className="text-sm font-bold text-neutral-100">Account Overview</h3>
-
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { label: 'Username',   value: `@${staffProfile.username}`,    color: 'text-emerald-400' },
-                { label: 'Role',       value: staffProfile.role,              color: 'text-blue-400' },
-                { label: 'Email',      value: staffProfile.email,             color: 'text-neutral-300' },
-                { label: 'Phone',      value: staffProfile.phone,             color: 'text-neutral-300' },
-                { label: 'Full Name',  value: staffProfile.fullName,          color: 'text-neutral-300' },
-                { label: 'Joined',     value: new Date(staffProfile.joinedDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }), color: 'text-neutral-400' },
-              ].map(item => (
-                <div key={item.label} className="bg-neutral-900 border border-neutral-800 rounded-xl p-3">
-                  <p className="text-[10px] text-neutral-600 uppercase tracking-wider font-semibold mb-1">{item.label}</p>
-                  <p className={`text-sm font-semibold truncate ${item.color}`}>{item.value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          
-
-          
         </div>
       )}
     </div>

@@ -16,22 +16,33 @@ import { SettingsPage } from './pages/Settings';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminUsers } from './pages/AdminUsers';
 import { AdminTableManagement } from './pages/AdminTableManagement';
-import { AdminRates } from './pages/AdminRates';
-import { AdminReservationTerms } from './pages/AdminReservationTerms';
 import { AdminAnnouncements } from './pages/AdminAnnouncements';
-import { AdminCalendar } from './pages/AdminCalendar';
 import { AdminEvents } from './pages/AdminEvents';
 import { Analytics } from './pages/Analytics';
 import { FeedbackPage } from './pages/Feedback';
-import { TakoBot } from './pages/TakoBot';
+import { AdminInventory } from './pages/AdminInventory';
+import { AdminSiteSettings } from './pages/AdminSiteSettings';
+import AdminPolicyRatesEditor from './pages/AdminPolicyRatesEditor';
+// Security & Operations pages
+import { LostAndFound } from './pages/LostAndFound';
+import { Watchlist } from './pages/Watchlist';
+// Offline Login
+import { OfflineLogin } from './pages/OfflineLogin';
 import { NotFound } from './pages/NotFound';
+import { SessionHistory } from './pages/SessionHistory';
+
+const isDesktop = import.meta.env.VITE_APP_MODE === 'desktop';
 
 export const router = createBrowserRouter([
   {
     Component: RootWrapper,
     children: [
-      { path: '/',             Component: HomePage },
+      { 
+        path: '/', 
+        Component: isDesktop ? OfflineLogin : HomePage 
+      },
       { path: '/monitor',      Component: LiveMonitor },
+      
       // ── Staff Portal ──────────────────────────────────────
       {
         path: '/staff',
@@ -43,9 +54,13 @@ export const router = createBrowserRouter([
           { path: 'queue',                Component: Queue },
           { path: 'activity',             Component: ActivityLog },
           { path: 'promo-codes',          Component: PromoCodesPage },
+          { path: 'history',              Component: SessionHistory },
+          { path: 'lost-found',           Component: LostAndFound }, // 🟢 Kept here for Staff
+          { path: 'watchlist',            Component: Watchlist },    // 🟢 Kept here for Staff
           { path: 'settings',             Component: SettingsPage },
         ],
       },
+      
       // ── Admin Portal ──────────────────────────────────────
       {
         path: '/admin',
@@ -54,14 +69,17 @@ export const router = createBrowserRouter([
           { index: true,                    Component: AdminDashboard },
           { path: 'users',                  Component: AdminUsers },
           { path: 'tables',                 Component: AdminTableManagement },
-          { path: 'rates',                  Component: AdminRates },
-          { path: 'reservation-terms',      Component: AdminReservationTerms },
+          { path: 'inventory',              Component: AdminInventory },
+          { path: 'policy-rates',           Component: AdminPolicyRatesEditor },
+          { path: 'rates',                  Component: AdminPolicyRatesEditor },
+          { path: 'reservation-terms',      Component: AdminPolicyRatesEditor },
           { path: 'announcements',          Component: AdminAnnouncements },
-          { path: 'calendar',               Component: AdminCalendar },
           { path: 'events',                 Component: AdminEvents },
           { path: 'analytics',              Component: Analytics },
+          { path: 'activity',               Component: ActivityLog },
           { path: 'feedback',               Component: FeedbackPage },
-          { path: 'tako',                   Component: TakoBot },
+          { path: 'site-settings',          Component: AdminSiteSettings },
+          { path: 'settings',               Component: SettingsPage },
         ],
       },
       { path: '*', Component: NotFound },

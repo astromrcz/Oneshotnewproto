@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { supabase } from "../utils/supabase";
+import { supabase } from "@/utils/supabase";
+
 // ── Types (Pruned for Customer App) ────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
 
@@ -40,6 +41,10 @@ export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'comple
 
 export type Reservation = {
   id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
+  // 🟢 NEW: Refund Tracking
+  refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
+  refundMethod?: 'gcash' | 'cash' | 'session_credit';
+  refundNotes?: string;
 };
 
 export type Feedback = {
@@ -110,6 +115,7 @@ type AppContextType = {
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; 
   applyPromoCode: (c: string) => PromoCode | null;
   refreshLiveMonitor: () => Promise<void>;
+  acknowledgeRefund: (id: string) => void; // 🟢 NEW: Added refund acknowledgment
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -190,7 +196,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         if (cmsData) {
-          // Transform CMS Key-Value rows into a single config object
           const configObj = cmsData.reduce((acc: any, curr: any) => {
             acc[curr.keyName] = curr.settingValue;
             return acc;
@@ -252,23 +257,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     
-    // 1. Optimistic UI update (keeps the frontend feeling instantly fast)
     setReservations(prev => [...prev, newRes as Reservation]);
     
-    // 2. Sanitize the payload for strict PostgreSQL compatibility
     const supabasePayload = {
       ...newRes,
-      // Convert raw Date objects to ISO strings
       date: newRes.date.toISOString(), 
       createdAt: newRes.createdAt.toISOString(),
-      // Convert TypeScript booleans to SQLite-legacy Integers
       downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
       balancePaid: newRes.balancePaid ? 1 : 0,
-      // Strip the temporary browser 'blob:' URL so it doesn't crash the BYTEA column
       receiptImg: null 
     };
 
-    // 3. Fire and forget Supabase insert
     supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
       if (error) {
         console.error("Error inserting reservation to Supabase:", error);
@@ -282,11 +281,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
-    
-    // Optimistic UI update
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
-    
-    // Fire and forget Supabase insert
     supabase.from('feedback').insert([newFeedback]).then(({ error }) => {
       if (error) console.error("Error inserting feedback to Supabase:", error);
     });
@@ -301,6 +296,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
+  };
+
+  // 🟢 NEW: Acknowledge Refund action for the customer
+  const acknowledgeRefund = (id: string) => {
+    // Optimistic UI
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
+    
+    // Supabase update
+    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
+      if (error) console.error("Error updating refund status:", error);
+    });
   };
 
   if (isInitializing) {
@@ -320,7 +326,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tables, queue, reservations, promoCodes, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement, siteConfig, events,
-      addReservation, addFeedback, applyPromoCode, refreshLiveMonitor
+      addReservation, addFeedback, applyPromoCode, refreshLiveMonitor,
+      acknowledgeRefund // 🟢 NEW
     }}>
       {children}
     </AppContext.Provider>

@@ -119,7 +119,7 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser } = useAppContext() as any;
+  const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund } = useAppContext() as any; // 🟢 FIX: Added acknowledgeRefund
 
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
@@ -1302,6 +1302,83 @@ export function HomePage() {
                                 </div>
                               </div>
                             )}
+
+                            {/* 🟢 NEW: Refund Status Tracker */}
+                            {r.status === 'cancelled' && r.refundStatus && (
+                              <div className="mt-4 bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                                <h4 className="text-xs font-bold text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                  <Shield size={14} className="text-sky-500" /> Refund Status
+                                </h4>
+                                
+                                {r.refundStatus === 'pending' && (
+                                  <p className="text-xs text-amber-400 bg-amber-950/20 p-3 rounded-lg border border-amber-900/30">
+                                    Your refund request has been received and is currently in the queue for management review.
+                                  </p>
+                                )}
+
+                                {r.refundStatus === 'processing' && (
+                                  <p className="text-xs text-sky-400 bg-sky-950/20 p-3 rounded-lg border border-sky-900/30">
+                                    Management is currently processing your refund. You will receive an update shortly.
+                                  </p>
+                                )}
+
+                                {r.refundStatus === 'sent' && (
+                                  <div className="space-y-3">
+                                    <div className="bg-emerald-950/20 border border-emerald-900/40 p-3 rounded-lg">
+                                      <p className="text-sm font-bold text-emerald-400 mb-1">Refund Sent via GCash</p>
+                                      <p className="text-xs text-neutral-400">
+                                        We have successfully transferred <strong>₱{r.downPaymentAmount.toFixed(2)}</strong> back to your GCash account. Please check your SMS or GCash app inbox.
+                                      </p>
+                                      {r.refundNotes && <p className="text-[10px] text-neutral-500 mt-2 italic">Note: {r.refundNotes}</p>}
+                                    </div>
+                                    <button 
+                                      onClick={() => acknowledgeRefund(r.id)}
+                                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2.5 rounded-lg transition-colors shadow-lg shadow-emerald-900/20"
+                                    >
+                                      I Confirm Receipt of Refund
+                                    </button>
+                                  </div>
+                                )}
+
+                                {r.refundStatus === 'in_person' && (
+                                  <div className="flex items-center justify-between bg-neutral-900 p-3 rounded-lg border border-neutral-800">
+                                    <div>
+                                      <p className="text-sm font-bold text-neutral-200">Refund Claimed</p>
+                                      <p className="text-xs text-neutral-500">Refund was provided in cash at the counter.</p>
+                                    </div>
+                                    <button disabled className="bg-neutral-800 text-neutral-600 text-[10px] font-bold py-1.5 px-3 rounded cursor-not-allowed">
+                                      Completed
+                                    </button>
+                                  </div>
+                                )}
+
+                                {r.refundStatus === 'remediated' && (
+                                  <div className="bg-violet-950/20 border border-violet-900/30 p-3 rounded-lg">
+                                    <p className="text-sm font-bold text-violet-400 mb-1">Converted to Game Credit</p>
+                                    <p className="text-xs text-neutral-400">
+                                      Your down payment has been successfully transferred to a new table session. Enjoy your game!
+                                    </p>
+                                  </div>
+                                )}
+
+                                {r.refundStatus === 'acknowledged' && (
+                                  <div className="flex items-center gap-2 text-emerald-500 bg-emerald-950/10 p-3 rounded-lg border border-emerald-900/20">
+                                    <CheckCircle size={16} />
+                                    <div>
+                                      <p className="text-sm font-bold">Refund Completed</p>
+                                      <p className="text-xs text-emerald-500/70">You have acknowledged receipt of this refund.</p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {r.refundStatus === 'expired' && (
+                                  <p className="text-xs text-rose-400 bg-rose-950/20 p-3 rounded-lg border border-rose-900/30">
+                                    This refund request has expired as it was unclaimed for too long. Please contact support.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+
                           </div>
                           );
                         })}

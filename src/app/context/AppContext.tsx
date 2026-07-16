@@ -252,12 +252,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     
-    // Optimistic UI update
+    // 1. Optimistic UI update (keeps the frontend feeling instantly fast)
     setReservations(prev => [...prev, newRes as Reservation]);
     
-    // Fire and forget Supabase insert
-    supabase.from('reservations').insert([newRes]).then(({ error }) => {
-      if (error) console.error("Error inserting reservation to Supabase:", error);
+    // 2. Sanitize the payload for strict PostgreSQL compatibility
+    const supabasePayload = {
+      ...newRes,
+      // Convert raw Date objects to ISO strings
+      date: newRes.date.toISOString(), 
+      createdAt: newRes.createdAt.toISOString(),
+      // Convert TypeScript booleans to SQLite-legacy Integers
+      downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
+      balancePaid: newRes.balancePaid ? 1 : 0,
+      // Strip the temporary browser 'blob:' URL so it doesn't crash the BYTEA column
+      receiptImg: null 
+    };
+
+    // 3. Fire and forget Supabase insert
+    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+      if (error) {
+        console.error("Error inserting reservation to Supabase:", error);
+      } else {
+        console.log("Successfully saved to Supabase!");
+      }
     });
     
     return id;

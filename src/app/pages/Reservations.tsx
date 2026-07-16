@@ -26,7 +26,7 @@ const formatDate = (d: Date) => {
 const todayStart = startOfDay(new Date());
 
 export function Reservations() {
-  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, rates } = useAppContext();
+  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, rates, updateRefundStatus } = useAppContext() as any;
   
   const [showForm, setShowForm] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
@@ -43,6 +43,9 @@ export function Reservations() {
   const [voidModal, setVoidModal] = useState<{ type: 'downPayment' | 'balance'; id: string } | null>(null);
   const [voidPassword, setVoidPassword] = useState('');
   const [voidError, setVoidError] = useState('');
+  
+  // 🟢 NEW: Staff Refund Notes
+  const [refundNotes, setRefundNotes] = useState('');
 
   // 🟢 NEW: State for in-page image viewer
   const [viewImage, setViewImage] = useState<string | null>(null);
@@ -556,11 +559,11 @@ export function Reservations() {
                 <h2 className="text-xl font-black text-neutral-100">{selected.customerName}</h2>
                 <p className="text-sm text-neutral-500 font-mono tracking-wider mt-1">Reservation #{selected.id.toUpperCase()}</p>
               </div>
-              <button onClick={() => setSelectedId(null)} className="p-2.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-xl transition-colors">
+              <button onClick={() => { setSelectedId(null); setRefundNotes(''); }} className="p-2.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-xl transition-colors">
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-5 text-base">
                 <div className="space-y-1">
                   <p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Date & Time</p>
@@ -650,6 +653,65 @@ export function Reservations() {
                   </div>
                 </div>
               </div>
+
+              {/* 🟢 NEW: Staff Refund Management Panel */}
+              {selected.status === 'cancelled' && selected.downPaymentPaid && (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-neutral-500 uppercase tracking-wider font-bold">Refund Management</p>
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded uppercase tracking-wider ${
+                      selected.refundStatus === 'acknowledged' ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50' : 
+                      selected.refundStatus === 'expired' ? 'bg-rose-950/40 text-rose-400 border border-rose-900/50' : 
+                      'bg-neutral-800 text-neutral-300'
+                    }`}>
+                      {selected.refundStatus ? selected.refundStatus.replace('_', ' ') : 'Pending'}
+                    </span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm text-neutral-400">Refund Due:</p>
+                    <p className="font-black text-amber-400 text-lg">{formatPHP(selected.downPaymentAmount)}</p>
+                  </div>
+
+                  {selected.refundNotes && (
+                    <div className="bg-neutral-950 border border-neutral-800 p-3 rounded-lg">
+                      <p className="text-[10px] text-neutral-500 font-bold uppercase mb-1">Staff Notes / Ref #</p>
+                      <p className="text-sm text-neutral-300">{selected.refundNotes}</p>
+                    </div>
+                  )}
+
+                  {/* Hide controls if the refund is completely resolved */}
+                  {selected.refundStatus !== 'acknowledged' && selected.refundStatus !== 'in_person' && selected.refundStatus !== 'expired' && selected.refundStatus !== 'remediated' && (
+                    <div className="space-y-3 pt-3 border-t border-neutral-800/60">
+                      <input 
+                        type="text" 
+                        placeholder="Reference number or notes..." 
+                        value={refundNotes} 
+                        onChange={e => setRefundNotes(e.target.value)} 
+                        className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:border-emerald-500 outline-none" 
+                      />
+                      
+                      <div className="grid grid-cols-2 gap-2">
+                        <button onClick={() => updateRefundStatus(selected.id, 'processing', undefined, refundNotes)} className="px-3 py-2 bg-sky-600/10 hover:bg-sky-600/20 text-sky-400 border border-sky-600/20 text-xs font-bold rounded-lg transition-colors">
+                          Mark Processing
+                        </button>
+                        <button onClick={() => updateRefundStatus(selected.id, 'sent', 'gcash', refundNotes)} className="px-3 py-2 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-600/20 text-xs font-bold rounded-lg transition-colors">
+                          Sent via GCash
+                        </button>
+                        <button onClick={() => updateRefundStatus(selected.id, 'in_person', 'cash', refundNotes)} className="px-3 py-2 bg-amber-600/10 hover:bg-amber-600/20 text-amber-400 border border-amber-600/20 text-xs font-bold rounded-lg transition-colors">
+                          Claimed in Person
+                        </button>
+                        <button onClick={() => updateRefundStatus(selected.id, 'remediated', 'session_credit', refundNotes)} className="px-3 py-2 bg-violet-600/10 hover:bg-violet-600/20 text-violet-400 border border-violet-600/20 text-xs font-bold rounded-lg transition-colors">
+                          Apply as Credit
+                        </button>
+                        <button onClick={() => updateRefundStatus(selected.id, 'expired', undefined, refundNotes)} className="col-span-2 px-3 py-2 bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-600/20 text-xs font-bold rounded-lg transition-colors">
+                          Mark Expired (Unclaimed)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Status Actions */}
               <div className="flex gap-2.5 flex-wrap">

@@ -54,6 +54,10 @@ export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'comple
 
 export type Reservation = {
   id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
+  // 🟢 NEW: Refund Tracking
+  refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
+  refundMethod?: 'gcash' | 'cash' | 'session_credit';
+  refundNotes?: string;
 };
 
 export type Feedback = {
@@ -148,6 +152,7 @@ type AppContextType = {
   deleteWatchlistItem: (id: string) => void;
   sessionHistory: SessionHistoryItem[];
   addSessionHistory: (i: Omit<SessionHistoryItem, 'id'>) => void;
+  updateRefundStatus: (id: string, refundStatus: string, method?: string, notes?: string) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -182,6 +187,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
 
+  const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
+    // 1. Optimistic UI update
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } : r));
+    
+    // 2. Sync to local database (which will eventually sync to Supabase)
+    const payload = { refundStatus, refundMethod: method, refundNotes: notes };
+    syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`);
+    
+    // 3. Log the activity for the staff dashboard
+    addActivity('reservation_updated', `Reservation ${id} refund marked as ${refundStatus}`); 
+  };
+  
   const refreshLiveMonitor = async () => {
     try {
       const [tablesRes, queueRes] = await Promise.all([ fetch('http://localhost:3001/api/tables').catch(() => null), fetch('http://localhost:3001/api/queue').catch(() => null) ]);

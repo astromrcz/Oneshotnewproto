@@ -1,12 +1,26 @@
-import { RouterProvider } from 'react-router';
-import { router } from './routes';
-import { Toaster } from './components/ui/sonner';
+import { useState, useEffect } from 'react';
+import { supabase } from './utils/supabase';
 
 export default function App() {
+  const [todos, setTodos] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function getTodos() {
+      const { data: todos } = await supabase.from('todos').select();
+
+      if (todos) {
+        setTodos(todos);
+      }
+    }
+
+    getTodos();
+  }, []);
+
   return (
-    <>
-      <Toaster position="top-center" richColors />
-      <RouterProvider router={router} />
-    </>
+    <ul>
+      {todos.map((todo) => (
+        <li key={todo.id}>{todo.name}</li>
+      ))}
+    </ul>
   );
 }

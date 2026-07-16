@@ -3,7 +3,6 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
-
 function figmaAssetResolver() {
   return {
     name: 'figma-asset-resolver',
@@ -17,8 +16,9 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
-  base: './', // 🟢 ADDED THIS LINE FOR ELECTRON
-
+  // 🟢 CHANGED: Set to '/' for Vercel, or remove the line entirely
+  base: '/', 
+  
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if

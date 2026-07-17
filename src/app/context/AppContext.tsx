@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { supabase } from "@/utils/supabase";
+import { supabase } from "../utils/supabase";
 
 // ── Types (Pruned for Customer App) ────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';

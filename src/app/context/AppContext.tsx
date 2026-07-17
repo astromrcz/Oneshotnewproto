@@ -88,7 +88,8 @@ export type Event = {
 };
 
 export type StaffProfile = {
-  username: string; password: string; fullName: string; email: string; role: string; phone: string; joinedDate: string; avatarImg?: string;
+  username: string; password: string; fullName: string; email: string; role: string; phone: string; joinedDate: string; avatarImg?: string; 
+  isAdmin?: boolean; // 🟢 NEW: Added to track admin rights globally
 };
 
 export type StaffUser = {
@@ -184,9 +185,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [weatherConfig, setWeatherConfig] = useState({ lat: '', lon: '', name: '' });
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
-  const [staffLoggedIn, setStaffLoggedIn] = useState(false);
-  const [adminLoggedIn, setAdminLoggedIn] = useState(false);
-  const [staffProfile, setStaffProfile] = useState<StaffProfile>({ username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15' });
+ // 🟢 FIX: Initialize states from localStorage to survive refreshes and back/forward clicks
+  const [staffLoggedIn, setStaffLoggedIn] = useState(() => localStorage.getItem('oneshot_staff_auth') === 'true');
+  const [adminLoggedIn, setAdminLoggedIn] = useState(() => localStorage.getItem('oneshot_admin_auth') === 'true');
+  
+  const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
+    const saved = localStorage.getItem('oneshot_staff_profile');
+    return saved ? JSON.parse(saved) : { username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15', isAdmin: true };
+  });
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
@@ -213,33 +219,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
-    // 1. Emergency Failsafe Admin Reset
-    if (username === 'admin' && pin === '8492') { // 8492 is your master emergency PIN
-      // If you had a real admin object in your DB, you would update it here.
-      return { success: true, message: 'Master Admin password reset bypassed.' };
-    }
-
-    // 2. Find the user locally
-    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
-    if (!targetUser) {
-      return { success: false, message: 'User not found or inactive.' };
-    }
-
-    // 3. Verify the PIN
-    if (targetUser.recoveryPin !== pin) {
-      // Add a generic error to prevent brute-forcing
-      return { success: false, message: 'Invalid Username or Recovery PIN.' };
-    }
-
-    // 4. Update the password using your existing database sync function
-    updateStaffUser(targetUser.id, { password: newPassword });
-    
-    // Log the security event
-    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
-
-    return { success: true, message: 'Password reset successfully!' };
-  };
 
   const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
     // 1. Optimistic UI update
@@ -416,43 +395,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
 const staffLogin = async (u: string, p: string) => { 
-    // 1. Check local SQLite database state
     const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive); 
     if (valid) { 
       setStaffLoggedIn(true); 
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role });
+      localStorage.setItem('oneshot_staff_auth', 'true');
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: valid.isAdmin });
       return true; 
     }
-
-
     return false; 
   };
 
   const adminLogin = async (u: string, p: string) => { 
-    // 1. Check local SQLite database state (must have isAdmin flag)
     const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive && su.isAdmin);
     if (valid) {
       setAdminLoggedIn(true);
-      // Optional: Set staff profile as well so the admin has a name in the activity logs
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role });
+      localStorage.setItem('oneshot_admin_auth', 'true');
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true });
       return true;
     }
-
-    // 2. Hardcoded Emergency Failsafe
- 
-
     return false; 
   };
-  const staffLogout = () => setStaffLoggedIn(false);
-  const adminLogout = () => setAdminLoggedIn(false);
+
+  const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
+    // 1. Find the user locally
+    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
+    if (!targetUser) {
+      return { success: false, message: 'User not found or inactive.' };
+    }
+
+    // 2. Verify the PIN strictly against the database
+    if (targetUser.recoveryPin !== pin) {
+      return { success: false, message: 'Invalid Username or Recovery PIN.' };
+    }
+
+    // 3. Update the password
+    updateStaffUser(targetUser.id, { password: newPassword });
+    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
+
+    return { success: true, message: 'Password reset successfully!' };
+  };
+
+  const staffLogout = () => {
+    setStaffLoggedIn(false);
+    localStorage.removeItem('oneshot_staff_auth');
+  };
+
+  const adminLogout = () => {
+    setAdminLoggedIn(false);
+    localStorage.removeItem('oneshot_admin_auth');
+  };
   
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
     setStaffProfile(prev => {
       const updated = { ...prev, ...p };
+      localStorage.setItem('oneshot_staff_profile', JSON.stringify(updated)); // Persist profile
       fetch(`http://localhost:3001/api/staff/${updated.username}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).catch(e => {});
       return updated;
     });
   };
+  
+ 
 
   const assignTable = (tableId: string, session: Session) => {
     const updatedSession = { ...session, orders: [] };

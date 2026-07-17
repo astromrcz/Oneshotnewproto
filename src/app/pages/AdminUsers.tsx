@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
-import { Plus, X, User, Mail, Phone, RefreshCw, CheckCircle, Eye, EyeOff, Trash2, History, Activity } from 'lucide-react';
+import { Plus, X, User, Mail, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity } from 'lucide-react';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
   { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
@@ -14,12 +14,11 @@ type FormState = {
 const blankForm: FormState = { username: '', password: '', fullName: '', email: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
-  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword } = useAppContext();
+  const { staffUsers, activities, addStaffUser, updateStaffUser } = useAppContext();
   
   const [showForm, setShowForm]     = useState(false);
   const [form, setForm]             = useState<FormState>(blankForm);
   const [showPw, setShowPw]         = useState(false);
-  const [resetMsg, setResetMsg]     = useState<string | null>(null);
   
   const [viewTab, setViewTab]       = useState<'active' | 'archived'>('active');
   const [filterRole, setFilterRole] = useState<'all' | StaffUser['role']>('all');
@@ -28,35 +27,80 @@ export function AdminUsers() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.username || !form.fullName || !form.email) return;
-    const payload: Omit<StaffUser, 'id' | 'createdAt'> = {
+    
+    // 🟢 Validator: Ensure uniqueness
+    const isUsernameTaken = staffUsers.some(u => u.username.toLowerCase() === form.username.toLowerCase());
+    const isEmailTaken = staffUsers.some(u => u.email.toLowerCase() === form.email.toLowerCase());
+
+    if (isUsernameTaken) { alert("Error: That username is already taken."); return; }
+    if (isEmailTaken) { alert("Error: A user with this email address already exists."); return; }
+
+    if (!form.username || !form.fullName || !form.email) {
+      alert("Please fill all required fields.");
+      return;
+    }
+    
+    const payload = {
       ...form,
-      isActive: true, 
+      isActive: true,
+      recoveryPin: '', // Empty: Generator will fill this on first login
+      isFirstLogin: 1, // 🟢 Trigger the setup modal for this user
     };
-    addStaffUser(payload);
+    
+    addStaffUser(payload as any);
     setShowForm(false);
     setForm(blankForm);
+    
+    setTimeout(() => window.location.reload(), 500);
   };
 
-  const handleReset = (id: string, name: string) => {
-    resetStaffUserPassword(id);
-    setResetMsg(`Password for "${name}" reset to: password123`);
-    setTimeout(() => setResetMsg(null), 4000);
-  };
+  // 🟢 NEW: View PIN logic instead of Resetting Password
+ 
 
-  const handleArchive = (id: string, name: string) => {
+  const handleArchive = (id: string, name: string, username: string) => {
+    if (username === 'superadmin' || id === 'admin_001') {
+      alert("CRITICAL SECURITY ALERT: The Master Super Admin account cannot be archived or deleted.");
+      return;
+    }
+
     if (window.confirm(`Are you sure you want to remove ${name}? Their data will be archived.`)) {
+      const targetUser = staffUsers.find(u => u.id === id);
+      if (targetUser?.isAdmin) {
+         const activeAdmins = staffUsers.filter(u => u.isAdmin && u.isActive).length;
+         if (activeAdmins <= 1) {
+            alert("Action Denied: You cannot archive the last active admin. There must be at least one active admin in the system.");
+            return;
+         }
+      }
+
       updateStaffUser(id, { isActive: false });
+      setTimeout(() => window.location.reload(), 500);
     }
   };
 
   const handleRestore = (id: string) => {
     updateStaffUser(id, { isActive: true });
+    setTimeout(() => window.location.reload(), 500);
   };
 
-  const toggleAdmin = (id: string, currentStatus: boolean, role: string) => {
+  const toggleAdmin = (id: string, currentStatus: boolean, role: string, username: string) => {
     if (role === 'cashier') return; 
+    
+    if (username === 'superadmin' || id === 'admin_001') {
+      alert('Action Denied: The Master Super Admin must always retain administrator privileges.');
+      return;
+    }
+
+    if (currentStatus) {
+      const activeAdmins = staffUsers.filter(u => u.isAdmin && u.isActive).length;
+      if (activeAdmins <= 1) {
+        alert('Action Denied: There must be at least one active admin in the system.');
+        return;
+      }
+    }
+
     updateStaffUser(id, { isAdmin: !currentStatus });
+    setTimeout(() => window.location.reload(), 500);
   };
 
   const displayUsers = staffUsers.filter(u => {
@@ -84,9 +128,10 @@ export function AdminUsers() {
         ))}
       </div>
 
-      {resetMsg && (
-        <div className="flex items-center gap-2.5 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-sm px-4 py-3 rounded-xl">
-          <CheckCircle size={15} /> {resetMsg}
+      {/* 🟢 NEW: PIN Display Banner */}
+      {pinMsg && (
+        <div className="flex items-center gap-2.5 bg-sky-950/40 border border-sky-700/40 text-sky-400 text-sm px-4 py-3 rounded-xl animate-in fade-in">
+          <KeyRound size={15} className="flex-shrink-0" /> {pinMsg}
         </div>
       )}
 
@@ -185,7 +230,6 @@ export function AdminUsers() {
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   {viewTab === 'active' ? (
                     <>
-                      {/* 🟢 NEW: Inline Admin Privilege Toggle */}
                       <div 
                         className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${u.role === 'cashier' ? 'bg-neutral-900/50 border-neutral-800/50' : 'bg-neutral-900 border-neutral-800'} mr-1`}
                         title={u.role === 'cashier' ? "Admin privileges disabled for cashiers" : "Toggle Admin Access"}
@@ -196,15 +240,17 @@ export function AdminUsers() {
                         <button
                           type="button"
                           disabled={u.role === 'cashier'}
-                          onClick={() => toggleAdmin(u.id, u.isAdmin, u.role)}
+                          onClick={() => toggleAdmin(u.id, u.isAdmin, u.role, u.username)}
                           className={`relative w-7 h-4 rounded-full transition-colors ${u.role === 'cashier' ? 'bg-neutral-800 cursor-not-allowed' : (u.isAdmin ? 'bg-amber-500' : 'bg-neutral-700')}`}
                         >
                           <div className={`absolute top-[2px] left-[2px] w-3 h-3 bg-white rounded-full transition-transform ${u.isAdmin ? 'translate-x-3' : 'translate-x-0'}`} />
                         </button>
                       </div>
 
-                      <button onClick={() => handleReset(u.id, u.fullName)} className="p-2 rounded-lg text-neutral-500 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Reset Password"><RefreshCw size={14} /></button>
-                      <button onClick={() => handleArchive(u.id, u.fullName)} className="p-2 rounded-lg text-neutral-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive User"><Trash2 size={14} /></button>
+                      {/* 🟢 NEW: Key Icon triggers the PIN reveal */}
+                      <button onClick={() => handleViewPin(u.id, u.fullName)} className="p-2 rounded-lg text-neutral-500 hover:text-sky-400 hover:bg-sky-950/20 transition-colors" title="View Recovery PIN"><KeyRound size={14} /></button>
+                      
+                      <button onClick={() => handleArchive(u.id, u.fullName, u.username)} className="p-2 rounded-lg text-neutral-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive User"><Trash2 size={14} /></button>
                     </>
                   ) : (
                     <button onClick={() => handleRestore(u.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/50 hover:bg-emerald-900/50 transition-colors">
@@ -243,21 +289,34 @@ export function AdminUsers() {
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-7 pr-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors placeholder-neutral-600" placeholder="username" />
                 </div>
               </div>
-              <div>
-                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Password *</label>
-                <div className="relative">
-                  <input type={showPw ? 'text' : 'password'} value={form.password}
-                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 pr-10 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors placeholder-neutral-600"
-                    placeholder="Set password" />
-                  <button type="button" tabIndex={-1} onClick={() => setShowPw(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">
-                    {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Password *</label>
+                  <div className="relative">
+                    <input type={showPw ? 'text' : 'password'} value={form.password}
+                      onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 pr-10 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors placeholder-neutral-600"
+                      placeholder="Set password" />
+                    <button type="button" tabIndex={-1} onClick={() => setShowPw(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">
+                      {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 🟢 NEW: Recovery PIN Input */}
+                <div>
+                  <label className="text-xs text-amber-500 mb-1.5 block font-bold">Recovery PIN *</label>
+                  <input type="text" value={form.recoveryPin} maxLength={4}
+                    onChange={e => setForm(f => ({ ...f, recoveryPin: e.target.value.replace(/\D/g, '') }))} required
+                    className="w-full bg-amber-950/20 border border-amber-900/50 rounded-xl px-3 py-2.5 text-sm font-mono tracking-widest text-amber-400 text-center focus:outline-none focus:border-amber-500 transition-colors placeholder-amber-900/40"
+                    placeholder="0000" />
                 </div>
               </div>
+
               <div>
-                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Email (For Password Recovery) *</label>
+                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Email *</label>
                 <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required
                   className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors placeholder-neutral-600" placeholder="user@oneshot.com" />
               </div>

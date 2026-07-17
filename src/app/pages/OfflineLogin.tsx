@@ -40,6 +40,15 @@ export function OfflineLogin() {
     const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % sliderImages.length), 5000);
     return () => clearInterval(timer);
   }, [sliderImages.length]);
+  
+  // 🟢 NEW: If they hit "Back" to get to the login screen, bounce them back into the app instantly
+  useEffect(() => {
+    if (localStorage.getItem('oneshot_admin_auth') === 'true') {
+      navigate('/admin', { replace: true });
+    } else if (localStorage.getItem('oneshot_staff_auth') === 'true') {
+      navigate('/staff', { replace: true });
+    }
+  }, [navigate]);
 
   const switchView = (newView: FormView) => {
     setError('');

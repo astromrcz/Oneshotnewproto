@@ -10,6 +10,7 @@ import {
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
+import { FirstTimeLoginModal } from './components/FirstTimeLoginModal';
 
 const navItems = [
   { to: '/staff',                     icon: CheckCircle, label: 'Overview',            exact: true },
@@ -40,9 +41,12 @@ export function Layout() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
-  const { queue, tables, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext();
+  const { queue, tables, activities, staffLoggedIn,} = useAppContext();
+  const { staffLogout } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
+  const { staffProfile, updateStaffProfile } = useAppContext();
+  const [showSetup, setShowSetup] = useState(staffProfile.isFirstLogin === 1);
 
   // Auth guard — redirect to login if not authenticated
   useEffect(() => {
@@ -74,6 +78,9 @@ export function Layout() {
   };
 
   return (
+      <>
+      {showSetup && <FirstTimeLoginModal onComplete={() => setShowSetup(false)} />}
+        
     <div className="flex h-screen bg-neutral-900 text-neutral-100 overflow-hidden">
       <LockScreen isLocked={isLocked} onUnlock={() => setIsLocked(false)} userType="staff" />
       
@@ -174,18 +181,22 @@ export function Layout() {
         </nav>
 
         {/* Bottom */}
-        <div className="p-4 border-t border-neutral-800 space-y-2">
-          {/* Admin Portal shortcut */}
-          <button
-            onClick={() => navigate('/admin')}
-            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-amber-950/20 hover:bg-amber-950/40 border border-amber-900/30 hover:border-amber-800/50 text-amber-500/80 hover:text-amber-400 transition-all text-xs font-semibold"
-          >
-            <ShieldCheck size={14} />
-            <span className="flex-1 text-left">Admin Portal</span>
-            <span className="text-[9px] text-amber-700 font-black">↗</span>
-          </button>
-          
-        </div>
+        {/* 🟢 NEW: Only render this button if the logged-in user is an Admin */}
+        {staffProfile?.isAdmin && (
+          <div className="px-4 pb-2">
+            <button
+              onClick={() => {
+                // We use navigate to keep the SPA state instead of window.open
+                navigate('/admin');
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-all text-xs font-semibold"
+            >
+              <ShieldCheck size={13} />
+              <span className="flex-1 text-left">Switch to Admin Portal</span>
+              <span className="text-[9px] text-neutral-600 font-black">→</span>
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Main Content */}
@@ -309,5 +320,6 @@ export function Layout() {
         </main>
       </div>
     </div>
+    </>
   );
 }

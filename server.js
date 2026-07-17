@@ -8,12 +8,38 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 
+// 🟢 NEW: Missing Supabase Import
+import { createClient } from '@supabase/supabase-js';
+
 const sqlite3 = sqlite3Pkg.verbose();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3001;
+
+// 🟢 NEW: Define your Supabase credentials (replace with your actual strings)
+const SUPABASE_URL = 'https://bqnswmjopwmvunzchqzl.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_7t0VexQXO8D0Gqk0n4StIg_IeVefuXa';
+
+// Initialize your cloud connection 
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+// 🟢 Phase 4: The Dead Man's Switch Heartbeat
+setInterval(async () => {
+  try {
+    const { error } = await supabase
+      .from('system_status')
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq('id', 1);
+
+    if (error) throw error;
+    // console.log(`[Heartbeat] Pinged cloud at ${new Date().toLocaleTimeString()}`);
+  } catch (err) {
+    // If the internet goes down, it will quietly fail here without crashing the server
+    console.log('[Heartbeat Alert] Failed to reach Supabase. Venue might be offline.');
+  }
+}, 60000); // Runs every 60,000 milliseconds (1 minute)
 
 // Store uploaded files in Node memory temporarily so we can save them as BLOBs
 const upload = multer({ storage: multer.memoryStorage() });
@@ -35,6 +61,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
       db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, email TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0)`);
+      db.run(`ALTER TABLE staff ADD COLUMN recoveryPin TEXT`, (err) => {
       db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, () => {});
       
       db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) SELECT key_name, setting_value FROM system_settings`, (err) => {
@@ -65,6 +92,25 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`ALTER TABLE watchlist ADD COLUMN evidenceLink TEXT`, () => {});
 
       db.run(`CREATE TABLE IF NOT EXISTS session_history (id TEXT PRIMARY KEY, customerName TEXT, tableId TEXT, tableName TEXT, startTime DATETIME, endTime DATETIME, durationMinutes INTEGER, totalAmount REAL, amountPaid REAL, orders TEXT)`);
+
+      const createSuperAdmin = `
+        INSERT INTO staff (id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin, recoveryPin)
+        SELECT 'admin_001', 'superadmin', 'admin123', 'System Administrator', 'admin@oneshot.local', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492'
+        WHERE NOT EXISTS (SELECT 1 FROM staff WHERE username = 'superadmin')
+      `;
+      db.run(createSuperAdmin);
+
+      const makeImmortal = `
+        CREATE TRIGGER IF NOT EXISTS prevent_superadmin_deletion
+        BEFORE DELETE ON staff
+        FOR EACH ROW
+        WHEN OLD.username = 'superadmin'
+        BEGIN
+            SELECT RAISE(ABORT, 'CRITICAL SECURITY ALERT: The Master Super Admin account cannot be deleted from the database.');
+        END;
+      `;
+      db.run(makeImmortal);
+    });
     });
   }
 });
@@ -601,17 +647,19 @@ app.post('/api/activities', (req, res) => {
 });
 
 app.post('/api/staff', (req, res) => {
-  const { id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin } = req.body;
-  db.run(`INSERT INTO staff (id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  [id, username, password, fullName, email, role, phone, joinedDate, isActive ? 1 : 0, isAdmin ? 1 : 0], function(err) {
+  const { id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin, recoveryPin } = req.body;
+  db.run(`INSERT INTO staff (id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin, recoveryPin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, username, password, fullName, email, role, phone, joinedDate, isActive ? 1 : 0, isAdmin ? 1 : 0, recoveryPin || null], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: "Staff added to DB." });
   });
 });
 
 app.put('/api/staff/:identifier', (req, res) => {
-  const { username, fullName, email, phone, password, avatarImg, isActive, role } = req.body;
+  // 🟢 FIX: Added recoveryPin and isAdmin to the destructured body
+  const { username, fullName, email, phone, password, avatarImg, isActive, role, isAdmin, recoveryPin } = req.body;
   let updates = [], params = [];
+  
   if (username !== undefined) { updates.push("username = ?"); params.push(username); }
   if (fullName !== undefined) { updates.push("fullName = ?"); params.push(fullName); }
   if (email !== undefined) { updates.push("email = ?"); params.push(email); }
@@ -620,9 +668,16 @@ app.put('/api/staff/:identifier', (req, res) => {
   if (avatarImg !== undefined) { updates.push("avatarImg = ?"); params.push(avatarImg); }
   if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
   if (role !== undefined) { updates.push("role = ?"); params.push(role); }
+  
+  // 🟢 FIX: Push the new fields into the SQL update array if they are provided
+  if (isAdmin !== undefined) { updates.push("isAdmin = ?"); params.push(isAdmin ? 1 : 0); }
+  if (recoveryPin !== undefined) { updates.push("recoveryPin = ?"); params.push(recoveryPin); }
+  
   if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  
   params.push(req.params.identifier);
   params.push(req.params.identifier);
+  
   db.run(`UPDATE staff SET ${updates.join(', ')} WHERE id = ? OR username = ?`, params, function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Profile updated successfully." });

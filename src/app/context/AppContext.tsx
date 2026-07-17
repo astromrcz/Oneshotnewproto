@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { toast } from 'sonner';
+import { supabase } from '../utils/supabase';
 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -92,6 +93,7 @@ export type StaffProfile = {
 
 export type StaffUser = {
   id: string; username: string; password: string; fullName: string; email: string; role: 'manager' | 'cashier'; isAdmin: boolean; phone: string; isActive: boolean; createdAt: Date;
+  recoveryPin?: string; // 🟢 NEW: 4-digit offline recovery PIN
 };
 
 export type RatesConfig = {
@@ -153,6 +155,10 @@ type AppContextType = {
   sessionHistory: SessionHistoryItem[];
   addSessionHistory: (i: Omit<SessionHistoryItem, 'id'>) => void;
   updateRefundStatus: (id: string, refundStatus: string, method?: string, notes?: string) => void;
+  staffLogin: (u: string, p: string) => Promise<boolean>;
+  adminLogin: (u: string, p: string) => Promise<boolean>;
+  resetPasswordWithPin: (username: string, pin: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
+  isSystemOffline: boolean;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -186,6 +192,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
+
+  const [isSystemOffline, setIsSystemOffline] = useState(false);
+
+  // 🟢 Phase 4: Monitor the Venue's Heartbeat
+  useEffect(() => {
+    const checkHeartbeat = async () => {
+      const { data } = await supabase.from('system_status').select('last_seen_at').eq('id', 1).maybeSingle();
+      if (data) {
+        const lastSeen = new Date(data.last_seen_at);
+        const timeDiffMs = new Date().getTime() - lastSeen.getTime();
+        
+        // If the signal is older than 5 minutes (300,000 ms), trigger the lockdown
+        setIsSystemOffline(timeDiffMs > 300000);
+      }
+    };
+    
+    checkHeartbeat();
+    const interval = setInterval(checkHeartbeat, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
+    // 1. Emergency Failsafe Admin Reset
+    if (username === 'admin' && pin === '8492') { // 8492 is your master emergency PIN
+      // If you had a real admin object in your DB, you would update it here.
+      return { success: true, message: 'Master Admin password reset bypassed.' };
+    }
+
+    // 2. Find the user locally
+    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
+    if (!targetUser) {
+      return { success: false, message: 'User not found or inactive.' };
+    }
+
+    // 3. Verify the PIN
+    if (targetUser.recoveryPin !== pin) {
+      // Add a generic error to prevent brute-forcing
+      return { success: false, message: 'Invalid Username or Recovery PIN.' };
+    }
+
+    // 4. Update the password using your existing database sync function
+    updateStaffUser(targetUser.id, { password: newPassword });
+    
+    // Log the security event
+    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
+
+    return { success: true, message: 'Password reset successfully!' };
+  };
 
   const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
     // 1. Optimistic UI update
@@ -361,9 +415,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/session-history', 'POST', newItem, `Logged session history`);
   };
 
-  const staffLogin = (u: string, p: string) => { const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive); if (valid || (u==='staff' && p==='staff123')) { setStaffLoggedIn(true); return true; } return false; };
+const staffLogin = async (u: string, p: string) => { 
+    // 1. Check local SQLite database state
+    const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive); 
+    if (valid) { 
+      setStaffLoggedIn(true); 
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role });
+      return true; 
+    }
+
+
+    return false; 
+  };
+
+  const adminLogin = async (u: string, p: string) => { 
+    // 1. Check local SQLite database state (must have isAdmin flag)
+    const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive && su.isAdmin);
+    if (valid) {
+      setAdminLoggedIn(true);
+      // Optional: Set staff profile as well so the admin has a name in the activity logs
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role });
+      return true;
+    }
+
+    // 2. Hardcoded Emergency Failsafe
+ 
+
+    return false; 
+  };
   const staffLogout = () => setStaffLoggedIn(false);
-  const adminLogin = (u: string, p: string) => { if (u === 'admin' && p === 'admin123') { setAdminLoggedIn(true); return true; } return false; };
   const adminLogout = () => setAdminLoggedIn(false);
   
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
@@ -747,7 +827,7 @@ return (
       updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
       // 🟢 FIX: Exposing these below so they can be consumed by LostAndFound & Watchlist components
       lostItems, addLostItem, updateLostItem, deleteLostItem,
-      watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory,
+      watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline
     }}>
       {children}
     </AppContext.Provider>

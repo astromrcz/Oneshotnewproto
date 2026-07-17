@@ -119,7 +119,7 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { siteConfig, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund } = useAppContext() as any; // 🟢 FIX: Added acknowledgeRefund
+  const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund } = useAppContext() as any; // 🟢 FIX: Added acknowledgeRefund
 
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
@@ -952,6 +952,22 @@ export function HomePage() {
               </div>
 
               {resTab === 'new' && (
+                <>
+                  {/* 🟢 Dead Man Switch Lockdown Banner */}
+                  {isSystemOffline && (
+                    <div className="mb-8 bg-rose-950/40 border border-rose-800/50 rounded-xl p-5 flex items-start gap-3 animate-in fade-in">
+                      <AlertTriangle className="text-rose-500 flex-shrink-0 mt-0.5" size={20} />
+                      <div>
+                        <h4 className="text-sm font-bold text-rose-400">Live Reservations Disabled</h4>
+                        <p className="text-xs text-rose-300/80 mt-1.5 leading-relaxed">
+                          Our physical venue is currently experiencing local internet connectivity issues. To prevent double-booking, online reservations have been temporarily paused. Please visit us in person—we are accepting walk-ins!
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className={`grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20 ${isSystemOffline ? 'opacity-50 pointer-events-none grayscale-[50%]' : ''}`}>
+                
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20">
                   {/* Custom Mini Calendar */}
                   <div>

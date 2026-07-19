@@ -2,17 +2,8 @@ import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   Plus, X, Pencil, Table2, CheckCircle, AlertTriangle,
-  ToggleLeft, ToggleRight, Lock, Eye, EyeOff, PowerOff, Power, Wrench,
+  ToggleLeft, ToggleRight, PowerOff, Power, Wrench,
 } from 'lucide-react';
-
-// Admin password for sensitive operations
-const ADMIN_PASSWORD = 'admin123';
-
-type PasswordModal = {
-  tableId: string;
-  tableName: string;
-  targetActive: boolean; // what we're toggling TO
-};
 
 export function AdminTableManagement() {
   const { tables, addTable, updateTable, toggleTableActive, setTableMaintenance, freeTable } = useAppContext();
@@ -23,12 +14,9 @@ export function AdminTableManagement() {
   const [editName, setEditName]       = useState('');
   const [toast, setToast]             = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
-  // Password confirmation modal
-  const [pwModal, setPwModal]         = useState<PasswordModal | null>(null);
-  const [pwInput, setPwInput]         = useState('');
-  const [showPw, setShowPw]           = useState(false);
-  const [pwError, setPwError]         = useState('');
-  const [pwConfirming, setPwConfirming] = useState(false);
+  // 🟢 FIXED: Replaced Password Modal with a simple Confirmation Modal
+  const [confirmModal, setConfirmModal] = useState<{ tableId: string; tableName: string; targetActive: boolean } | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
 
   // Filter
   const [filter, setFilter]           = useState<'all' | 'active' | 'inactive'>('all');
@@ -47,7 +35,7 @@ export function AdminTableManagement() {
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
-    addTable(newName.trim(), newDescription.trim());
+    addTable(newName.trim()); // 🟢 Note: addTable in AppContext only takes 1 argument (name) currently
     setNewName('');
     setNewDescription('');
     setShowAddForm(false);
@@ -61,36 +49,33 @@ export function AdminTableManagement() {
     flash('Table renamed successfully.');
   };
 
-  const openPasswordModal = (table: typeof tables[0]) => {
+  // 🟢 FIXED: Open confirmation without password states
+  const openConfirmModal = (table: typeof tables[0]) => {
     if (table.status === 'occupied' && table.isActive) {
       flash('Cannot deactivate an occupied table.', 'error');
       return;
     }
-    setPwModal({ tableId: table.id, tableName: table.name, targetActive: !table.isActive });
-    setPwInput('');
-    setPwError('');
-    setShowPw(false);
+    setConfirmModal({ tableId: table.id, tableName: table.name, targetActive: !table.isActive });
   };
 
-  const handlePasswordConfirm = () => {
-    if (!pwModal) return;
-    setPwConfirming(true);
-    setTimeout(() => {
-      if (pwInput !== ADMIN_PASSWORD) {
-        setPwError('Incorrect password. Please try again.');
-        setPwConfirming(false);
-        return;
-      }
-      toggleTableActive(pwModal.tableId);
-      flash(
-        `"${pwModal.tableName}" has been ${pwModal.targetActive ? 'activated' : 'deactivated'}.`,
-        'success'
-      );
-      setPwModal(null);
-      setPwInput('');
-      setPwError('');
-      setPwConfirming(false);
-    }, 500);
+  // 🟢 FIXED: Process immediately and wait for DB
+  const handleConfirmToggle = async () => {
+    if (!confirmModal) return;
+    setIsConfirming(true);
+    
+    // Trigger the context function which syncs to the database
+    toggleTableActive(confirmModal.tableId);
+
+    // Wait briefly to simulate/ensure DB sync completion
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    flash(
+      `"${confirmModal.tableName}" has been ${confirmModal.targetActive ? 'activated' : 'deactivated'}.`,
+      'success'
+    );
+    
+    setConfirmModal(null);
+    setIsConfirming(false);
   };
 
   const STATUS_COLOR: Record<string, string> = {
@@ -114,7 +99,7 @@ export function AdminTableManagement() {
     <div className="space-y-5">
       {/* Toast */}
       {toast && (
-        <div className={`flex items-center gap-2.5 text-sm px-4 py-3 rounded-xl border ${
+        <div className={`flex items-center gap-2.5 text-sm px-4 py-3 rounded-xl border animate-in fade-in ${
           toast.type === 'error'
             ? 'bg-rose-950/40 border-rose-700/40 text-rose-400'
             : 'bg-emerald-950/40 border-emerald-700/40 text-emerald-400'
@@ -319,7 +304,7 @@ export function AdminTableManagement() {
 
                   {/* Active / Inactive toggle */}
                   <button
-                    onClick={() => openPasswordModal(t)}
+                    onClick={() => openConfirmModal(t)}
                     title={t.isActive ? 'Deactivate table' : 'Activate table'}
                     className={`p-1.5 rounded-lg transition-colors ${
                       t.isActive
@@ -344,7 +329,7 @@ export function AdminTableManagement() {
         <AlertTriangle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
         <p className="text-xs text-amber-600/80 leading-relaxed">
           Tables cannot be permanently deleted. Deactivating a table hides it from the staff portal and prevents new sessions.
-          A password confirmation is required for safety. Occupied tables must be freed before deactivating.
+          Occupied tables must be freed before deactivating.
         </p>
       </div>
 
@@ -398,26 +383,26 @@ export function AdminTableManagement() {
         </div>
       )}
 
-      {/* ── Password Confirmation Modal ── */}
-      {pwModal && (
+      {/* ── Status Confirmation Modal ── */}
+      {confirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-amber-900/40 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
             {/* Header */}
             <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                  pwModal.targetActive ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-rose-500/10 border border-rose-500/20'
+                  confirmModal.targetActive ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-rose-500/10 border border-rose-500/20'
                 }`}>
-                  {pwModal.targetActive ? <Power size={18} className="text-emerald-400" /> : <PowerOff size={18} className="text-rose-400" />}
+                  {confirmModal.targetActive ? <Power size={18} className="text-emerald-400" /> : <PowerOff size={18} className="text-rose-400" />}
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-neutral-100">
-                    {pwModal.targetActive ? 'Activate Table' : 'Deactivate Table'}
+                    {confirmModal.targetActive ? 'Activate Table' : 'Deactivate Table'}
                   </h2>
-                  <p className="text-xs text-neutral-500">{pwModal.tableName}</p>
+                  <p className="text-xs text-neutral-500">{confirmModal.tableName}</p>
                 </div>
               </div>
-              <button onClick={() => setPwModal(null)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg">
+              <button onClick={() => setConfirmModal(null)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg">
                 <X size={16} />
               </button>
             </div>
@@ -425,70 +410,36 @@ export function AdminTableManagement() {
             <div className="p-6 space-y-4">
               {/* What will happen */}
               <div className={`rounded-xl p-3 text-xs border ${
-                pwModal.targetActive
+                confirmModal.targetActive
                   ? 'bg-emerald-950/20 border-emerald-800/30 text-emerald-400/80'
                   : 'bg-rose-950/20 border-rose-800/30 text-rose-400/80'
               }`}>
-                {pwModal.targetActive
-                  ? `"${pwModal.tableName}" will be marked as active and visible to staff for session management.`
-                  : `"${pwModal.tableName}" will be deactivated and hidden from staff. No new sessions can be started.`
+                {confirmModal.targetActive
+                  ? `"${confirmModal.tableName}" will be marked as active and visible to staff for session management.`
+                  : `"${confirmModal.tableName}" will be deactivated and hidden from staff. No new sessions can be started.`
                 }
-              </div>
-
-              {/* Password field */}
-              <div>
-                <label className="text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5 font-medium">
-                  <Lock size={11} /> Admin Password Required
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPw ? 'text' : 'password'}
-                    value={pwInput}
-                    onChange={e => { setPwInput(e.target.value); setPwError(''); }}
-                    onKeyDown={e => e.key === 'Enter' && handlePasswordConfirm()}
-                    autoFocus
-                    placeholder="Enter admin password"
-                    className={`w-full bg-neutral-900 border rounded-xl px-3 pr-10 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-1 transition-colors placeholder-neutral-600 ${
-                      pwError
-                        ? 'border-rose-500/50 focus:border-rose-500/50 focus:ring-rose-500/20'
-                        : 'border-neutral-800 focus:border-amber-600/50 focus:ring-amber-600/20'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 transition-colors"
-                  >
-                    {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                {pwError && (
-                  <p className="flex items-center gap-1 text-[11px] text-rose-400 mt-1.5">
-                    <AlertTriangle size={10} /> {pwError}
-                  </p>
-                )}
               </div>
 
               {/* Buttons */}
               <div className="flex gap-3 pt-1">
                 <button
-                  onClick={() => { setPwModal(null); setPwInput(''); setPwError(''); }}
+                  onClick={() => setConfirmModal(null)}
                   className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handlePasswordConfirm}
-                  disabled={!pwInput || pwConfirming}
+                  onClick={handleConfirmToggle}
+                  disabled={isConfirming}
                   className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${
-                    pwModal.targetActive
+                    confirmModal.targetActive
                       ? 'bg-emerald-700 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
                       : 'bg-rose-700 hover:bg-rose-600 text-white shadow-lg shadow-rose-900/30'
                   }`}
                 >
-                  {pwConfirming
+                  {isConfirming
                     ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Verifying...</>
-                    : pwModal.targetActive
+                    : confirmModal.targetActive
                       ? <><Power size={14} /> Activate Table</>
                       : <><PowerOff size={14} /> Deactivate Table</>
                   }

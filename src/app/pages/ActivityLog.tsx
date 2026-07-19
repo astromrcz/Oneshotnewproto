@@ -1,142 +1,113 @@
 import { useState, useMemo } from 'react';
 import { useAppContext, ActivityType } from '../context/AppContext';
-import { Clock, Filter, ShieldCheck, ShoppingCart, CalendarDays, Users, LayoutGrid, Calendar, User } from 'lucide-react';
-import { formatDistanceToNow, isToday, isYesterday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
+import { 
+  PlusCircle, XCircle, RefreshCw, Info, FileText, 
+  LayoutGrid, ShoppingCart, CalendarDays, Users, ShieldCheck, Tag
+} from 'lucide-react';
+import { isToday, isYesterday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 
 export function ActivityLog() {
   const { activities } = useAppContext();
   
-  // ── States ──
-  const [categoryFilter, setCategoryFilter] = useState<ActivityType | 'ALL'>('ALL');
-  const [dateFilter, setDateFilter] = useState<string>('ALL_TIME');
+  // ── Filters matching the reference image ──
+  const [dateFilter, setDateFilter] = useState<string>('ALL');
+  const [moduleFilter, setModuleFilter] = useState<string>('ALL');
   const [actorFilter, setActorFilter] = useState<string>('ALL');
+  const [eventFilter, setEventFilter] = useState<string>('ALL');
+  
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
-  // ── Category Mapping ──
+  // ── Category / Module Mapping ──
   const categoryMap: Record<string, ActivityType[]> = {
     'Table Management': ['table_assigned', 'table_freed', 'table_reserved', 'session_extended'],
     'Point of Sale': ['pos_order', 'payment_received'],
     'Reservations': ['reservation_created', 'reservation_updated', 'reservation_cancelled'],
     'Queue System': ['queue_added', 'queue_removed', 'queue_called'],
-    'Admin Actions': ['admin_action', 'tako_action', 'promo_created'],
+    'System Actions': ['admin_action', 'tako_action', 'promo_created'],
   };
 
-  // ── Actor Extraction Helper ──
+  // ── Helpers ──
   const getActor = (description: string) => {
     const match = description.match(/\(Action by:\s*(.*?)\)/);
-    return match ? match[1] : 'System / Legacy';
+    return match ? match[1] : 'System';
   };
 
-  // ── Get Unique Actors for Dropdown ──
-  const uniqueActors = useMemo(() => {
-    const actors = new Set(activities.map(a => getActor(a.description)));
-    return Array.from(actors).sort();
-  }, [activities]);
+  const cleanDescription = (desc: string) => desc.replace(/\s*\(Action by:.*?\)/, '');
+
+  const getModule = (type: string) => {
+    for (const [cat, types] of Object.entries(categoryMap)) {
+      if (types.includes(type as any)) return cat;
+    }
+    return 'System Actions';
+  };
+
+  const getModuleIcon = (moduleName: string) => {
+    switch (moduleName) {
+      case 'Table Management': return <LayoutGrid size={12} className="text-blue-400" />;
+      case 'Point of Sale': return <ShoppingCart size={12} className="text-emerald-400" />;
+      case 'Reservations': return <CalendarDays size={12} className="text-purple-400" />;
+      case 'Queue System': return <Users size={12} className="text-amber-400" />;
+      default: return <ShieldCheck size={12} className="text-rose-400" />;
+    }
+  };
+
+  const getEventUI = (type: string) => {
+    const formattedText = type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    if (type.includes('created') || type.includes('added') || type === 'pos_order' || type.includes('received')) {
+      return { icon: <PlusCircle size={14} className="text-emerald-500" />, text: formattedText };
+    }
+    if (type.includes('removed') || type.includes('freed') || type.includes('cancelled') || type.includes('deleted')) {
+      return { icon: <XCircle size={14} className="text-rose-500" />, text: formattedText };
+    }
+    if (type.includes('updated') || type.includes('extended') || type.includes('changed') || type.includes('toggled') || type.includes('called') || type.includes('assigned')) {
+      return { icon: <RefreshCw size={14} className="text-blue-500" />, text: formattedText };
+    }
+    return { icon: <Info size={14} className="text-amber-500" />, text: formattedText };
+  };
+
+  // ── Unique Lists for Dropdowns ──
+  const uniqueActors = useMemo(() => Array.from(new Set(activities.map(a => getActor(a.description)))).sort(), [activities]);
+  const uniqueEvents = useMemo(() => Array.from(new Set(activities.map(a => a.type))).sort(), [activities]);
 
   // ── Filtering Logic ──
   const filteredActivities = activities.filter(a => {
-    // 1. Category Filter Check
-    let matchesCategory = true;
-    if (categoryFilter !== 'ALL') {
-      if (categoryFilter.startsWith('CAT_')) {
-        const catName = categoryFilter.replace('CAT_', '');
-        matchesCategory = categoryMap[catName]?.includes(a.type) || false;
-      } else {
-        matchesCategory = a.type === categoryFilter;
-      }
-    }
-    if (!matchesCategory) return false;
-
-    // 2. Date Filter Check
     const actDate = new Date(a.timestamp);
-    if (dateFilter === 'TODAY') {
-      if (!isToday(actDate)) return false;
-    } else if (dateFilter === 'YESTERDAY') {
-      if (!isYesterday(actDate)) return false;
-    } else if (dateFilter === 'THIS_WEEK') {
-      if (!isThisWeek(actDate)) return false;
-    } else if (dateFilter === 'THIS_MONTH') {
-      if (!isThisMonth(actDate)) return false;
-    } else if (dateFilter === 'CUSTOM') {
-      if (startDate && endDate) {
-        const start = startOfDay(new Date(startDate));
-        const end = endOfDay(new Date(endDate));
-        if (!isWithinInterval(actDate, { start, end })) return false;
-      } else if (startDate) {
-        if (actDate < startOfDay(new Date(startDate))) return false;
-      } else if (endDate) {
-        if (actDate > endOfDay(new Date(endDate))) return false;
-      }
+    
+    // Date Filter
+    if (dateFilter === 'TODAY' && !isToday(actDate)) return false;
+    if (dateFilter === 'YESTERDAY' && !isYesterday(actDate)) return false;
+    if (dateFilter === 'THIS_WEEK' && !isThisWeek(actDate)) return false;
+    if (dateFilter === 'THIS_MONTH' && !isThisMonth(actDate)) return false;
+    if (dateFilter === 'CUSTOM') {
+      if (startDate && endDate && !isWithinInterval(actDate, { start: startOfDay(new Date(startDate)), end: endOfDay(new Date(endDate)) })) return false;
     }
 
-    // 3. Actor Filter Check
-    if (actorFilter !== 'ALL') {
-      if (getActor(a.description) !== actorFilter) return false;
-    }
+    // Module, Actor, Event Filters
+    if (moduleFilter !== 'ALL' && getModule(a.type) !== moduleFilter) return false;
+    if (actorFilter !== 'ALL' && getActor(a.description) !== actorFilter) return false;
+    if (eventFilter !== 'ALL' && a.type !== eventFilter) return false;
 
     return true;
   });
 
-  // ── Clean Description (Removes the "(Action by: ...)" for cleaner UI) ──
-  const cleanDescription = (desc: string) => {
-    return desc.replace(/\s*\(Action by:.*?\)/, '');
-  };
-
-  // ── Icon Helper ──
-  const getIcon = (type: string) => {
-    if (categoryMap['Table Management'].includes(type as any)) return <LayoutGrid size={16} className="text-blue-400" />;
-    if (categoryMap['Point of Sale'].includes(type as any)) return <ShoppingCart size={16} className="text-emerald-400" />;
-    if (categoryMap['Reservations'].includes(type as any)) return <CalendarDays size={16} className="text-purple-400" />;
-    if (categoryMap['Queue System'].includes(type as any)) return <Users size={16} className="text-amber-400" />;
-    return <ShieldCheck size={16} className="text-rose-400" />;
-  };
-
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* ── Filters Header ── */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-neutral-950 p-6 rounded-2xl border border-neutral-800">
-        <div>
-          <h2 className="text-2xl font-black text-white">Activity Log History</h2>
-          <p className="text-sm text-neutral-500 mt-1">Audit log for all staff and system actions.</p>
-        </div>
-        
-        <div className="flex flex-col sm:flex-row flex-wrap items-end sm:items-center gap-3 w-full xl:w-auto justify-end">
-          
-          {/* Made By (Actor) Filter */}
-          <div className="relative w-full sm:w-auto">
-            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-              <User size={14} className="text-neutral-400" />
-            </div>
-            <select 
-              value={actorFilter} 
-              onChange={(e) => setActorFilter(e.target.value)}
-              className="w-full sm:w-auto pl-9 pr-8 py-2.5 bg-neutral-900 border border-neutral-700 rounded-xl text-sm font-semibold text-white focus:outline-none focus:border-emerald-500 transition-colors appearance-none"
-            >
-              <option value="ALL">Made By: All Users</option>
-              {uniqueActors.map(actor => (
-                <option key={actor} value={actor}>{actor}</option>
-              ))}
-            </select>
-          </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      
+      {/* ── Header ── */}
+      <div>
+        <h2 className="text-2xl font-black text-white tracking-tight">Activity log</h2>
+        <p className="text-sm text-neutral-500 mt-1">List of all events in the system account.</p>
+      </div>
 
-          {/* Date Filter Dropdown */}
-          <div className="relative w-full sm:w-auto">
-            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-              <Calendar size={14} className="text-neutral-400" />
-            </div>
-            <select 
-              value={dateFilter} 
-              onChange={(e) => {
-                setDateFilter(e.target.value);
-                if (e.target.value !== 'CUSTOM') {
-                  setStartDate('');
-                  setEndDate('');
-                }
-              }}
-              className="w-full sm:w-auto pl-9 pr-8 py-2.5 bg-neutral-900 border border-neutral-700 rounded-xl text-sm font-semibold text-white focus:outline-none focus:border-emerald-500 transition-colors appearance-none"
-            >
-              <option value="ALL_TIME">All Time</option>
+      {/* ── Filter Bar (Matches Image Layout) ── */}
+      <div className="flex flex-col xl:flex-row items-end xl:items-center justify-between gap-4 w-full">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full xl:w-auto flex-1">
+          
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-neutral-500 tracking-wider">Period</label>
+            <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="w-full px-3 py-2 bg-neutral-900/50 border border-neutral-800 rounded-lg text-sm text-neutral-200 focus:outline-none focus:border-emerald-500 transition-colors">
+              <option value="ALL">All time</option>
               <option value="TODAY">Today</option>
               <option value="YESTERDAY">Yesterday</option>
               <option value="THIS_WEEK">This Week</option>
@@ -145,107 +116,120 @@ export function ActivityLog() {
             </select>
           </div>
 
-          {/* Category Filter Dropdown */}
-          <div className="relative w-full sm:w-auto">
-            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-              <Filter size={14} className="text-neutral-400" />
-            </div>
-            <select 
-              value={categoryFilter} 
-              onChange={(e) => setCategoryFilter(e.target.value as any)}
-              className="w-full sm:w-auto pl-9 pr-8 py-2.5 bg-neutral-900 border border-neutral-700 rounded-xl text-sm font-semibold text-white focus:outline-none focus:border-emerald-500 transition-colors appearance-none"
-            >
-              <option value="ALL">All Categories</option>
-              <optgroup label="Filter by Type">
-                {Object.keys(categoryMap).map(cat => (
-                  <option key={cat} value={`CAT_${cat}`}>{cat}</option>
-                ))}
-              </optgroup>
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-neutral-500 tracking-wider">Module</label>
+            <select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)} className="w-full px-3 py-2 bg-neutral-900/50 border border-neutral-800 rounded-lg text-sm text-neutral-200 focus:outline-none focus:border-emerald-500 transition-colors">
+              <option value="ALL">All modules</option>
+              {Object.keys(categoryMap).map(cat => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-neutral-500 tracking-wider">Employee</label>
+            <select value={actorFilter} onChange={(e) => setActorFilter(e.target.value)} className="w-full px-3 py-2 bg-neutral-900/50 border border-neutral-800 rounded-lg text-sm text-neutral-200 focus:outline-none focus:border-emerald-500 transition-colors">
+              <option value="ALL">All employees</option>
+              {uniqueActors.map(actor => <option key={actor} value={actor}>{actor}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-neutral-500 tracking-wider">Events</label>
+            <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} className="w-full px-3 py-2 bg-neutral-900/50 border border-neutral-800 rounded-lg text-sm text-neutral-200 focus:outline-none focus:border-emerald-500 transition-colors">
+              <option value="ALL">All events</option>
+              {uniqueEvents.map(evt => <option key={evt} value={evt}>{evt.replace(/_/g, ' ')}</option>)}
             </select>
           </div>
         </div>
+
+        {/* Create Report Button */}
+        <button className="flex items-center gap-2 bg-[#2a75d3] hover:bg-[#2060b3] text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors h-[42px] whitespace-nowrap">
+          <FileText size={16} /> Create report
+        </button>
       </div>
 
       {/* ── Custom Date Range Inputs (Conditional) ── */}
       {dateFilter === 'CUSTOM' && (
-        <div className="flex items-center gap-3 bg-neutral-950 p-4 rounded-xl border border-neutral-800 animate-in fade-in slide-in-from-top-2">
-          <div className="flex-1 sm:flex-none">
-            <label className="block text-[10px] text-neutral-500 uppercase tracking-wider font-semibold mb-1.5">Start Date</label>
-            <input 
-              type="date" 
-              style={{ colorScheme: 'dark' }}
-              value={startDate} 
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full sm:w-auto bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors"
-            />
-          </div>
-          <div className="flex-1 sm:flex-none">
-            <label className="block text-[10px] text-neutral-500 uppercase tracking-wider font-semibold mb-1.5">End Date</label>
-            <input 
-              type="date" 
-              style={{ colorScheme: 'dark' }}
-              value={endDate} 
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full sm:w-auto bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors"
-            />
-          </div>
-          {(startDate || endDate) && (
-            <div className="pt-5 hidden sm:block">
-              <button 
-                onClick={() => { setStartDate(''); setEndDate(''); setDateFilter('ALL_TIME'); }}
-                className="text-xs text-rose-400 hover:text-rose-300 font-semibold px-3 py-2 rounded-lg hover:bg-rose-950/30 transition-colors"
-              >
-                Clear Range
-              </button>
-            </div>
-          )}
+        <div className="flex items-center gap-3 bg-neutral-900/30 p-3 rounded-lg border border-neutral-800 animate-in fade-in">
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-neutral-900 border border-neutral-800 rounded flex-1 px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors" />
+          <span className="text-neutral-500 text-sm">—</span>
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-neutral-900 border border-neutral-800 rounded flex-1 px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors" />
         </div>
       )}
 
-      {/* ── Activity List ── */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-2">
-        {filteredActivities.length === 0 ? (
-          <div className="p-12 text-center text-neutral-500">
-            <Clock size={32} className="mx-auto mb-3 opacity-50" />
-            <p className="font-semibold text-neutral-300">No activity found</p>
-            <p className="text-xs mt-1">Try adjusting your filters.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-neutral-800/50">
-            {filteredActivities.map((act) => {
-              const actor = getActor(act.description);
-              
-              return (
-                <div key={act.id} className="p-4 hover:bg-neutral-900/50 transition-colors flex items-start gap-4">
-                  <div className="mt-1 p-2 bg-neutral-900 rounded-lg border border-neutral-800 flex-shrink-0">
-                    {getIcon(act.type)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-neutral-200 leading-relaxed font-medium">
-                      {cleanDescription(act.description)}
-                    </p>
-                    <div className="flex items-center gap-3 mt-2 flex-wrap">
-                      <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500 bg-neutral-900 px-2 py-0.5 rounded border border-neutral-800">
-                        {act.type.replace(/_/g, ' ')}
-                      </span>
-                      <span className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1 bg-emerald-950/20 px-2 py-0.5 rounded border border-emerald-900/50">
-                        <User size={10} /> {actor}
-                      </span>
-                      <span className="text-[10px] text-neutral-600 flex items-center gap-1">
-                        <CalendarDays size={10} /> 
-                        {new Date(act.timestamp).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                      <span className="text-[10px] text-neutral-600 flex items-center gap-1">
-                        <Clock size={10} /> 
-                        {new Date(act.timestamp).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })} ({formatDistanceToNow(new Date(act.timestamp), { addSuffix: true })})
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+      {/* ── Activity Data Table ── */}
+      <div className="bg-[#121212] border border-neutral-800 rounded-lg overflow-x-auto">
+        <table className="w-full text-left text-sm whitespace-nowrap">
+          <thead className="bg-[#1e1e1e] text-neutral-400 font-semibold border-b border-neutral-800">
+            <tr>
+              <th className="px-5 py-3.5 font-medium min-w-[160px]">Date and time</th>
+              <th className="px-5 py-3.5 font-medium min-w-[180px]">Module</th>
+              <th className="px-5 py-3.5 font-medium min-w-[140px]">Employee</th>
+              <th className="px-5 py-3.5 font-medium min-w-[200px]">Event</th>
+              <th className="px-5 py-3.5 font-medium w-full">Additional Details</th>
+            </tr>
+          </thead>
+          
+          <tbody className="divide-y divide-neutral-800/50">
+            {filteredActivities.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-5 py-12 text-center text-neutral-500">
+                  <p className="font-semibold">No activity found for this period.</p>
+                </td>
+              </tr>
+            ) : (
+              filteredActivities.map((act) => {
+                const dateObj = new Date(act.timestamp);
+                const formattedDate = `${dateObj.getDate().toString().padStart(2, '0')} ${dateObj.toLocaleString('default', { month: 'short' })} ${dateObj.getFullYear()} ${dateObj.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}`;
+                
+                const moduleName = getModule(act.type);
+                const eventUI = getEventUI(act.type);
+                const cleanDesc = cleanDescription(act.description);
+
+                return (
+                  <tr key={act.id} className="hover:bg-neutral-900/30 transition-colors group">
+                    {/* Date and Time */}
+                    <td className="px-5 py-3.5 text-neutral-300">
+                      {formattedDate}
+                    </td>
+
+                    {/* Module (Location equivalent) */}
+                    <td className="px-5 py-3.5 text-neutral-400">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1 rounded bg-neutral-900 border border-neutral-800">
+                           {getModuleIcon(moduleName)}
+                        </div>
+                        {moduleName}
+                      </div>
+                    </td>
+
+                    {/* Employee */}
+                    <td className="px-5 py-3.5 text-neutral-300">
+                      {getActor(act.description)}
+                    </td>
+
+                    {/* Event */}
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-2 text-neutral-300 font-medium">
+                        {eventUI.icon}
+                        {eventUI.text}
+                      </div>
+                    </td>
+
+                    {/* Additional Details */}
+                    <td className="px-5 py-3.5 text-neutral-400 whitespace-normal min-w-[300px]">
+                      {cleanDesc}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+        
+        {/* Footer Total */}
+        <div className="px-5 py-4 border-t border-neutral-800 bg-[#1e1e1e]/50 text-xs font-semibold text-neutral-400">
+          Total — {filteredActivities.length}
+        </div>
       </div>
     </div>
   );

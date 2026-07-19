@@ -79,7 +79,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`ALTER TABLE events ADD COLUMN allowReservations INTEGER DEFAULT 1`, () => {});
       db.run(`ALTER TABLE events ADD COLUMN caterWalkIns INTEGER DEFAULT 1`, () => {});
       db.run(`ALTER TABLE events ADD COLUMN walkInTableCount INTEGER DEFAULT 10`, () => {});
-      
+      db.run(`ALTER TABLE staff ADD COLUMN isFirstLogin INTEGER DEFAULT 1`, (err) => {});
       // 🟢 NEW: Lost & Found and Watchlist Tables
      // 🟢 NEW: Lost & Found and Watchlist Tables
 // 🟢 NEW: Lost & Found and Watchlist Tables (with Soft Delete & Evidence Link)
@@ -93,9 +93,10 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
       db.run(`CREATE TABLE IF NOT EXISTS session_history (id TEXT PRIMARY KEY, customerName TEXT, tableId TEXT, tableName TEXT, startTime DATETIME, endTime DATETIME, durationMinutes INTEGER, totalAmount REAL, amountPaid REAL, orders TEXT)`);
 
+      // 🟢 UPDATED: 'admin123' is now replaced with its SHA-256 hash
       const createSuperAdmin = `
         INSERT INTO staff (id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin, recoveryPin)
-        SELECT 'admin_001', 'superadmin', 'admin123', 'System Administrator', 'admin@oneshot.local', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492'
+        SELECT 'admin_001', 'superadmin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'System Administrator', 'admin@oneshot.local', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492'
         WHERE NOT EXISTS (SELECT 1 FROM staff WHERE username = 'superadmin')
       `;
       db.run(createSuperAdmin);

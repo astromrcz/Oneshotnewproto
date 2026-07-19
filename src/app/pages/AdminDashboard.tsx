@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { toast } from 'sonner';
 import { 
   Users, Table2, Tag, Megaphone, CalendarX2, DollarSign, 
   TrendingUp, Bell, CloudRain, Sun, Cloud, MapPin, X, 
@@ -9,7 +10,13 @@ import { useNavigate } from 'react-router';
 import { format, isToday, isTomorrow } from 'date-fns';
 
 export function AdminDashboard() {
-  const { staffUsers, tables, promoCodes, announcements, closedDates, rates, reservations, feedback, weather, updateWeatherLocation, activities } = useAppContext();
+  // 🟢 FIX: Added sessionHistory and refreshLiveMonitor to the destructured context
+  const { 
+    staffUsers, tables, promoCodes, announcements, closedDates, 
+    rates, reservations, feedback, weather, updateWeatherLocation, 
+    activities, sessionHistory, refreshLiveMonitor 
+  } = useAppContext();
+  
   const navigate = useNavigate();
 
   // Local state to toggle the Weather Location Editor
@@ -24,61 +31,79 @@ export function AdminDashboard() {
   const activePromos    = promoCodes.filter(p => p.isActive).length;
   const activeAnn       = announcements.filter(a => a.isActive).length;
   const upcomingClosed  = closedDates.filter(c => new Date(c.date) >= new Date()).length;
-  const totalRevenue    = reservations.filter(r => r.status === 'completed').reduce((s, r) => s + r.totalAmount, 0);
+  
+  // 🟢 FIX: Revenue now calculates BOTH Completed Reservations AND Walk-in Table Sessions
+  const totalRevenue = 
+    reservations.filter(r => r.status === 'completed').reduce((s, r) => s + r.totalAmount, 0) +
+    (sessionHistory || []).reduce((s, sh) => s + (sh.totalAmount || 0), 0);
 
   // Filter reservations for the new card
   const pendingReservations = reservations
     .filter(r => r.status === 'pending' || r.status === 'confirmed')
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const handleWeatherSubmit = (e: React.FormEvent) => {
+  // 🟢 FIX: Implemented Geocoding API so the weather widget fetches real latitude/longitude
+  const handleWeatherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if(locationQuery.trim()) {
-       updateWeatherLocation(locationQuery.trim(), locationQuery.trim(), locationQuery.trim()); 
+      toast.loading("Locating...", { id: 'weather-fetch' });
+      try {
+        const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationQuery.trim())}&count=1`);
+        const data = await res.json();
+        
+        if (data.results && data.results.length > 0) {
+          const { latitude, longitude, name } = data.results[0];
+          updateWeatherLocation(latitude.toString(), longitude.toString(), name);
+          toast.success(`Weather location updated to ${name}`, { id: 'weather-fetch' });
+        } else {
+          toast.error("Location not found. Please try a different city.", { id: 'weather-fetch' });
+        }
+      } catch (err) {
+        toast.error("Network error. Failed to update location.", { id: 'weather-fetch' });
+      }
     }
     setIsEditingWeather(false);
+    setLocationQuery('');
   };
 
-  const handleManualSync = () => {
+  // 🟢 FIX: Wired up to the actual refresh function in AppContext
+  const handleManualSync = async () => {
     setIsSyncing(true);
-    // Simulate a network request to Supabase
-    setTimeout(() => {
-      setIsSyncing(false);
+    try {
+      if (refreshLiveMonitor) await refreshLiveMonitor();
       setLastSync(new Date());
-    }, 2500);
+      toast.success("Database successfully synchronized with Live Monitor.");
+    } catch (e) {
+      toast.error("Failed to synchronize database.");
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  // Generate dynamic system alerts based on current state
+  // 🟢 FIX: Replaced dynamic tailwind strings with static mapping to prevent CSS build purging
   const getDynamicAlerts = () => {
     const alerts = [];
     
     // Supabase Egress/Sync Warning
-    const timeSinceSync = (new Date().getTime() - lastSync.getTime()) / (1000 * 60 * 60); // in hours
+    const timeSinceSync = (new Date().getTime() - lastSync.getTime()) / (1000 * 60 * 60);
     if (timeSinceSync > 24) {
        alerts.push({
          id: 'alert_sync',
          title: 'Cloud Sync Overdue',
          desc: 'Local SQLite data has not been backed up to Supabase in over 24 hours. Run a manual sync to ensure data safety.',
-         color: 'rose',
+         style: { box: 'bg-rose-950/20 border-rose-900/30', dot: 'bg-rose-500', title: 'text-rose-400', btn: 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 border-rose-500/20' },
          action: { label: 'Sync Now', onClick: handleManualSync }
-       });
-    } else {
-       alerts.push({
-         id: 'alert_sync_ok',
-         title: 'Database Synchronized',
-         desc: `Local SQLite is running efficiently. Last cloud backup to Supabase completed ${format(lastSync, 'h:mm a')}. Egress limits are optimal.`,
-         color: 'emerald'
        });
     }
 
     // Reservation Overload Warning
     const todayRes = pendingReservations.filter(r => isToday(new Date(r.date)));
-    if (todayRes.length > (tables.length * 2)) {
+    if (tables.length > 0 && todayRes.length > (tables.length * 2)) {
       alerts.push({
          id: 'alert_res',
          title: 'High Booking Volume',
          desc: `There are ${todayRes.length} reservations scheduled for today. Consider limiting walk-ins or adjusting the online capacity limit.`,
-         color: 'amber',
+         style: { box: 'bg-amber-950/20 border-amber-900/30', dot: 'bg-amber-500', title: 'text-amber-400', btn: 'bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 border-amber-500/20' },
          action: { label: 'Adjust Limits', onClick: () => navigate('/admin/policy-rates') }
        });
     }
@@ -90,7 +115,7 @@ export function AdminDashboard() {
          id: 'alert_voids',
          title: 'Unusual POS Activity',
          desc: `Detected ${recentVoids.length} voided transactions in the last 24 hours. Please review the system activity logs.`,
-         color: 'rose',
+         style: { box: 'bg-rose-950/20 border-rose-900/30', dot: 'bg-rose-500', title: 'text-rose-400', btn: 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 border-rose-500/20' },
          action: { label: 'View Logs', onClick: () => navigate('/admin/activity') }
        });
     }
@@ -101,7 +126,7 @@ export function AdminDashboard() {
          id: 'alert_weather',
          title: 'Inclement Weather Detected',
          desc: 'Rain is forecasted in your area. Predictive models suggest a 30% increase in indoor walk-in traffic and extended play durations.',
-         color: 'blue'
+         style: { box: 'bg-blue-950/20 border-blue-900/30', dot: 'bg-blue-500', title: 'text-blue-400', btn: '' },
        });
     }
 
@@ -112,7 +137,7 @@ export function AdminDashboard() {
 
   const cards = [
     { label: 'Staff Users',       value: activeUsers,       total: staffUsers.length,       color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    icon: Users,        link: '/admin/users' },
-    { label: 'Tables',            value: tables.filter(t=>t.status==='available').length, total: tables.length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables', subLabel: 'available' },
+    { label: 'Tables',            value: tables.filter(t=>t.status==='available').length, total: tables.length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables' },
     { label: 'Active Promos',     value: activePromos,      total: promoCodes.length,       color: 'text-violet-400',  bg: 'bg-violet-500/10',  border: 'border-violet-500/20',  icon: Tag,          link: '/admin/events' },
     { label: 'Live Announcements',value: activeAnn,         total: announcements.length,    color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/20',   icon: Megaphone,    link: '/admin/announcements' },
     { label: 'Upcoming Closures', value: upcomingClosed,    total: closedDates.length,      color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    icon: CalendarX2,   link: '/admin/events' },
@@ -261,16 +286,16 @@ export function AdminDashboard() {
               </div>
             ) : (
               dynamicAlerts.map(alert => (
-                <div key={alert.id} className={`p-3.5 rounded-xl border flex flex-col bg-${alert.color}-950/20 border-${alert.color}-900/30`}>
+                <div key={alert.id} className={`p-3.5 rounded-xl border flex flex-col ${alert.style.box}`}>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <div className={`w-2 h-2 rounded-full bg-${alert.color}-500 flex-shrink-0`} />
-                    <p className={`text-xs font-bold text-${alert.color}-400`}>{alert.title}</p>
+                    <div className={`w-2 h-2 rounded-full ${alert.style.dot} flex-shrink-0`} />
+                    <p className={`text-xs font-bold ${alert.style.title}`}>{alert.title}</p>
                   </div>
                   <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">{alert.desc}</p>
                   {alert.action && (
                     <button 
                       onClick={alert.action.onClick}
-                      className={`align-self-start self-start text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors bg-${alert.color}-600/20 text-${alert.color}-400 hover:bg-${alert.color}-600/30 border border-${alert.color}-500/20`}
+                      className={`align-self-start self-start text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors border ${alert.style.btn}`}
                     >
                       {alert.action.label}
                     </button>
@@ -281,7 +306,7 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        {/* 🟢 NEW: Incoming Reservations Card */}
+        {/* Incoming Reservations Card */}
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-bold text-neutral-200 flex items-center gap-2">

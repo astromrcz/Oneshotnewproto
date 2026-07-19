@@ -5,25 +5,35 @@ import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRoun
 import { useAppContext } from '../context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
-type FormView = 'login' | 'reset';
+type FormView = 'login' | 'reset' | 'force-change';
+
+// 🟢 NEW: Password Strength Helper
+const getPasswordStrength = (pw: string) => {
+  if (!pw) return { score: 0, color: 'bg-neutral-800/50', isValid: false };
+  let score = 0;
+  if (pw.length >= 8) score += 1;
+  if (/[a-zA-Z]/.test(pw)) score += 1;
+  if (/[0-9]/.test(pw)) score += 1;
+
+  if (score === 1) return { score, color: 'bg-rose-500', isValid: false };
+  if (score === 2) return { score, color: 'bg-amber-500', isValid: false };
+  return { score, color: 'bg-emerald-500', isValid: true };
+};
 
 export function OfflineLogin() {
   const navigate = useNavigate();
-  const { staffLogin, adminLogin, siteConfig, resetPasswordWithPin } = useAppContext() as any;
+  const { staffLogin, adminLogin, siteConfig, resetPasswordWithPin, updateStaffUser, staffUsers, staffLogout, hashPassword } = useAppContext() as any;
   
-  // UI States
   const [view, setView] = useState<FormView>('login');
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Login Form State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
 
-  // Reset Form State
   const [resetUsername, setResetUsername] = useState('');
   const [resetPin, setResetPin] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -40,8 +50,7 @@ export function OfflineLogin() {
     const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % sliderImages.length), 5000);
     return () => clearInterval(timer);
   }, [sliderImages.length]);
-  
-  // 🟢 NEW: If they hit "Back" to get to the login screen, bounce them back into the app instantly
+
   useEffect(() => {
     if (localStorage.getItem('oneshot_admin_auth') === 'true') {
       navigate('/admin', { replace: true });
@@ -50,40 +59,61 @@ export function OfflineLogin() {
     }
   }, [navigate]);
 
+  const pwStrength = getPasswordStrength(newPassword);
+
   const switchView = (newView: FormView) => {
-    setError('');
-    setSuccessMsg('');
-    setView(newView);
+    setError(''); setSuccessMsg(''); setView(newView);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setIsProcessing(true);
+    setError(''); setIsProcessing(true);
 
     const isAdmin = await adminLogin(username, password);
-    if (isAdmin) { navigate('/admin'); return; }
+    const isStaff = !isAdmin && await staffLogin(username, password);
 
-    const isStaff = await staffLogin(username, password);
-    if (isStaff) { navigate('/staff'); return; }
+    if (isAdmin || isStaff) {
+      if (password === 'oneshotstaff') {
+        switchView('force-change');
+        setIsProcessing(false);
+        return;
+      }
+      navigate(isAdmin ? '/admin' : '/staff');
+      return;
+    }
 
     setError('Invalid username or password.');
     setIsProcessing(false);
+  };
+
+  const handleForceChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (newPassword === 'oneshotstaff') { setError('You cannot use the default password.'); return; }
+    if (!pwStrength.isValid) { setError('Password does not meet security requirements.'); return; }
+    if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
+
+    setIsProcessing(true);
+    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());    
+    if (targetUser) {
+      const hashedNew = await hashPassword(newPassword);
+      updateStaffUser(targetUser.id, { password: hashedNew });
+      setSuccessMsg('Security verified. Logging you in...');
+      setTimeout(() => navigate(targetUser.isAdmin ? '/admin' : '/staff'), 1500);
+    } else {
+      setError('User record not found.');
+      setIsProcessing(false);
+    }
   };
 
   const handleConfirmReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
-    if (newPassword !== confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    if (resetPin.length !== 4) {
-      setError('Recovery PIN must be exactly 4 digits.');
-      return;
-    }
+    if (!pwStrength.isValid) { setError('Password does not meet security requirements.'); return; }
+    if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
+    if (resetPin.length !== 4) { setError('Recovery PIN must be exactly 4 digits.'); return; }
 
     setIsProcessing(true);
     const res = await resetPasswordWithPin(resetUsername, resetPin, newPassword);
@@ -92,11 +122,7 @@ export function OfflineLogin() {
       setSuccessMsg('Password successfully changed! Returning to login...');
       setTimeout(() => {
         setUsername(resetUsername);
-        setPassword('');
-        setResetUsername('');
-        setResetPin('');
-        setNewPassword('');
-        setConfirmPassword('');
+        setPassword(''); setResetUsername(''); setResetPin(''); setNewPassword(''); setConfirmPassword('');
         switchView('login');
       }, 3000);
     } else {
@@ -107,8 +133,6 @@ export function OfflineLogin() {
 
   return (
     <div className="min-h-screen bg-neutral-950 flex flex-col lg:flex-row font-sans overflow-hidden relative">
-      
-      {/* ─── LEFT COLUMN: FORMS ─── */}
       <div className="w-full lg:w-[480px] xl:w-[540px] flex flex-col justify-center px-8 sm:px-12 lg:px-16 py-12 z-20 bg-neutral-950 shadow-[20px_0_50px_rgba(0,0,0,0.5)] relative">
         <div className="w-full max-w-sm mx-auto relative overflow-hidden">
           
@@ -118,21 +142,18 @@ export function OfflineLogin() {
             <p className="text-[11px] text-emerald-500 font-bold uppercase tracking-[0.2em] mt-2">Offline Management System</p>
           </div>
 
-          <div className="relative min-h-[350px]">
+          <div className="w-full">
             <AnimatePresence mode="wait">
               
               {/* ── LOGIN VIEW ── */}
               {view === 'login' && (
-                <motion.div key="login" initial={{ x: -50, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 50, opacity: 0 }} transition={{ duration: 0.3 }} className="absolute inset-0">
+                <motion.div key="login" initial={{ x: -50, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 50, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
                   <form onSubmit={handleLogin} className="space-y-4">
                     <div className="flex items-center gap-2 mb-2">
                       <ShieldCheck className="text-emerald-500" size={18} />
                       <h2 className="text-sm font-bold text-neutral-300 uppercase tracking-wider">Authorized Access Only</h2>
                     </div>
-
                     {error && <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-4 py-3 rounded-xl"><AlertTriangle size={14} className="flex-shrink-0" />{error}</div>}
-                    {successMsg && <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 text-xs px-4 py-3 rounded-xl"><CheckCircle size={14} className="flex-shrink-0" />{successMsg}</div>}
-
                     <div className="space-y-4">
                       <div className="space-y-1.5">
                         <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-widest pl-1">Username</label>
@@ -141,7 +162,6 @@ export function OfflineLogin() {
                           <input type="text" autoFocus value={username} onChange={e => setUsername(e.target.value)} disabled={isProcessing} className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl pl-11 pr-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500/50 transition-all placeholder-neutral-600" placeholder="Enter your username" />
                         </div>
                       </div>
-
                       <div className="space-y-1.5">
                         <div className="flex justify-between items-center pr-1">
                           <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-widest pl-1">Password</label>
@@ -156,7 +176,6 @@ export function OfflineLogin() {
                         </div>
                       </div>
                     </div>
-
                     <button type="submit" disabled={isProcessing} className="w-full mt-6 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2">
                       {isProcessing ? 'Authenticating...' : 'Secure Login'}
                     </button>
@@ -164,12 +183,68 @@ export function OfflineLogin() {
                 </motion.div>
               )}
 
-              {/* ── RESET PASSWORD VIEW (PIN) ── */}
+              {/* ── FORCE PASSWORD CHANGE VIEW ── */}
+              {view === 'force-change' && (
+                <motion.div key="force-change" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
+                  <form onSubmit={handleForceChange} className="space-y-4">
+                    <div className="bg-rose-950/20 border border-rose-900/40 rounded-xl p-4 mb-4">
+                      <div className="flex items-center gap-2 mb-2 text-rose-500">
+                        <AlertTriangle size={18} />
+                        <h2 className="text-sm font-bold uppercase tracking-wider">Action Required</h2>
+                      </div>
+                      <p className="text-xs text-rose-200/80 leading-relaxed">
+                        Your password has been reset to the system default by an Administrator. You must set a new private password before you can access the dashboard.
+                      </p>
+                    </div>
+
+                    {error && <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-4 py-3 rounded-xl"><AlertTriangle size={14} className="flex-shrink-0" />{error}</div>}
+                    {successMsg && <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 text-xs px-4 py-3 rounded-xl"><CheckCircle size={14} className="flex-shrink-0" />{successMsg}</div>}
+
+                    <div className="space-y-1.5">
+                      <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-widest pl-1">New Password</label>
+                      <div className="relative">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500"><KeyRound size={16} /></div>
+                        <input type={showPw ? "text" : "password"} required autoFocus value={newPassword} onChange={e => setNewPassword(e.target.value)} disabled={isProcessing} className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl pl-11 pr-12 py-3 text-sm text-white focus:outline-none focus:border-rose-500/50 transition-all" placeholder="Enter a secure password" />
+                        <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"><Eye size={16} /></button>
+                      </div>
+                      {/* 🟢 NEW: Password Strength Meter */}
+                      {newPassword && (
+                        <div className="pt-1 pb-1 space-y-1.5">
+                          <div className="flex gap-1 h-1 w-full rounded-full overflow-hidden bg-neutral-900">
+                            <div className={`h-full ${pwStrength.score >= 1 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                            <div className={`h-full ${pwStrength.score >= 2 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                            <div className={`h-full ${pwStrength.score >= 3 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                          </div>
+                          <p className={`text-[9px] ${pwStrength.isValid ? 'text-emerald-500' : 'text-neutral-500'}`}>Requires 8+ characters, containing letters and numbers.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-widest pl-1">Confirm New Password</label>
+                      <div className="relative">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500"><KeyRound size={16} /></div>
+                        <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} disabled={isProcessing} className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl pl-11 pr-4 py-3 text-sm text-white focus:outline-none focus:border-rose-500/50 transition-all" placeholder="Re-enter password" />
+                      </div>
+                    </div>
+
+                    <button type="submit" disabled={isProcessing || !pwStrength.isValid} className="w-full mt-4 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-900/50 disabled:text-rose-400/50 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg">
+                      {isProcessing ? 'Verifying...' : 'Set Password & Enter System'}
+                    </button>
+                    
+                    <button type="button" disabled={isProcessing} onClick={() => { staffLogout(); switchView('login'); }} className="w-full text-xs text-neutral-500 hover:text-neutral-300 font-bold py-2 transition-all">
+                      Cancel & Log Out
+                    </button>
+                  </form>
+                </motion.div>
+              )}
+
+              {/* ── RESET VIA PIN VIEW ── */}
               {view === 'reset' && (
-                <motion.div key="reset" initial={{ x: 50, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -50, opacity: 0 }} transition={{ duration: 0.3 }} className="absolute inset-0">
+                <motion.div key="reset" initial={{ x: 50, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -50, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
                   <form onSubmit={handleConfirmReset} className="space-y-4">
                     <button type="button" onClick={() => switchView('login')} className="flex items-center gap-2 text-xs font-bold text-neutral-400 hover:text-white mb-2 transition-colors"><ArrowLeft size={14} /> Back to Login</button>
-                    <h2 className="text-xl font-bold text-white mb-4">Set New Password</h2>
+                    <h2 className="text-xl font-bold text-white mb-4">Account Recovery</h2>
 
                     {error && <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-4 py-3 rounded-xl"><AlertTriangle size={14} className="flex-shrink-0" />{error}</div>}
                     {successMsg && <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 text-xs px-4 py-3 rounded-xl"><CheckCircle size={14} className="flex-shrink-0" />{successMsg}</div>}
@@ -192,6 +267,17 @@ export function OfflineLogin() {
                         <input type={showPw ? "text" : "password"} required value={newPassword} onChange={e => setNewPassword(e.target.value)} disabled={isProcessing} className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl pl-11 pr-12 py-3 text-sm text-white focus:outline-none focus:border-amber-500/50 transition-all" placeholder="••••••••" />
                         <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"><Eye size={16} /></button>
                       </div>
+                      {/* 🟢 NEW: Password Strength Meter */}
+                      {newPassword && (
+                        <div className="pt-1 pb-1 space-y-1.5">
+                          <div className="flex gap-1 h-1 w-full rounded-full overflow-hidden bg-neutral-900">
+                            <div className={`h-full ${pwStrength.score >= 1 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                            <div className={`h-full ${pwStrength.score >= 2 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                            <div className={`h-full ${pwStrength.score >= 3 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                          </div>
+                          <p className={`text-[9px] ${pwStrength.isValid ? 'text-emerald-500' : 'text-neutral-500'}`}>Requires 8+ characters, containing letters and numbers.</p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -202,8 +288,8 @@ export function OfflineLogin() {
                       </div>
                     </div>
 
-                    <button type="submit" disabled={isProcessing || resetPin.length !== 4 || !newPassword} className="w-full mt-4 bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg">
-                      {isProcessing ? 'Saving...' : 'Confirm & Change Password'}
+                    <button type="submit" disabled={isProcessing || !pwStrength.isValid || resetPin.length !== 4} className="w-full mt-4 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg">
+                      {isProcessing ? 'Saving...' : 'Confirm & Log In'}
                     </button>
                   </form>
                 </motion.div>
@@ -217,7 +303,6 @@ export function OfflineLogin() {
         </div>
       </div>
 
-      {/* ─── RIGHT COLUMN: IMAGE SLIDER ─── */}
       <div className="hidden lg:block relative flex-1 bg-neutral-900 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-neutral-950 via-neutral-950/20 to-transparent z-10" />
         <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/80 via-transparent to-neutral-950/30 z-10" />

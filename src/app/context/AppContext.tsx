@@ -55,7 +55,6 @@ export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'comple
 
 export type Reservation = {
   id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
-  // 🟢 NEW: Refund Tracking
   refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
   refundMethod?: 'gcash' | 'cash' | 'session_credit';
   refundNotes?: string;
@@ -89,12 +88,13 @@ export type Event = {
 
 export type StaffProfile = {
   username: string; password: string; fullName: string; email: string; role: string; phone: string; joinedDate: string; avatarImg?: string; 
-  isAdmin?: boolean; // 🟢 NEW: Added to track admin rights globally
+  isAdmin?: boolean; 
 };
 
 export type StaffUser = {
   id: string; username: string; password: string; fullName: string; email: string; role: 'manager' | 'cashier'; isAdmin: boolean; phone: string; isActive: boolean; createdAt: Date;
-  recoveryPin?: string; // 🟢 NEW: 4-digit offline recovery PIN
+  recoveryPin?: string; 
+  avatarImg?: string;
 };
 
 export type RatesConfig = {
@@ -134,7 +134,7 @@ type AppContextType = {
   tables: Table[]; queue: QueueItem[]; reservations: Reservation[]; feedback: Feedback[]; activities: Activity[]; promoCodes: PromoCode[]; staffUsers: StaffUser[]; inventory: InventoryItem[]; rates: RatesConfig; reservationTerms: ReservationTerms; announcements: Announcement[]; closedDates: ClosedDate[]; weather: WeatherData | null; updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
-  staffLogin: (u: string, p: string) => boolean; staffLogout: () => void; adminLogin: (u: string, p: string) => boolean; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
+  staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
@@ -142,7 +142,7 @@ type AppContextType = {
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
-  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => void; toggleStaffUserActive: (id: string) => void;
+  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
   updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
   siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
   lostItems: LostItem[];
@@ -156,10 +156,9 @@ type AppContextType = {
   sessionHistory: SessionHistoryItem[];
   addSessionHistory: (i: Omit<SessionHistoryItem, 'id'>) => void;
   updateRefundStatus: (id: string, refundStatus: string, method?: string, notes?: string) => void;
-  staffLogin: (u: string, p: string) => Promise<boolean>;
-  adminLogin: (u: string, p: string) => Promise<boolean>;
   resetPasswordWithPin: (username: string, pin: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
   isSystemOffline: boolean;
+  hashPassword: (p: string) => Promise<string>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -185,7 +184,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [weatherConfig, setWeatherConfig] = useState({ lat: '', lon: '', name: '' });
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
- // 🟢 FIX: Initialize states from localStorage to survive refreshes and back/forward clicks
+
   const [staffLoggedIn, setStaffLoggedIn] = useState(() => localStorage.getItem('oneshot_staff_auth') === 'true');
   const [adminLoggedIn, setAdminLoggedIn] = useState(() => localStorage.getItem('oneshot_admin_auth') === 'true');
   
@@ -193,6 +192,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem('oneshot_staff_profile');
     return saved ? JSON.parse(saved) : { username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15', isAdmin: true };
   });
+  
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
@@ -201,35 +201,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [isSystemOffline, setIsSystemOffline] = useState(false);
 
-  // 🟢 Phase 4: Monitor the Venue's Heartbeat
   useEffect(() => {
     const checkHeartbeat = async () => {
       const { data } = await supabase.from('system_status').select('last_seen_at').eq('id', 1).maybeSingle();
       if (data) {
         const lastSeen = new Date(data.last_seen_at);
         const timeDiffMs = new Date().getTime() - lastSeen.getTime();
-        
-        // If the signal is older than 5 minutes (300,000 ms), trigger the lockdown
         setIsSystemOffline(timeDiffMs > 300000);
       }
     };
     
     checkHeartbeat();
-    const interval = setInterval(checkHeartbeat, 60000); // Check every minute
+    const interval = setInterval(checkHeartbeat, 60000); 
     return () => clearInterval(interval);
   }, []);
 
-
   const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
-    // 1. Optimistic UI update
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } : r));
-    
-    // 2. Sync to local database (which will eventually sync to Supabase)
     const payload = { refundStatus, refundMethod: method, refundNotes: notes };
     syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`);
-    
-    // 3. Log the activity for the staff dashboard
-    addActivity('reservation_updated', `Reservation ${id} refund marked as ${refundStatus}`); 
+    addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
   };
   
   const refreshLiveMonitor = async () => {
@@ -272,8 +263,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
         if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
         if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
-        if (arguments[13] && arguments[13].ok) setLostItems(await arguments[13].json());
-        if (arguments[14] && arguments[14].ok) setWatchlist(await arguments[14].json());
         if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
         if (watchlistRes && watchlistRes.ok) setWatchlist(await watchlistRes.json());
         if (sessionHistoryRes && sessionHistoryRes.ok) setSessionHistory(await sessionHistoryRes.json());
@@ -348,11 +337,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const syncToSupabase = useCallback((action: string, payload: any) => {}, []);
 
+  // 🟢 FIX: Always use the exact staffProfile.fullName to prevent generic "Admin" logs
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
-    let actor = 'Customer / System';
-    if (adminLoggedIn) actor = 'Admin';
-    else if (staffLoggedIn && staffProfile?.fullName) actor = staffProfile.fullName;
+    const actor = staffProfile?.fullName || 'System / Customer';
     const detailedDescription = `${description} (Action by: ${actor})`;
+    
     const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description: detailedDescription, timestamp: new Date(), metadata };
     setActivities(prev => [newActivity, ...prev]);
     fetch('http://localhost:3001/api/activities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newActivity) }).catch(e => {});
@@ -394,44 +383,81 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/session-history', 'POST', newItem, `Logged session history`);
   };
 
-const staffLogin = async (u: string, p: string) => { 
-    const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive); 
+  const hashPassword = async (password: string) => {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const staffLogin = async (u: string, p: string) => { 
+    const hashedP = await hashPassword(p); 
+    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive); 
     if (valid) { 
       setStaffLoggedIn(true); 
       localStorage.setItem('oneshot_staff_auth', 'true');
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: valid.isAdmin });
+      
+      // 🟢 FIX: Explicitly pull avatarImg and phone to overwrite stale memory
+      updateStaffProfile({ 
+        fullName: valid.fullName, 
+        username: valid.username, 
+        email: valid.email, 
+        role: valid.role, 
+        isAdmin: valid.isAdmin,
+        phone: valid.phone || '',
+        avatarImg: valid.avatarImg || ''
+      });
       return true; 
     }
     return false; 
   };
 
   const adminLogin = async (u: string, p: string) => { 
-    const valid = staffUsers.find(su => su.username === u && su.password === p && su.isActive && su.isAdmin);
+    const hashedP = await hashPassword(p); 
+    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive && su.isAdmin);
     if (valid) {
       setAdminLoggedIn(true);
       localStorage.setItem('oneshot_admin_auth', 'true');
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true });
+      
+      // 🟢 FIX: Explicitly pull avatarImg and phone to overwrite stale memory
+      updateStaffProfile({ 
+        fullName: valid.fullName, 
+        username: valid.username, 
+        email: valid.email, 
+        role: valid.role, 
+        isAdmin: true,
+        phone: valid.phone || '',
+        avatarImg: valid.avatarImg || ''
+      });
       return true;
     }
     return false; 
   };
 
+ const resetStaffUserPassword = async (id: string) => {
+    try {
+      // 🟢 SECURE FIX: Look up the user's name before logging the activity
+      const targetUser = staffUsers.find(user => user.id === id);
+      const displayName = targetUser ? targetUser.fullName : id;
+
+      const hashedPw = await hashPassword('oneshotstaff'); 
+      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: hashedPw } : u));
+      await syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`);
+      addActivity('admin_action', `Reset password to default for: ${displayName}`);
+    } catch (error) {
+      console.error("Failed to reset password:", error);
+      toast.error("Failed to reset password.");
+    }
+  };
+
   const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
-    // 1. Find the user locally
     const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
-    if (!targetUser) {
-      return { success: false, message: 'User not found or inactive.' };
-    }
+    if (!targetUser) return { success: false, message: 'User not found or inactive.' };
+    if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
 
-    // 2. Verify the PIN strictly against the database
-    if (targetUser.recoveryPin !== pin) {
-      return { success: false, message: 'Invalid Username or Recovery PIN.' };
-    }
-
-    // 3. Update the password
-    updateStaffUser(targetUser.id, { password: newPassword });
+    const hashedNew = await hashPassword(newPassword); 
+    updateStaffUser(targetUser.id, { password: hashedNew });
     addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
-
     return { success: true, message: 'Password reset successfully!' };
   };
 
@@ -448,24 +474,22 @@ const staffLogin = async (u: string, p: string) => {
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
     setStaffProfile(prev => {
       const updated = { ...prev, ...p };
-      localStorage.setItem('oneshot_staff_profile', JSON.stringify(updated)); // Persist profile
+      localStorage.setItem('oneshot_staff_profile', JSON.stringify(updated));
       fetch(`http://localhost:3001/api/staff/${updated.username}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).catch(e => {});
       return updated;
     });
   };
   
- 
-
   const assignTable = (tableId: string, session: Session) => {
     const updatedSession = { ...session, orders: [] };
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: updatedSession } : t));
-    addActivity('table_assigned', `Table assigned to ${session.customerName}`, { tableId });
+    addActivity('table_assigned', `Assigned ${tables.find(t=>t.id===tableId)?.name} to ${session.customerName}`);
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`);
   };
 
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
-    addActivity('table_freed', `Table freed`, { tableId });
+    addActivity('table_freed', `Freed ${tables.find(t=>t.id===tableId)?.name}`);
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`);
   };
 
@@ -478,21 +502,24 @@ const staffLogin = async (u: string, p: string) => {
       }
       return t;
     }));
-    addActivity('session_extended', `Extended table session by ${mins} minutes`);
+    addActivity('session_extended', `Extended session at ${tables.find(t=>t.id===tableId)?.name} by ${mins} minutes`);
   };
 
-  const reserveTable = (tableId: string) => setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'reserved' } : t));
+  const reserveTable = (tableId: string) => {
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'reserved' } : t));
+    addActivity('table_reserved', `Reserved ${tables.find(t=>t.id===tableId)?.name}`);
+  };
   
   const setTableMaintenance = (tableId: string, reason: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`);
-    addActivity('admin_action', `Table set to maintenance: ${reason}`, { tableId });
+    addActivity('admin_action', `Set ${tables.find(t=>t.id===tableId)?.name} to maintenance: ${reason}`);
   };
 
   const setTableEvent = (tableId: string, eventName: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'event', maintenanceReason: eventName } : t));
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`);
-    addActivity('admin_action', `Table marked for event: ${eventName}`, { tableId });
+    addActivity('admin_action', `Reserved ${tables.find(t=>t.id===tableId)?.name} for event: ${eventName}`);
   };
 
   const addTable = (name: string) => {
@@ -502,17 +529,24 @@ const staffLogin = async (u: string, p: string) => {
     syncToDB('/api/tables', 'POST', newTable, `New table added`);
   };
 
-  const updateTable = (id: string, name: string) => setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
+  const updateTable = (id: string, name: string) => {
+    setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
+    addActivity('admin_action', `Renamed table ID: ${id} to ${name}`);
+  };
+
   const toggleTableActive = (id: string) => {
     setTables(prev => {
       const target = prev.find(t => t.id === id);
       if (target) syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`);
       return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
     });
+    addActivity('admin_action', `Toggled active status for table ID: ${id}`);
   };
+
   const deleteTable = (id: string) => {
     setTables(prev => prev.filter(t => t.id !== id));
     syncToDB(`/api/tables/${id}`, 'DELETE', {}, `Table deleted`);
+    addActivity('admin_action', `Deleted table ID: ${id}`);
   };
 
   const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
@@ -525,12 +559,13 @@ const staffLogin = async (u: string, p: string) => {
   const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => {
     setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
     syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`);
-    addActivity('admin_action', `Updated menu item details`);
+    addActivity('admin_action', `Updated details for menu item ID: ${id}`);
   };
 
   const deleteInventoryItem = (id: string) => {
     setInventory(prev => prev.filter(i => i.id !== id));
     syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`);
+    addActivity('admin_action', `Deleted menu item ID: ${id}`);
   };
   
   const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
@@ -597,11 +632,12 @@ const staffLogin = async (u: string, p: string) => {
   const removeFromQueue = (id: string) => {
     setQueue(prev => prev.filter(q => q.id !== id));
     syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`);
+    addActivity('queue_removed', `Removed ID: ${id} from queue`);
   };
 
   const callQueueItem = (id: string) => {
     setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
-    addActivity('queue_called', `Called customer from queue to available table`);
+    addActivity('queue_called', `Called customer ID: ${id} from queue to available table`);
     syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`);
   };
 
@@ -656,23 +692,27 @@ const staffLogin = async (u: string, p: string) => {
     const newPromo = { ...i, id, createdAt: new Date(), usageCount: 0 };
     setPromoCodes(prev => [...prev, newPromo]);
     syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`);
+    addActivity('admin_action', `Generated promo code: ${i.code}`);
     return id;
   };
   
   const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => {
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
     syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`);
+    addActivity('admin_action', `Updated promo code ID: ${id}`);
   };
   
   const togglePromoCode = (id: string) => {
     const target = promoCodes.find(p => p.id === id);
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
     if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo');
+    addActivity('admin_action', `Toggled visibility for promo ID: ${id}`);
   };
   
   const deletePromoCode = (id: string) => {
     setPromoCodes(prev => prev.filter(p => p.id !== id));
     syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo');
+    addActivity('admin_action', `Deleted promo code ID: ${id}`);
   };
   
   const applyPromoCode = (code: string) => {
@@ -691,26 +731,29 @@ const staffLogin = async (u: string, p: string) => {
     const newUser = { ...u, id, createdAt: new Date() };
     setStaffUsers(prev => [...prev, newUser]);
     syncToDB('/api/staff', 'POST', newUser, `Added staff user`);
+    addActivity('admin_action', `Created new staff user: ${u.username}`);
   };
   
   const updateStaffUser = (id: string, u: Partial<StaffUser>) => {
+    // 🟢 SECURE FIX: Look up the user's name before logging the activity
+    const targetUser = staffUsers.find(user => user.id === id);
+    const displayName = targetUser ? targetUser.fullName : id;
+
     setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
     syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`);
+    addActivity('admin_action', `Updated details for: ${displayName}`);
   };
   
-  const resetStaffUserPassword = (id: string) => {
-    setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: 'password123' } : u));
-    syncToDB(`/api/staff/${id}`, 'PUT', { password: 'password123' }, `Reset staff password`);
-  };
-  
+  // 🟢 FIXED: toggleStaffUserActive is restored
   const toggleStaffUserActive = (id: string) => {
     const target = staffUsers.find(u => u.id === id);
     if (target) {
       setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
       syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`);
+      addActivity('admin_action', `Toggled active status for staff user: ${target.username}`);
     }
   };
-
+  
   const updateRates = async (r: Partial<RatesConfig>) => {
     const sanitized = { ...r } as Partial<RatesConfig>;
     if (sanitized.hourlyRate !== undefined) sanitized.hourlyRate = Number(sanitized.hourlyRate) || 0;
@@ -743,16 +786,19 @@ const staffLogin = async (u: string, p: string) => {
     const newAnn = { ...a, id: `a${Date.now()}`, createdAt: new Date() };
     setAnnouncements(prev => [newAnn, ...prev]);
     syncToDB('/api/announcements', 'POST', newAnn, `Created announcement: ${a.title}`);
+    addActivity('admin_action', `Created public announcement: ${a.title}`);
   };
 
   const updateAnnouncement = (id: string, u: Partial<Announcement>) => {
     setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, ...u } : a));
     syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`);
+    addActivity('admin_action', `Updated announcement ID: ${id}`);
   };
   
   const deleteAnnouncement = (id: string) => {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
     syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`);
+    addActivity('admin_action', `Deleted announcement ID: ${id}`);
   };
 
   const toggleAnnouncement = (id: string) => {
@@ -760,6 +806,7 @@ const staffLogin = async (u: string, p: string) => {
     if (target) {
       setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a));
       syncToDB(`/api/announcements/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled announcement visibility`);
+      addActivity('admin_action', `Toggled visibility for announcement ID: ${id}`);
     }
   };
 
@@ -767,11 +814,13 @@ const staffLogin = async (u: string, p: string) => {
     const newCd = { ...c, id: `cd${Date.now()}` };
     setClosedDates(prev => [...prev, newCd]);
     syncToDB('/api/closed-dates', 'POST', newCd, `Created closed date for ${c.date}`);
+    addActivity('admin_action', `Added closure date: ${c.date}`);
   };
   
   const removeClosedDate = (id: string) => {
     setClosedDates(prev => prev.filter(c => c.id !== id));
     syncToDB(`/api/closed-dates/${id}`, 'DELETE', {}, `Deleted closed date`);
+    addActivity('admin_action', `Removed closure date ID: ${id}`);
   };
   
   const updateClosedDate = (id: string, u: Partial<ClosedDate>) => {
@@ -789,16 +838,19 @@ const staffLogin = async (u: string, p: string) => {
     const newEvent = { ...e, id: Date.now().toString() };
     setEvents(prev => [...prev, newEvent]);
     syncToDB('/api/events', 'POST', newEvent, `Created new event`);
+    addActivity('admin_action', `Created special event: ${e.title}`);
   };
   
   const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => {
     setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
     syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`);
+    addActivity('admin_action', `Updated event ID: ${id}`);
   };
   
   const deleteEvent = (id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`);
+    addActivity('admin_action', `Deleted event ID: ${id}`);
   };
 
   if (isInitializing) {
@@ -827,9 +879,9 @@ return (
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
       updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
-      // 🟢 FIX: Exposing these below so they can be consumed by LostAndFound & Watchlist components
       lostItems, addLostItem, updateLostItem, deleteLostItem,
-      watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline
+      watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
+      hashPassword
     }}>
       {children}
     </AppContext.Provider>

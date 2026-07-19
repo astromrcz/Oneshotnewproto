@@ -87,15 +87,15 @@ export type Event = {
 };
 
 export type StaffProfile = {
-  username: string; password: string; fullName: string; email: string; role: string; phone: string; joinedDate: string; avatarImg?: string; 
+  username: string; password: string; fullName: string; role: string; phone: string; joinedDate: string; avatarImg?: string; 
   isAdmin?: boolean; 
-};
+}; // Removed email
 
 export type StaffUser = {
-  id: string; username: string; password: string; fullName: string; email: string; role: 'manager' | 'cashier'; isAdmin: boolean; phone: string; isActive: boolean; createdAt: Date;
+  id: string; username: string; password: string; fullName: string; role: 'manager' | 'cashier'; isAdmin: boolean; phone: string; isActive: boolean; createdAt: Date;
   recoveryPin?: string; 
   avatarImg?: string;
-};
+}; // Removed email
 
 export type RatesConfig = {
   hourlyRate: number; overtimeRate: number; downPaymentPercent: number;
@@ -159,6 +159,10 @@ type AppContextType = {
   resetPasswordWithPin: (username: string, pin: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
   isSystemOffline: boolean;
   hashPassword: (p: string) => Promise<string>;
+  theme: 'dark' | 'light';
+  primaryColor: string;
+  updateTheme: (theme: 'dark' | 'light') => void;
+  updatePrimaryColor: (color: string) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -188,9 +192,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [staffLoggedIn, setStaffLoggedIn] = useState(() => localStorage.getItem('oneshot_staff_auth') === 'true');
   const [adminLoggedIn, setAdminLoggedIn] = useState(() => localStorage.getItem('oneshot_admin_auth') === 'true');
   
+  // 🎨 Global Theme State
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('oneshot_theme') as 'dark' | 'light') || 'dark');
+  const [primaryColor, setPrimaryColor] = useState(() => localStorage.getItem('oneshot_color') || 'emerald');
+
+  // Inject the theme attributes directly into the HTML Document root
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme', theme);
+    root.setAttribute('data-color', primaryColor);
+  }, [theme, primaryColor]);
+
+  const updateTheme = (newTheme: 'dark' | 'light') => {
+    setTheme(newTheme);
+    localStorage.setItem('oneshot_theme', newTheme);
+  };
+
+  const updatePrimaryColor = (color: string) => {
+    setPrimaryColor(color);
+    localStorage.setItem('oneshot_color', color);
+  };
+
   const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
     const saved = localStorage.getItem('oneshot_staff_profile');
-    return saved ? JSON.parse(saved) : { username: 'admin', password: 'admin123', fullName: 'Admin User', email: 'admin@oneshot.com', role: 'Manager', phone: '09171234567', joinedDate: '2024-01-15', isAdmin: true };
+    return saved ? JSON.parse(saved) : { 
+      username: '', 
+      password: '', 
+      fullName: '', 
+      role: '', 
+      phone: '', 
+      joinedDate: '', 
+      isAdmin: false 
+    };
   });
   
   const [siteConfig, setSiteConfig] = useState<any>(null);
@@ -405,9 +438,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateStaffProfile({ 
         fullName: valid.fullName, 
         username: valid.username, 
-        email: valid.email, 
         role: valid.role, 
-        isAdmin: valid.isAdmin,
+        isAdmin: valid.isAdmin, // Or true for adminLogin
         phone: valid.phone || '',
         avatarImg: valid.avatarImg || ''
       });
@@ -876,7 +908,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted event ID: ${id}`);
   };
 
-  if (isInitializing) {
+ if (isInitializing) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center">
         <div className="relative w-16 h-16 mb-6">
@@ -888,7 +920,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       </div>
     );
   }
-return (
+
+  return (
     <AppContext.Provider value={{
       tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement,
@@ -904,7 +937,13 @@ return (
       updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
       lostItems, addLostItem, updateLostItem, deleteLostItem,
       watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
-      hashPassword
+      hashPassword,
+      
+      // 🟢 FIXED: Exported the Theme functions to the rest of the application
+      theme, 
+      primaryColor, 
+      updateTheme, 
+      updatePrimaryColor
     }}>
       {children}
     </AppContext.Provider>

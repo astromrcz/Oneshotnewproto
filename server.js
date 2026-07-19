@@ -60,8 +60,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
-      db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, email TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0)`);
-      db.run(`ALTER TABLE staff ADD COLUMN recoveryPin TEXT`, (err) => {
+db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0)`);      db.run(`ALTER TABLE staff ADD COLUMN recoveryPin TEXT`, (err) => {
       db.run(`ALTER TABLE tables ADD COLUMN sessionData TEXT`, () => {});
       
       db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) SELECT key_name, setting_value FROM system_settings`, (err) => {
@@ -94,9 +93,9 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`CREATE TABLE IF NOT EXISTS session_history (id TEXT PRIMARY KEY, customerName TEXT, tableId TEXT, tableName TEXT, startTime DATETIME, endTime DATETIME, durationMinutes INTEGER, totalAmount REAL, amountPaid REAL, orders TEXT)`);
 
       // 🟢 UPDATED: 'admin123' is now replaced with its SHA-256 hash
-      const createSuperAdmin = `
-        INSERT INTO staff (id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin, recoveryPin)
-        SELECT 'admin_001', 'superadmin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'System Administrator', 'admin@oneshot.local', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492'
+     const createSuperAdmin = `
+        INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin)
+        SELECT 'admin_001', 'superadmin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'System Administrator', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492'
         WHERE NOT EXISTS (SELECT 1 FROM staff WHERE username = 'superadmin')
       `;
       db.run(createSuperAdmin);
@@ -695,29 +694,27 @@ app.post('/api/activities', (req, res) => {
 });
 
 app.post('/api/staff', (req, res) => {
-  const { id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin, recoveryPin } = req.body;
-  db.run(`INSERT INTO staff (id, username, password, fullName, email, role, phone, joinedDate, isActive, isAdmin, recoveryPin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  [id, username, password, fullName, email, role, phone, joinedDate, isActive ? 1 : 0, isAdmin ? 1 : 0, recoveryPin || null], function(err) {
+  // Removed email
+  const { id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin } = req.body;
+  db.run(`INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, username, password, fullName, role, phone, joinedDate, isActive ? 1 : 0, isAdmin ? 1 : 0, recoveryPin || null], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: "Staff added to DB." });
   });
 });
 
 app.put('/api/staff/:identifier', (req, res) => {
-  // 🟢 FIX: Added recoveryPin and isAdmin to the destructured body
-  const { username, fullName, email, phone, password, avatarImg, isActive, role, isAdmin, recoveryPin } = req.body;
+  // Removed email
+  const { username, fullName, phone, password, avatarImg, isActive, role, isAdmin, recoveryPin } = req.body;
   let updates = [], params = [];
   
   if (username !== undefined) { updates.push("username = ?"); params.push(username); }
   if (fullName !== undefined) { updates.push("fullName = ?"); params.push(fullName); }
-  if (email !== undefined) { updates.push("email = ?"); params.push(email); }
   if (phone !== undefined) { updates.push("phone = ?"); params.push(phone); }
   if (password !== undefined) { updates.push("password = ?"); params.push(password); }
   if (avatarImg !== undefined) { updates.push("avatarImg = ?"); params.push(avatarImg); }
   if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
   if (role !== undefined) { updates.push("role = ?"); params.push(role); }
-  
-  // 🟢 FIX: Push the new fields into the SQL update array if they are provided
   if (isAdmin !== undefined) { updates.push("isAdmin = ?"); params.push(isAdmin ? 1 : 0); }
   if (recoveryPin !== undefined) { updates.push("recoveryPin = ?"); params.push(recoveryPin); }
   

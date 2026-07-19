@@ -42,18 +42,17 @@ export function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLocked, setIsLocked] = useState(() => localStorage.getItem('oneshot_is_locked') === 'true');  
   
-  // 🟢 NEW: Global Unsaved Changes State & Interceptor
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
 
-  const { adminLoggedIn, adminLogout } = useAppContext();
+  const { adminLoggedIn, adminLogout, staffProfile } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!adminLoggedIn) navigate('/', { replace: true });
   }, [adminLoggedIn, navigate]);
-// 🛡️ POS Auto-Lock (Idle Timer)
+
   useEffect(() => {
     if (!adminLoggedIn || isLocked) return;
 
@@ -61,21 +60,17 @@ export function AdminLayout() {
 
     const resetIdleTimer = () => {
       clearTimeout(timeoutId);
-      // 900,000 milliseconds = 15 minutes
-      // Change to 60000 (1 min) if you want to test it quickly!
       timeoutId = setTimeout(() => {
         console.log("⏳ System idle detected. Auto-locking terminal.");
         handleLockTerminal();
       }, 900000); 
     };
 
-    // Listen for any interaction with the computer
     window.addEventListener('mousemove', resetIdleTimer);
     window.addEventListener('keydown', resetIdleTimer);
     window.addEventListener('click', resetIdleTimer);
     window.addEventListener('scroll', resetIdleTimer);
 
-    // Start the timer immediately
     resetIdleTimer();
 
     return () => {
@@ -86,7 +81,7 @@ export function AdminLayout() {
       window.removeEventListener('scroll', resetIdleTimer);
     };
   }, [adminLoggedIn, isLocked]);
-  // 🛡️ OS-Level Unsaved Changes Interceptor (Blocks closing tab or F5)
+
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChanges) {
@@ -126,7 +121,6 @@ export function AdminLayout() {
       setPendingNav('STAFF_PORTAL');
       return;
     }
-    // 🟢 FIXED: Hard reload to force AppContext to re-evaluate the auth flags
     localStorage.setItem('oneshot_staff_auth', 'true');
     window.location.href = '/staff';
   };
@@ -150,22 +144,22 @@ export function AdminLayout() {
     <>
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
       
-      <div className={`flex h-screen w-full bg-neutral-950 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
+      {/* 🟢 FIXED: Added text-neutral-100 so all fonts dynamically invert in Light Mode */}
+      <div className={`flex h-screen w-full bg-neutral-950 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
-        {/* Sidebar */}
         <aside className={`
-          fixed inset-y-0 left-0 z-40 w-64 bg-neutral-950 border-r border-amber-900/30 flex flex-col transition-transform duration-300
+          fixed inset-y-0 left-0 z-40 w-64 bg-neutral-950 border-r border-emerald-900/30 flex flex-col transition-transform duration-300
           lg:relative lg:translate-x-0
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         `}>
-          <div className="p-5 flex items-center justify-between border-b border-amber-900/30">
+          <div className="p-5 flex items-center justify-between border-b border-emerald-900/30">
             <div className="flex items-center gap-3">
               <img src={logoImg} alt="One Shot Bar" className="w-10 h-10 object-contain rounded-xl" />
               <div>
                 <p className="text-sm font-bold text-neutral-100 leading-tight">One Shot Bar</p>
-                <p className="text-[10px] text-amber-500/70 uppercase tracking-widest font-semibold">Admin Portal</p>
+                <p className="text-[10px] text-emerald-500/70 uppercase tracking-widest font-semibold">Admin Portal</p>
               </div>
             </div>
             <button className="lg:hidden text-neutral-500 hover:text-neutral-200" onClick={() => setSidebarOpen(false)}>
@@ -174,11 +168,11 @@ export function AdminLayout() {
           </div>
 
           <div className="px-4 py-3">
-            <div className="flex items-center gap-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2.5">
-              <ShieldCheck size={16} className="text-amber-400 flex-shrink-0" />
+            <div className="flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5">
+              <ShieldCheck size={16} className="text-emerald-400 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-amber-300">Administrator</p>
-                <p className="text-[10px] text-amber-600">Full access · admin</p>
+                <p className="text-xs font-semibold text-emerald-300">Administrator</p>
+                <p className="text-[10px] text-emerald-600">Full access · admin</p>
               </div>
             </div>
           </div>
@@ -191,7 +185,6 @@ export function AdminLayout() {
                 to={item.to}
                 end={item.exact}
                 onClick={(e) => {
-                  // 🟢 UI-Level Unsaved Changes Interceptor
                   if (hasUnsavedChanges) {
                     e.preventDefault();
                     setPendingNav(item.to);
@@ -202,16 +195,16 @@ export function AdminLayout() {
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm group ${
                     isActive
-                      ? 'bg-amber-500/15 text-amber-400 font-semibold border border-amber-500/20'
+                      ? 'bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/20'
                       : 'text-neutral-400 hover:bg-neutral-800/70 hover:text-neutral-200'
                   }`
                 }
               >
                 {({ isActive }) => (
                   <>
-                    <item.icon size={16} className={isActive ? 'text-amber-400' : ''} />
+                    <item.icon size={16} className={isActive ? 'text-emerald-400' : ''} />
                     <span className="flex-1">{item.label}</span>
-                    {isActive && <ChevronRight size={13} className="text-amber-500/60" />}
+                    {isActive && <ChevronRight size={13} className="text-emerald-500/60" />}
                   </>
                 )}
               </NavLink>
@@ -230,7 +223,6 @@ export function AdminLayout() {
           </div>
         </aside>
 
-        {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <header className="relative z-20 h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
             <div className="flex items-center gap-3">
@@ -238,54 +230,61 @@ export function AdminLayout() {
                 <Menu size={20} />
               </button>
               <div className="flex items-center gap-2">
-                <ShieldCheck size={15} className="text-amber-500" />
+                <ShieldCheck size={15} className="text-emerald-500" />
                 <h1 className="text-base font-semibold text-neutral-200">{pageTitle}</h1>
               </div>
             </div>
+            
             <div className="flex items-center gap-3">
+              {/* Profile display added back */}
+              <button className="flex items-center gap-2 bg-neutral-800/60 rounded-full pl-1 pr-3 py-1 border border-neutral-700/50 hover:bg-neutral-800 transition-colors mr-2 cursor-default">
+                <div className="w-6 h-6 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
+                  {staffProfile?.avatarImg ? (
+                    <img src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (staffProfile?.fullName?.charAt(0) || 'A')}
+                </div>
+                <span className="text-xs text-neutral-400 font-medium">{staffProfile?.fullName || 'Admin'}</span>
+              </button>
+
               <button onClick={() => {
                 if (hasUnsavedChanges) { setPendingNav('/admin/settings'); } 
                 else { navigate('/admin/settings'); }
-              }} className="p-1.5 text-neutral-400 hover:text-amber-400 transition-colors">
+              }} className="p-1.5 text-neutral-400 hover:text-emerald-400 transition-colors">
                 <Settings size={16} />
               </button>
               
               <button
                 onClick={handleLockTerminal}
-                className="flex items-center gap-2 text-xs text-neutral-400 hover:text-amber-400 bg-neutral-800 hover:bg-amber-950/20 border border-neutral-700 hover:border-amber-800/40 px-3 py-1.5 rounded-full transition-all font-medium"
+                className="flex items-center gap-2 text-xs text-neutral-400 hover:text-emerald-400 bg-neutral-800 hover:bg-emerald-950/20 border border-neutral-700 hover:border-emerald-800/40 px-3 py-1.5 rounded-full transition-all font-medium"
               >
-                <Lock size={13} />
-                Lock
+                <Lock size={13} /> Lock
               </button>
               
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 text-xs text-neutral-400 hover:text-rose-400 bg-neutral-800 hover:bg-rose-950/20 border border-neutral-700 hover:border-rose-800/40 px-3 py-1.5 rounded-full transition-all font-medium"
               >
-                <LogOut size={13} />
-                Logout
+                <LogOut size={13} /> Logout
               </button>
             </div>
           </header>
 
           <main className="flex-1 overflow-auto bg-neutral-900 relative">
             <div className="p-6 max-w-screen-xl mx-auto h-full">
-              {/* 🟢 NEW: Provide the Unsaved Changes function to all child pages */}
               <Outlet context={{ setHasUnsavedChanges }} />
             </div>
           </main>
         </div>
       </div>
 
-      {/* 🟢 UNRESOLVED CHANGES WARNING MODAL 🟢 */}
       {pendingNav && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-neutral-950 border border-amber-900/40 rounded-2xl w-full max-w-sm shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-neutral-950 border border-emerald-900/40 rounded-2xl w-full max-w-sm shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4 text-amber-500">
+              <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4 text-emerald-500">
                 <AlertTriangle size={20} />
               </div>
-              <h2 className="text-lg font-bold text-white mb-2">Unsaved Changes</h2>
+              <h2 className="text-lg font-bold text-neutral-100 mb-2">Unsaved Changes</h2>
               <p className="text-sm text-neutral-400 leading-relaxed">
                 You have unsaved modifications on this page. If you leave now, all your pending changes will be permanently discarded.
               </p>
@@ -299,7 +298,7 @@ export function AdminLayout() {
               </button>
               <button 
                 onClick={confirmNavigation} 
-                className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-rose-900/20"
+                className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-neutral-100 text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-rose-900/20"
               >
                 Discard & Leave
               </button>
@@ -310,4 +309,3 @@ export function AdminLayout() {
     </>
   );
 }
-

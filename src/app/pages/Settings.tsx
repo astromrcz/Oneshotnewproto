@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { toast } from 'sonner';
 import {
-  User, Lock, Mail, Phone, Eye, EyeOff,
+  User, Lock, Phone, Eye, EyeOff, Palette, Sun, Moon,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
   AlertTriangle, UploadCloud, BarChart2, CalendarCheck, 
   ShoppingCart, LayoutGrid, Clock
@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router';
 import { formatDistanceToNow } from 'date-fns';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
-type Section = 'overview' | 'profile' | 'security';
+type Section = 'overview' | 'profile' | 'appearance' | 'security';
 
 const getPasswordStrength = (pw: string) => {
   if (!pw) return { score: 0, color: 'bg-neutral-800', isValid: false };
@@ -25,8 +25,17 @@ const getPasswordStrength = (pw: string) => {
   return { score, color: 'bg-emerald-500', isValid: true };
 };
 
+// 🟢 NEW: Theme Palettes matching your inspiration image
+const COLOR_PALETTES = [
+  { id: 'emerald', name: 'Fresh Green',     hex: '#10B981', prm: 'bg-[#10B981]', sec: 'bg-[#064E3B]', acc: 'bg-[#34D399]' },
+  { id: 'blue',    name: 'Modern SaaS',     hex: '#2563EB', prm: 'bg-[#2563EB]', sec: 'bg-[#1E3A8A]', acc: 'bg-[#60A5FA]' },
+  { id: 'fintech', name: 'Fintech Blue',    hex: '#1D4ED8', prm: 'bg-[#1D4ED8]', sec: 'bg-[#172554]', acc: 'bg-[#3B82F6]' },
+  { id: 'gold',    name: 'Luxury Dark',     hex: '#D4AF37', prm: 'bg-[#D4AF37]', sec: 'bg-[#423305]', acc: 'bg-[#FCD34D]' },
+  { id: 'purple',  name: 'Creative Purple', hex: '#7C3AED', prm: 'bg-[#7C3AED]', sec: 'bg-[#4C1D95]', acc: 'bg-[#A78BFA]' },
+];
+
 export function SettingsPage() {
-const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword, staffUsers, updateStaffUser } = useAppContext();
+  const { staffProfile, updateStaffProfile, activities, hashPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
   const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState<Section>('overview');
@@ -34,14 +43,10 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
   
   const [avatarImg, setAvatarImg] = useState<string | null>(staffProfile.avatarImg || null);
   const [pendingAvatar, setPendingAvatar] = useState<string | null>(null);
-  
-  // 🟢 NEW: Store the actual file to upload to the server
   const [pendingFile, setPendingFile] = useState<File | null>(null); 
 
   const [profileEdit, setProfileEdit] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    fullName: staffProfile.fullName, email: staffProfile.email, phone: staffProfile.phone, role: staffProfile.role,
-  });
+  const [profileForm, setProfileForm] = useState({ fullName: staffProfile.fullName, phone: staffProfile.phone, role: staffProfile.role });
 
   const [secEdit, setSecEdit] = useState(false);
   const [secForm, setSecForm] = useState({ username: staffProfile.username, currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -62,42 +67,30 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
   const flashSaved = (key: string) => { setSaved(key); setTimeout(() => setSaved(null), 2500); };
 
   const handleSaveProfile = () => {
-    updateStaffProfile({ fullName: profileForm.fullName, email: profileForm.email, phone: profileForm.phone });
+    updateStaffProfile({ fullName: profileForm.fullName, phone: profileForm.phone });
     setProfileEdit(false); flashSaved('profile');
   };
 
-  // 🟢 NEW: Actually upload the image to your SQLite Backend
   const handleSaveAvatar = async () => {
     if (!pendingFile) return;
-    
     toast.loading("Uploading profile picture...", { id: 'avatar-upload' });
     try {
       const formData = new FormData();
       formData.append('image', pendingFile);
 
-      const res = await fetch('http://localhost:3001/api/images', {
-        method: 'POST',
-        body: formData,
-      });
-
+      const res = await fetch('http://localhost:3001/api/images', { method: 'POST', body: formData });
       if (!res.ok) throw new Error('Failed to upload image');
       const data = await res.json();
 
       updateStaffProfile({ avatarImg: data.url });
       setAvatarImg(data.url);
       
-      // 🟢 FIX: Synchronize the image change across the entire application instantly
       const targetUser = staffUsers.find(u => u.username === staffProfile.username);
-      if (targetUser) {
-          updateStaffUser(targetUser.id, { avatarImg: data.url });
-      }
+      if (targetUser) updateStaffUser(targetUser.id, { avatarImg: data.url });
 
-      setPendingAvatar(null);
-      setPendingFile(null);
-      
+      setPendingAvatar(null); setPendingFile(null);
       toast.success("Profile picture updated!", { id: 'avatar-upload' });
     } catch (error) {
-      console.error("Upload error:", error);
       toast.error("Failed to update profile picture.", { id: 'avatar-upload' });
     }
   };
@@ -109,10 +102,7 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
     const hashedCurrent = await hashPassword(secForm.currentPassword);
     const targetUser = staffUsers.find(u => u.username === staffProfile.username);
     
-    if (targetUser?.password !== hashedCurrent) { 
-      setSecError('Current password is incorrect.'); 
-      return; 
-    }
+    if (targetUser?.password !== hashedCurrent) { setSecError('Current password is incorrect.'); return; }
     
     if (secForm.newPassword) {
       if (!pwStrength.isValid) { setSecError('New password does not meet security requirements.'); return; }
@@ -120,36 +110,26 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
     }
 
     const hashedNew = secForm.newPassword ? await hashPassword(secForm.newPassword) : undefined;
-
-    updateStaffProfile({
-      username: secForm.username || staffProfile.username,
-      ...(hashedNew ? { password: hashedNew } : {}),
-    });
+    updateStaffProfile({ username: secForm.username || staffProfile.username, ...(hashedNew ? { password: hashedNew } : {}) });
     
-    setSecEdit(false);
-    setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '' }));
+    setSecEdit(false); setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '' }));
     flashSaved('security');
   };
 
   const tabs: { id: Section; label: string; icon: React.ElementType }[] = [
-    { id: 'overview', label: 'Overview', icon: BarChart2 },
-    { id: 'profile',  label: 'Profile',  icon: User },
-    { id: 'security', label: 'Security', icon: Lock },
+    { id: 'overview',   label: 'Overview',   icon: BarChart2 },
+    { id: 'profile',    label: 'Profile',    icon: User },
+    { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'security',   label: 'Security',   icon: Lock },
   ];
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-12">
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex items-center gap-5">
-        
-        {/* Profile Picture Block */}
+      {/* HEADER */}
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex items-center gap-5 shadow-sm">
         <div className="flex flex-col items-center gap-2">
           <div className="relative group w-20 h-20 rounded-2xl flex-shrink-0 overflow-hidden border border-neutral-800 bg-neutral-900">
-            <img 
-              src={pendingAvatar || (avatarImg ? (avatarImg.startsWith('http') ? avatarImg : `http://localhost:3001${avatarImg}`) : logoImg)} 
-              onError={(e) => { e.currentTarget.src = logoImg; }}
-              alt="Profile Avatar" 
-              className="w-full h-full object-cover" 
-            />
+            <img src={pendingAvatar || (avatarImg ? (avatarImg.startsWith('http') ? avatarImg : `http://localhost:3001${avatarImg}`) : logoImg)} onError={(e) => { e.currentTarget.src = logoImg; }} alt="Profile Avatar" className="w-full h-full object-cover" />
             <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity">
               <input type="file" accept="image/*" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setPendingFile(file); setPendingAvatar(URL.createObjectURL(file)); } }} />
               <UploadCloud size={16} className="text-white mb-1" />
@@ -163,18 +143,14 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
             </div>
           )}
         </div>
-
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-black text-neutral-100">{staffProfile.fullName}</h2>
           <p className="text-sm text-neutral-400 font-medium">{staffProfile.role} · @{staffProfile.username}</p>
-          <div className="flex items-center gap-3 mt-1.5">
-            <span className="text-xs text-neutral-500 bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded-md flex items-center gap-1.5"><Mail size={10} /> {staffProfile.email}</span>
-          </div>
         </div>
         {saved && <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-xs px-3 py-2 rounded-xl animate-in fade-in"><CheckCircle size={13} /> Changes saved!</div>}
       </div>
 
-      <div className="flex gap-1 bg-neutral-950 border border-neutral-800 rounded-xl p-1">
+      <div className="flex flex-wrap sm:flex-nowrap gap-1 bg-neutral-950 border border-neutral-800 rounded-xl p-1">
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveSection(tab.id)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeSection === tab.id ? 'bg-emerald-600/15 text-emerald-400 border border-emerald-600/20' : 'text-neutral-500 hover:text-neutral-300'}`}>
             <tab.icon size={15} /> {tab.label}
@@ -182,6 +158,7 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
         ))}
       </div>
 
+      {/* OVERVIEW */}
       {activeSection === 'overview' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -192,6 +169,7 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
                </div>
              ))}
           </div>
+          
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden p-6">
             <h3 className="text-sm font-bold text-neutral-100 mb-4 flex items-center gap-2"><Clock size={16} className="text-emerald-500" /> Your Recent Activity</h3>
             <div className="space-y-3">
@@ -212,15 +190,15 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
         </div>
       )}
 
+      {/* PROFILE */}
       {activeSection === 'profile' && (
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
             <div><h3 className="text-sm font-bold text-neutral-100">Personal Information</h3><p className="text-xs text-neutral-500 mt-0.5">Your display name, contact, and role details</p></div>
-            {!profileEdit ? <button onClick={() => { setProfileEdit(true); setProfileForm({ fullName: staffProfile.fullName, email: staffProfile.email, phone: staffProfile.phone, role: staffProfile.role }); }} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => setProfileEdit(false)} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
+            {!profileEdit ? <button onClick={() => { setProfileEdit(true); setProfileForm({ fullName: staffProfile.fullName, phone: staffProfile.phone, role: staffProfile.role }); }} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => setProfileEdit(false)} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
           </div>
           <div className="p-6 space-y-4">
             <FieldRow icon={User} label="Full Name" value={staffProfile.fullName} editing={profileEdit} input={<input type="text" value={profileForm.fullName} onChange={e => setProfileForm(f => ({ ...f, fullName: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" />} />
-            <FieldRow icon={Mail} label="Email Address" value={staffProfile.email} editing={profileEdit} input={<input type="email" value={profileForm.email} onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" />} />
             <FieldRow icon={Phone} label="Phone Number" value={staffProfile.phone} editing={profileEdit} input={<input type="tel" value={profileForm.phone} onChange={e => setProfileForm(f => ({ ...f, phone: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" />} />
             <FieldRow icon={Tag} label="Role / Position" value={staffProfile.role} editing={false} input={null} />
             <FieldRow icon={Calendar} label="Date Joined" value={new Date(staffProfile.joinedDate).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })} editing={false} input={null} />
@@ -234,6 +212,79 @@ const { staffProfile, updateStaffProfile, staffLogout, activities, hashPassword,
         </div>
       )}
 
+      {/* 🟢 APPEARANCE TAB (Modern Inspiration Setup) */}
+      {activeSection === 'appearance' && (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+          <div className="px-6 py-5 border-b border-neutral-800">
+            <h3 className="text-sm font-bold text-neutral-100">Application Theme</h3>
+            <p className="text-xs text-neutral-500 mt-0.5">Customize how the local POS system looks on this device.</p>
+          </div>
+          
+          <div className="p-6 space-y-8">
+            {/* Dark / Light Mode */}
+            <div>
+              <p className="text-xs text-neutral-400 font-bold uppercase tracking-wider mb-3">Base Mode</p>
+              <div className="grid grid-cols-2 gap-4 max-w-md">
+                <button onClick={() => updateTheme('dark')} className={`flex items-center justify-center gap-3 p-3.5 rounded-xl border-2 transition-all ${theme === 'dark' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-md' : 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:border-neutral-700'}`}>
+                  <Moon size={18} /> <span className="font-semibold text-sm">Dark</span>
+                </button>
+                <button onClick={() => updateTheme('light')} className={`flex items-center justify-center gap-3 p-3.5 rounded-xl border-2 transition-all ${theme === 'light' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 shadow-md' : 'border-neutral-800 bg-white text-neutral-800 hover:border-neutral-700'}`}>
+                  <Sun size={18} /> <span className="font-semibold text-sm">Light</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Horizontal Palette Cards */}
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <p className="text-xs text-neutral-400 font-bold uppercase tracking-wider">Color Palettes</p>
+                <span className="text-[10px] text-neutral-500 font-medium bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded-md">{COLOR_PALETTES.length} themes</span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {COLOR_PALETTES.map(p => {
+                  const isActive = primaryColor === p.id;
+                  return (
+                    <div 
+                      key={p.id} 
+                      onClick={() => updatePrimaryColor(p.id)} 
+                      className={`flex flex-col p-4 rounded-2xl border-2 cursor-pointer transition-all ${isActive ? 'border-emerald-500 bg-emerald-500/5 shadow-lg shadow-emerald-900/10' : 'border-neutral-800 bg-neutral-900 hover:bg-neutral-800/80 hover:border-neutral-700'}`}
+                    >
+                      <div className="flex justify-between items-center mb-4">
+                        <span className={`text-sm font-bold flex items-center gap-2 ${isActive ? 'text-emerald-400' : 'text-neutral-200'}`}>
+                          {p.name}
+                          {isActive && <CheckCircle size={14} className="text-emerald-500" />}
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded-lg ${isActive ? 'bg-emerald-500 text-white' : 'bg-neutral-800 text-neutral-400'}`}>
+                          {p.hex}
+                        </span>
+                      </div>
+                      
+                      {/* Swatch Frames */}
+                      <div className="flex gap-2 h-10 w-full">
+                        <div className="flex-1 rounded-lg bg-neutral-950 border border-neutral-800 flex items-end justify-center pb-1"><span className="text-[8px] text-neutral-600 font-bold uppercase tracking-widest">BG</span></div>
+                        <div className={`flex-1 rounded-lg ${p.prm} flex items-end justify-center pb-1`}><span className="text-[8px] text-white/70 font-bold uppercase tracking-widest">Prm</span></div>
+                        <div className={`flex-1 rounded-lg ${p.sec} flex items-end justify-center pb-1`}><span className="text-[8px] text-white/50 font-bold uppercase tracking-widest">Sec</span></div>
+                        <div className={`flex-1 rounded-lg ${p.acc} flex items-end justify-center pb-1`}><span className="text-[8px] text-black/50 font-bold uppercase tracking-widest">Acc</span></div>
+                        <div className="flex-1 rounded-lg bg-white border border-neutral-300 flex items-end justify-center pb-1"><span className="text-[8px] text-neutral-400 font-bold uppercase tracking-widest">Txt</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            
+            <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex items-start gap-3">
+              <Palette size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                Changes made here only apply to this local device. Customer-facing online bookings and other staff terminals will not be affected.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECURITY */}
       {activeSection === 'security' && (
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
-// 🟢 FIXED: Added RefreshCw back to the imports
-import { Plus, X, User, Mail, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw } from 'lucide-react';
+import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw } from 'lucide-react';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
   { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
@@ -10,14 +9,14 @@ const ROLES: { value: StaffUser['role']; label: string; color: string; icon: Rea
 
 type FormState = {
   username: string; password: string; fullName: string;
-  email: string; role: StaffUser['role']; phone: string; isAdmin: boolean;
+  role: StaffUser['role']; phone: string; isAdmin: boolean;
 };
 
-const blankForm: FormState = { username: '', password: '', fullName: '', email: '', role: 'manager', phone: '', isAdmin: false };
+// 🟢 FIXED: Email removed from the blank form state
+const blankForm: FormState = { username: '', password: '', fullName: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
-  // 🟢 Brought resetStaffUserPassword back from context
-  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword } = useAppContext();
+  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword } = useAppContext();
   
   const [showForm, setShowForm]     = useState(false);
   const [form, setForm]             = useState<FormState>(blankForm);
@@ -29,16 +28,16 @@ export function AdminUsers() {
 
   const openAdd = () => { setForm(blankForm); setShowPw(false); setShowForm(true); };
 
-const handleSave = async (e: React.FormEvent) => { // Make it async
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     
     const isUsernameTaken = staffUsers.some(u => u.username.toLowerCase() === form.username.toLowerCase());
-    const isEmailTaken = staffUsers.some(u => u.email.toLowerCase() === form.email.toLowerCase());
     const hashedPw = await hashPassword(form.password);
+    
     if (isUsernameTaken) { alert("Error: That username is already taken. Please choose another."); return; }
-    if (isEmailTaken) { alert("Error: A user with this email address already exists."); return; }
-
-    if (!form.username || !form.fullName || !form.email) {
+    
+    // 🟢 FIXED: Email validation removed
+    if (!form.username || !form.fullName) {
       alert("Please fill all required fields.");
       return;
     }
@@ -57,7 +56,6 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
     setTimeout(() => window.location.reload(), 500);
   };
 
-  // 🟢 NEW: Admin password reset to default "oneshotstaff"
   const handleResetPassword = (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to reset the password for ${name}? It will be changed to "oneshotstaff" and they will be forced to change it on their next login.`)) {
       resetStaffUserPassword(id);
@@ -122,7 +120,6 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
 
   return (
     <div className="space-y-5">
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: 'Active Staff',    value: staffUsers.filter(u => u.isActive).length,  color: 'text-white' },
@@ -143,7 +140,6 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
         </div>
       )}
 
-      {/* Toolbar & Tabs */}
       <div className="flex flex-col sm:flex-row justify-between gap-4">
         <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-xl p-1">
           <button onClick={() => setViewTab('active')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${viewTab === 'active' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20' : 'text-neutral-500 hover:text-neutral-300'}`}>
@@ -170,7 +166,6 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
         </div>
       </div>
 
-      {/* User List */}
       <div className="space-y-3">
         {displayUsers.length === 0 ? (
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-12 text-center">
@@ -186,7 +181,6 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
             <div key={u.id} className={`bg-neutral-950 border rounded-xl p-5 transition-colors ${viewTab === 'archived' ? 'border-rose-900/30 opacity-75' : 'border-neutral-800 hover:border-neutral-700'}`}>
               <div className="flex items-start gap-4">
                 
-                {/* 🟢 NEW: Renders their actual profile picture if they have one */}
                 <div className="flex flex-col items-center gap-2">
                   {u.avatarImg ? (
                     <img src={u.avatarImg.startsWith('http') ? u.avatarImg : `http://localhost:3001${u.avatarImg}`} alt={u.fullName} className={`w-11 h-11 rounded-xl object-cover border ${viewTab === 'archived' ? 'border-rose-900/30 opacity-50' : 'border-neutral-700'}`} />
@@ -205,9 +199,9 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
                     {viewTab === 'archived' && <span className="text-[10px] bg-rose-900/30 text-rose-400 border border-rose-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Archived</span>}
                   </div>
                   
+                  {/* 🟢 FIXED: Email removed from display */}
                   <div className="flex items-center gap-4 text-xs text-neutral-500 flex-wrap mb-3">
                     <span className="flex items-center gap-1"><User size={10} /> @{u.username}</span>
-                    <span className="flex items-center gap-1"><Mail size={10} /> {u.email}</span>
                     {u.phone && <span className="flex items-center gap-1"><Phone size={10} /> {u.phone}</span>}
                   </div>
 
@@ -217,7 +211,7 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
                       <span className="text-[10px] text-neutral-400 font-medium">System Actions: <strong className="text-neutral-200">{activityMentions}</strong></span>
                     </div>
                     {performanceScore > 100 && (
-                      <div className="flex items-center gap-1 bg-amber-950/30 border border-amber-900/40 px-2 py-1 rounded-md text-[10px] text-amber-500 font-bold">🔥 Top Performer</div>
+                      <div className="flex items-center gap-1 bg-amber-950/30 border border-amber-900/40 px-2 py-1 rounded-md text-[10px] text-amber-500 font-bold">⭐ Top Performer</div>
                     )}
                   </div>
                 </div>
@@ -232,7 +226,6 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
                         </button>
                       </div>
 
-                      {/* 🟢 NEW: Restore Password button replacing View PIN */}
                       <button onClick={() => handleResetPassword(u.id, u.fullName)} className="p-2 rounded-lg text-neutral-500 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Force Password Reset"><RefreshCw size={14} /></button>
                       
                       <button onClick={() => handleArchive(u.id, u.fullName, u.username)} className="p-2 rounded-lg text-neutral-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive User"><Trash2 size={14} /></button>
@@ -288,11 +281,8 @@ const handleSave = async (e: React.FormEvent) => { // Make it async
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Email *</label>
-                <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" placeholder="user@oneshot.com" />
-              </div>
+              {/* 🟢 FIXED: Email Input completely removed here */}
+
               <div>
                 <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Phone</label>
                 <input type="tel" value={form.phone} maxLength={13}

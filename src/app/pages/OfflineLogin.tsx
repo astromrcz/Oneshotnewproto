@@ -357,7 +357,7 @@ export function OfflineLogin() {
                     </div>
                     
                     <p className="text-xs text-rose-200/80 leading-relaxed mb-4 border-l-2 border-rose-500 pl-3">
-                      WARNING: You have initiated a God Mode bypass. Enter the 16-character Cold Storage Master Key to reset the core Administrator account.
+                      WARNING: You have initiated an Admin bypass. Enter the 16-character Cold Storage Master Key to reset the core Administrator account.
                     </p>
 
                     {error && <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-4 py-3 rounded-xl"><AlertTriangle size={14} className="flex-shrink-0" />{error}</div>}

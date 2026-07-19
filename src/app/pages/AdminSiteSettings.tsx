@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Save, CheckCircle, X, LayoutTemplate, ShieldAlert, Lock, Upload, Trash2, Image as ImageIcon } from 'lucide-react';
+import { Save, CheckCircle, X, LayoutTemplate, ShieldAlert, Lock, Upload, Trash2, Image as ImageIcon, AlertTriangle } from 'lucide-react';
+import { useOutletContext } from 'react-router';
 
 export function AdminSiteSettings() {
-  const { siteConfig, updateSiteConfig, staffUsers } = useAppContext() as any;
+  // 🟢 FIXED: Pulled in hashPassword and staffProfile for secure authentication
+  const { siteConfig, updateSiteConfig, staffUsers, hashPassword, staffProfile } = useAppContext() as any;
   const [form, setForm] = useState(siteConfig || {});
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'hero' | 'about' | 'contact'>('hero');
@@ -13,6 +15,7 @@ export function AdminSiteSettings() {
   const [password, setPassword] = useState('');
   const [passError, setPassError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const heroInputRef = useRef<HTMLInputElement>(null);
   const aboutInputRef = useRef<HTMLInputElement>(null);
@@ -28,20 +31,27 @@ export function AdminSiteSettings() {
     setPassError('');
   };
 
-  const handleConfirmSave = () => {
-    const adminUser = staffUsers?.find((u: any) => u.username === 'admin');
-    if (password !== (adminUser?.password || 'admin123')) {
+  // 🟢 FIXED: Converted to async to handle the SHA-256 hashing
+  const handleConfirmSave = async () => {
+    setIsProcessing(true);
+    setPassError('');
+
+    const hashedInput = await hashPassword(password);
+    const currentUser = staffUsers?.find((u: any) => u.username === staffProfile.username);
+
+    if (!currentUser || currentUser.password !== hashedInput) {
       setPassError('Incorrect admin password.');
+      setIsProcessing(false);
       return;
     }
 
     updateSiteConfig(form);
     setSaved(true);
     setShowConfirm(false);
+    setIsProcessing(false);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  // 🟢 NEW: Uploads binary file to Backend, gets URL back
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: 'hero' | 'about') => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -76,7 +86,7 @@ export function AdminSiteSettings() {
       alert("Image upload failed. Make sure your server is running.");
     } finally {
       setUploading(false);
-      e.target.value = ''; // Reset input
+      e.target.value = ''; 
     }
   };
 
@@ -90,7 +100,7 @@ export function AdminSiteSettings() {
   return (
     <div className="space-y-5 max-w-4xl">
       {saved && (
-        <div className="flex items-center gap-2.5 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-sm px-4 py-3 rounded-xl">
+        <div className="flex items-center gap-2.5 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-sm px-4 py-3 rounded-xl animate-in fade-in">
           <CheckCircle size={15} /> Site content updated successfully! The homepage is now live with the new changes.
         </div>
       )}
@@ -102,7 +112,6 @@ export function AdminSiteSettings() {
         </p>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 bg-neutral-950 border border-neutral-800 rounded-xl p-1 max-w-sm">
         {([
           { id: 'hero', label: 'Hero Section' },
@@ -118,23 +127,26 @@ export function AdminSiteSettings() {
 
       <form onSubmit={handleSaveClick} className="space-y-5">
         
-        {/* ════ HERO SECTION ════ */}
         {activeTab === 'hero' && (
           <div className="space-y-4 animate-in fade-in duration-300">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 space-y-4">
-                <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold border-b border-neutral-800 pb-3 mb-4">Hero Text</h3>
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-4">
+                  <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Hero Text</h3>
+                  <span className="text-[9px] font-bold bg-neutral-900 text-neutral-600 px-2 py-1 rounded flex items-center gap-1"><Lock size={10}/> LOCKED</span>
+                </div>
+                {/* 🟢 FIXED: Disabled the core Hero text fields */}
                 <div>
-                  <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Main Title</label>
-                  <input type="text" value={form.heroTitle || ''} onChange={e => setForm(f => ({...f, heroTitle: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:border-sky-500 outline-none" />
+                  <label className="block text-xs text-neutral-500 mb-1.5 font-medium">Main Title</label>
+                  <input type="text" disabled value={form.heroTitle || ''} className="w-full bg-neutral-950 border border-neutral-800/50 rounded-xl px-3 py-2 text-sm text-neutral-500 cursor-not-allowed outline-none" />
                 </div>
                 <div>
-                  <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Subtitle</label>
-                  <input type="text" value={form.heroSubtitle || ''} onChange={e => setForm(f => ({...f, heroSubtitle: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-sky-400 focus:border-sky-500 outline-none" />
+                  <label className="block text-xs text-neutral-500 mb-1.5 font-medium">Subtitle</label>
+                  <input type="text" disabled value={form.heroSubtitle || ''} className="w-full bg-neutral-950 border border-neutral-800/50 rounded-xl px-3 py-2 text-sm text-neutral-500 cursor-not-allowed outline-none" />
                 </div>
                 <div>
-                  <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Description Paragraph</label>
-                  <textarea rows={4} value={form.heroDescription || ''} onChange={e => setForm(f => ({...f, heroDescription: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
+                  <label className="block text-xs text-neutral-500 mb-1.5 font-medium">Description Paragraph</label>
+                  <textarea rows={4} disabled value={form.heroDescription || ''} className="w-full bg-neutral-950 border border-neutral-800/50 rounded-xl px-3 py-2 text-sm text-neutral-500 cursor-not-allowed outline-none resize-none" />
                 </div>
               </div>
 
@@ -147,7 +159,7 @@ export function AdminSiteSettings() {
                 <div className="grid grid-cols-2 gap-3 mb-4 flex-1">
                   {(form.heroImages || []).map((imgUrl: string, idx: number) => (
                     <div key={idx} className="relative h-24 rounded-lg overflow-hidden border border-neutral-700 group bg-neutral-900">
-                      <img src={imgUrl} alt={`Hero ${idx + 1}`} className="w-full h-full object-cover" />
+                      <img src={imgUrl.startsWith('http') ? imgUrl : `http://localhost:3001${imgUrl}`} alt={`Hero ${idx + 1}`} className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                         <button type="button" onClick={() => removeHeroImage(idx)} className="p-2 bg-rose-600 hover:bg-rose-500 text-white rounded-full transition-colors shadow-lg">
                           <Trash2 size={14} />
@@ -157,7 +169,7 @@ export function AdminSiteSettings() {
                   ))}
                   
                   {(form.heroImages || []).length < 5 && (
-                    <button type="button" disabled={uploading} onClick={() => heroInputRef.current?.click()} className="h-24 rounded-lg border-2 border-dashed border-neutral-700 hover:border-sky-500/50 bg-neutral-900/50 flex flex-col items-center justify-center gap-1.5 transition-colors text-neutral-500 hover:text-sky-400 disabled:opacity-50">
+                    <button type="button" disabled={uploading} onClick={() => heroInputRef.current?.click()} className="h-24 rounded-lg border-2 border-dashed border-neutral-700 hover:border-sky-500/50 bg-neutral-900/50 flex flex-col items-center justify-center gap-1.5 transition-colors text-neutral-500 hover:text-sky-400 disabled:opacity-50 cursor-pointer">
                       <Upload size={16} />
                       <span className="text-[10px] font-semibold">{uploading ? 'Uploading...' : 'Upload Image'}</span>
                     </button>
@@ -200,7 +212,7 @@ export function AdminSiteSettings() {
               <div className="relative h-48 rounded-xl overflow-hidden border border-neutral-700 group bg-neutral-900 flex items-center justify-center">
                 {form.aboutImage ? (
                   <>
-                    <img src={form.aboutImage} alt="About Us Feature" className="w-full h-full object-cover" />
+                    <img src={form.aboutImage.startsWith('http') ? form.aboutImage : `http://localhost:3001${form.aboutImage}`} alt="About Us Feature" className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
                       <button type="button" disabled={uploading} onClick={() => aboutInputRef.current?.click()} className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors disabled:opacity-50">
                         <ImageIcon size={14} /> {uploading ? 'Uploading...' : 'Change Image'}
@@ -262,7 +274,7 @@ export function AdminSiteSettings() {
         </button>
       </form>
 
-      {/* ════ CONFIRMATION MODAL WITH SUMMARY & PASSWORD ════ */}
+      {/* ════ CONFIRMATION MODAL ════ */}
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
@@ -282,7 +294,6 @@ export function AdminSiteSettings() {
                   const oldVal = (siteConfig as any)?.[key];
                   const newVal = (form as any)[key];
                   
-                  // Handle Array Changes Natively (Hero Images)
                   if (Array.isArray(oldVal) && Array.isArray(newVal)) {
                     if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
                       return (
@@ -293,7 +304,6 @@ export function AdminSiteSettings() {
                       );
                     }
                   } else if (oldVal !== newVal) {
-                    // Check if it's an image string to avoid rendering huge block of text
                     const isImageString = typeof newVal === 'string' && newVal.startsWith('http');
                     
                     return (
@@ -322,18 +332,19 @@ export function AdminSiteSettings() {
                   type="password" 
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setPassError(''); }}
+                  disabled={isProcessing}
                   placeholder="Enter admin password to save" 
                   autoFocus
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500" 
                 />
-                {passError && <p className="text-[10px] text-rose-400 font-semibold mt-2">{passError}</p>}
+                {passError && <p className="text-[10px] flex items-center gap-1 text-rose-400 font-semibold mt-2"><AlertTriangle size={10} /> {passError}</p>}
               </div>
             </div>
 
             <div className="px-6 py-4 border-t border-neutral-800 flex gap-3 flex-none">
               <button type="button" onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
-              <button type="button" onClick={handleConfirmSave} disabled={!password} className="flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
-                <CheckCircle size={14} /> Authorize & Save
+              <button type="button" onClick={handleConfirmSave} disabled={!password || isProcessing} className="flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
+                {isProcessing ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Verifying...</> : <><CheckCircle size={14} /> Authorize & Save</>}
               </button>
             </div>
           </div>

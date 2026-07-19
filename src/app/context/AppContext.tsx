@@ -397,7 +397,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setStaffLoggedIn(true); 
       localStorage.setItem('oneshot_staff_auth', 'true');
       
-      // 🟢 FIX: Explicitly pull avatarImg and phone to overwrite stale memory
+      // 🟢 FIX: Set 12-hour expiration & obliterate any ghost locks from previous sessions
+      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
+      localStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
+      localStorage.removeItem('oneshot_is_locked'); 
+      
       updateStaffProfile({ 
         fullName: valid.fullName, 
         username: valid.username, 
@@ -419,7 +423,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAdminLoggedIn(true);
       localStorage.setItem('oneshot_admin_auth', 'true');
       
-      // 🟢 FIX: Explicitly pull avatarImg and phone to overwrite stale memory
+      // 🟢 FIX: Set 12-hour expiration & obliterate any ghost locks from previous sessions
+      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
+      localStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
+      localStorage.removeItem('oneshot_is_locked');
+      
       updateStaffProfile({ 
         fullName: valid.fullName, 
         username: valid.username, 
@@ -432,6 +440,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true;
     }
     return false; 
+  };
+
+  const staffLogout = () => {
+    setStaffLoggedIn(false);
+    localStorage.removeItem('oneshot_staff_auth');
+    localStorage.removeItem('oneshot_auth_expiry');
+    localStorage.removeItem('oneshot_is_locked'); // 🟢 FIX: Clear locks on logout
+  };
+
+  const adminLogout = () => {
+    setAdminLoggedIn(false);
+    localStorage.removeItem('oneshot_admin_auth');
+    localStorage.removeItem('oneshot_auth_expiry');
+    localStorage.removeItem('oneshot_is_locked'); // 🟢 FIX: Clear locks on logout
   };
 
  const resetStaffUserPassword = async (id: string) => {
@@ -461,15 +483,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { success: true, message: 'Password reset successfully!' };
   };
 
-  const staffLogout = () => {
-    setStaffLoggedIn(false);
-    localStorage.removeItem('oneshot_staff_auth');
-  };
-
-  const adminLogout = () => {
-    setAdminLoggedIn(false);
-    localStorage.removeItem('oneshot_admin_auth');
-  };
+ 
   
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
     setStaffProfile(prev => {
@@ -756,6 +770,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   
   const updateRates = async (r: Partial<RatesConfig>) => {
     const sanitized = { ...r } as Partial<RatesConfig>;
+    setRates(prev => ({ ...prev, ...sanitized }));
     if (sanitized.hourlyRate !== undefined) sanitized.hourlyRate = Number(sanitized.hourlyRate) || 0;
     if (sanitized.overtimeRate !== undefined) sanitized.overtimeRate = Number(sanitized.overtimeRate) || 0;
     if (sanitized.weekdayHappyHourRate !== undefined) sanitized.weekdayHappyHourRate = Number(sanitized.weekdayHappyHourRate) || 0;
@@ -769,6 +784,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
       addActivity('admin_action', 'System rates updated');
+      
+      // Step 2: Trigger immediate Cloud Sync script on the backend
+      fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
       return res;
     } catch (e) { throw e; }
   };
@@ -828,10 +846,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`);
   };
 
-  const updateSiteConfig = (newConfig: any) => {
+ const updateSiteConfig = (newConfig: any) => {
     setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
+    
+    // Step 1: Save to local SQLite
     syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`);
     addActivity('admin_action', `Updated public website CMS content`);
+
+    // Step 2: Trigger immediate Cloud Sync script on the backend
+    fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
   };
 
   const addEvent = (e: Omit<Event, 'id'>) => {

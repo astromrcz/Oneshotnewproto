@@ -22,7 +22,6 @@ export function AdminAnnouncements() {
   const [toast, setToast]         = useState<string | null>(null);
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
-
   const openAdd  = () => { setEditingId(null); setForm(blank); setShowForm(true); };
   const openEdit = (a: Announcement) => {
     setEditingId(a.id);

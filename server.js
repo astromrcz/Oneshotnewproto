@@ -274,6 +274,53 @@ app.get('/api/watchlist', (req, res) => {
 // ==========================================
 // 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
+// ==========================================
+// ☁️ CLOUD SYNC ROUTE (Triggered by Admin Saves)
+// ==========================================
+app.post('/api/sync-to-cloud', async (req, res) => {
+  console.log('☁️ Initiating forced cloud sync for Vercel...');
+  
+  try {
+    // 1. Sync CMS (Site Settings)
+    db.all(`SELECT keyName, settingValue FROM cms`, [], async (err, rows) => {
+      if (err) return console.error('Local CMS read error:', err.message);
+      if (rows && rows.length > 0) {
+        // Formats local SQLite data to match your Supabase schema
+        const payload = rows.map(r => ({ key_name: r.keyName, content_value: r.settingValue }));
+        
+        const { error } = await supabase
+          .from('cms_content')
+          .upsert(payload, { onConflict: 'key_name' });
+          
+        if (error) console.error('❌ Supabase CMS Sync Error:', error.message);
+        else console.log('✅ CMS synced to cloud.');
+      }
+    });
+
+    // 2. Sync System Settings (Policy & Rates)
+    db.all(`SELECT keyName, settingValue FROM systemSettings`, [], async (err, rows) => {
+      if (err) return console.error('Local Rates read error:', err.message);
+      if (rows && rows.length > 0) {
+        // Formats local SQLite data to match your Supabase schema
+        const payload = rows.map(r => ({ key_name: r.keyName, setting_value: r.settingValue }));
+        
+        const { error } = await supabase
+          .from('system_settings')
+          .upsert(payload, { onConflict: 'key_name' });
+          
+        if (error) console.error('❌ Supabase Rates Sync Error:', error.message);
+        else console.log('✅ Policy & Rates synced to cloud.');
+      }
+    });
+
+    // Send immediate response back to frontend so the UI doesn't hang
+    res.status(200).json({ message: 'Cloud sync dispatched successfully.' });
+
+  } catch (err) {
+    console.error('❌ Critical Cloud Sync Failure:', err);
+    res.status(500).json({ error: 'Failed to dispatch cloud sync.' });
+  }
+});
 
 // 🟢 NEW: Lost & Found and Watchlist Write Routes
 app.post('/api/lost-and-found', (req, res) => {

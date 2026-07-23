@@ -6,7 +6,7 @@ import {
   CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
-
+import { useNavigate } from 'react-router';
 const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 const statusConfig: Record<ReservationStatus, { label: string; color: string; dot: string }> = {
@@ -27,6 +27,7 @@ const todayStart = startOfDay(new Date());
 
 export function Reservations() {
   const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, rates, updateRefundStatus } = useAppContext() as any;
+  const navigate = useNavigate();
   
   const [showForm, setShowForm] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
@@ -118,6 +119,50 @@ export function Reservations() {
       }
     };
     reader.readAsDataURL(imageFile);
+  };
+
+  const handleCheckIn = (res: any) => {
+    const resDate = new Date(res.date);
+    
+    // 1. Prevent early check-in for future dates
+    if (!isToday(resDate) && resDate.setHours(0,0,0,0) > new Date().setHours(0,0,0,0)) {
+      alert(`This reservation is scheduled for ${format(new Date(res.date), 'MMM d, yyyy')}.\n\nTo accommodate them today, please add them to the Walk-in Queue or assign an available table directly. Their future reservation will remain intact.`);
+      return;
+    }
+
+    const customerPayload = JSON.stringify({ kind: 'reservation', id: res.id, name: res.customerName, partySize: res.partySize, contact: res.contactNumber, durationHours: res.durationHours, timeSlot: res.timeSlot });
+    let targetTableId = null;
+
+    if (res.tableId) {
+      const preferredTable = tables.find((t: any) => t.id === res.tableId);
+      if (preferredTable && preferredTable.status !== 'available') {
+        const choice = window.confirm(`Their preferred table (${preferredTable.name}) is currently occupied.\n\nClick OK to assign them to ANY available table, or Cancel to manually add them to the Waiting Queue.`);
+        if (!choice) {
+          navigate('/staff/queue');
+          return;
+        }
+      } else if (preferredTable && preferredTable.status === 'available') {
+        targetTableId = preferredTable.id;
+      }
+    }
+
+    // No target table yet (none specified, or preferred was occupied)
+    if (!targetTableId) {
+      const firstAvail = tables.find((t: any) => t.status === 'available' && t.isActive);
+      if (firstAvail) {
+        targetTableId = firstAvail.id;
+      } else {
+        alert("There are no available tables right now. Please add them to the Waiting Queue.");
+        navigate('/staff/queue');
+        return;
+      }
+    }
+
+    sessionStorage.setItem('assignTableId', targetTableId);
+    sessionStorage.setItem('assignCustomer', customerPayload);
+    updateReservationStatus(res.id, 'checked-in');
+    setSelectedId(null);
+    navigate('/staff/tables');
   };
 
   // ─── Handlers ────────────────────────────────────────────────────────
@@ -427,7 +472,7 @@ export function Reservations() {
                           )}
                           {r.status === 'confirmed' && (
                             <button
-                              onClick={() => updateReservationStatus(r.id, 'checked-in')}
+                              onClick={() => handleCheckIn(r)}
                               className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold rounded border border-blue-700/30 transition-colors"
                             >
                               Check In
@@ -721,7 +766,7 @@ export function Reservations() {
                   </button>
                 )}
                 {selected.status === 'confirmed' && (
-                  <button onClick={() => { updateReservationStatus(selected.id, 'checked-in'); setSelectedId(null); }} className="flex-1 px-4 py-3 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-bold rounded-xl border border-blue-700/30 transition-colors">
+                  <button onClick={() => handleCheckIn(selected)} className="flex-1 px-4 py-3 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-bold rounded-xl border border-blue-700/30 transition-colors">
                     Check In Customer
                   </button>
                 )}

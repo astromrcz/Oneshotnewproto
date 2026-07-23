@@ -61,12 +61,15 @@ export function AdminDashboard() {
 
   const handleManualSync = async () => {
     setIsSyncing(true);
+    toast.loading("Uploading local data to cloud...", { id: 'cloud-sync' });
     try {
+      // Added artificial delay to allow visual feedback
+      await new Promise(resolve => setTimeout(resolve, 1500));
       if (refreshLiveMonitor) await refreshLiveMonitor();
       setLastSync(new Date());
-      toast.success("Database successfully synchronized with Live Monitor.");
+      toast.success("Database successfully backed up to Cloud.", { id: 'cloud-sync' });
     } catch (e) {
-      toast.error("Failed to synchronize database.");
+      toast.error("Failed to synchronize database.", { id: 'cloud-sync' });
     } finally {
       setIsSyncing(false);
     }
@@ -121,18 +124,18 @@ export function AdminDashboard() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6 items-stretch">
         
-        {/* Main Welcome - Connected to Emerald Theme Engine */}
-        <div className={`flex flex-col justify-between h-full bg-gradient-to-r from-emerald-950/40 to-neutral-950 border border-emerald-900/30 rounded-2xl p-6 md:col-span-2 ${weather ? 'lg:col-span-7' : 'lg:col-span-8'}`}>
+        {/* Main Welcome - Clean, Theme-Responsive SaaS Design */}
+        <div className={`flex flex-col justify-between h-full bg-neutral-950 border border-neutral-800 rounded-2xl p-6 md:col-span-2 ${weather ? 'lg:col-span-7' : 'lg:col-span-8'}`}>
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-xl font-black text-neutral-100 mb-1">Admin Dashboard</h1>
-              <p className="text-sm text-neutral-400">Full control over One Shot Bar & Billiards operations.</p>
+              <p className="text-sm text-neutral-500">Full control over One Shot Bar & Billiards operations.</p>
             </div>
             <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl flex-shrink-0">
-              <DollarSign size={15} className="text-emerald-400" />
+              <DollarSign size={15} className="text-emerald-500" />
               <div>
-                <p className="text-xs font-black text-emerald-400">₱{totalRevenue.toLocaleString()}</p>
-                <p className="text-[10px] text-emerald-700">Total Revenue</p>
+                <p className="text-xs font-black text-emerald-500">₱{totalRevenue.toLocaleString()}</p>
+                <p className="text-[10px] text-emerald-600/80 font-bold uppercase tracking-wider">Total Revenue</p>
               </div>
             </div>
           </div>
@@ -143,9 +146,9 @@ export function AdminDashboard() {
               { label: 'Down Payment', value: `${rates.downPaymentPercent}%` },
             ].map(r => (
               <button key={r.label} onClick={() => navigate('/admin/policy-rates')}
-                className="bg-emerald-950/20 border border-emerald-900/20 rounded-xl p-3 text-left hover:border-emerald-700/30 transition-colors h-full flex flex-col justify-between">
-                <p className="text-sm font-black text-emerald-400">{r.value}</p>
-                <p className="text-[10px] text-emerald-600 uppercase tracking-wider mt-1">{r.label}</p>
+                className="bg-emerald-500/5 border border-emerald-500/10 hover:bg-emerald-500/10 rounded-xl p-3 text-left transition-colors h-full flex flex-col justify-between">
+                <p className="text-sm font-black text-emerald-500">{r.value}</p>
+                <p className="text-[10px] text-emerald-600/80 uppercase tracking-wider mt-1 font-bold">{r.label}</p>
               </button>
             ))}
           </div>

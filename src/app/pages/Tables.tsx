@@ -95,7 +95,7 @@ export function Tables() {
   });
 
   const waitingCustomers: CustomerSource[] = queue
-    .filter((q: any) => q.status === 'waiting')
+    .filter((q: any) => q.status === 'waiting' || q.status === 'called')
     .map((q: any) => ({ kind: 'queue', id: q.id, name: q.customerName, partySize: q.partySize, contact: q.contactNumber, notes: q.notes }));
 
   const todayReservations: CustomerSource[] = reservations

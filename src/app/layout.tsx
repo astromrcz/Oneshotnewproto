@@ -143,13 +143,13 @@ export function Layout() {
         `}>
           {/* Logo */}
           <div className="p-5 flex items-center justify-between border-b border-neutral-800/60">
-            <div className="flex items-center gap-3">
-              <img src={logoImg} alt="One Shot Bar" className="w-10 h-10 object-contain rounded-xl" />
+            <button onClick={() => navigate('/staff')} className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity cursor-pointer">
+              <img src={logoImg} alt="One Shot Bar" className="w-10 h-10 object-contain rounded-xl flex-shrink-0" />
               <div>
                 <p className="text-sm font-bold text-neutral-100 leading-tight">One Shot Bar</p>
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-medium">& Billiards</p>
               </div>
-            </div>
+            </button>
             <button className="lg:hidden text-neutral-500 hover:text-neutral-200" onClick={() => setSidebarOpen(false)}>
               <X size={18} />
             </button>

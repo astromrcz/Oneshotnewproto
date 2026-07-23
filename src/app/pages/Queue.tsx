@@ -334,17 +334,24 @@ export function Queue() {
                 <span className="w-2 h-2 rounded-full bg-blue-400" /> Called ({called.length})
               </h2>
               {called.map((item: any) => (
-                <div key={item.id} className="bg-neutral-950 border border-blue-900/30 rounded-xl p-3 flex items-center gap-3 opacity-80">
+                <div key={item.id} className="bg-neutral-950 border border-blue-900/30 rounded-xl p-3 flex items-center gap-3">
                   <Bell size={14} className="text-blue-400 flex-none" />
-                  <div className="flex-1">
-                    <p className="text-sm text-neutral-300">{item.customerName}</p>
-                    <p className="text-xs text-neutral-600">{item.partySize} pax · {item.contactNumber}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-neutral-200 truncate">{item.customerName}</p>
+                    <p className="text-xs text-neutral-500 truncate">{item.partySize} pax · {item.contactNumber}</p>
                   </div>
                   <button
-                    onClick={() => removeFromQueue(item.id)}
-                    className="p-1.5 text-neutral-600 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
+                    onClick={() => navigate('/staff/tables')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs font-semibold rounded-lg border border-blue-700/30 transition-colors flex-none"
                   >
-                    <X size={13} />
+                    Assign Table
+                  </button>
+                  <button
+                    onClick={() => removeFromQueue(item.id)}
+                    className="p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors flex-none"
+                    title="Remove"
+                  >
+                    <X size={14} />
                   </button>
                 </div>
               ))}
@@ -372,23 +379,24 @@ export function Queue() {
                     <p className="text-sm font-semibold text-neutral-200">{table.name}</p>
                     <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-bold px-1.5 py-0.5 rounded uppercase">Free</span>
                   </div>
-                  {waiting.length > 0 && (
+                  {(called.length > 0 || waiting.length > 0) && (
                     <button
                       onClick={() => {
+                        const targetCustomer = called.length > 0 ? called[0] : waiting[0];
                         sessionStorage.setItem('assignCustomer', JSON.stringify({
                           kind: 'queue',
-                          id: waiting[0].id,
-                          name: waiting[0].customerName,
-                          partySize: waiting[0].partySize,
-                          contact: waiting[0].contactNumber,
-                          notes: waiting[0].notes
+                          id: targetCustomer.id,
+                          name: targetCustomer.customerName,
+                          partySize: targetCustomer.partySize,
+                          contact: targetCustomer.contactNumber,
+                          notes: targetCustomer.notes
                         }));
                         sessionStorage.setItem('assignTableId', table.id);
                         navigate('/staff/tables');
                       }}
                       className="w-full text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-700/30 py-2 rounded-lg transition-colors font-medium"
                     >
-                      Assign {waiting[0]?.customerName} to {table.name}
+                      Assign {called.length > 0 ? called[0].customerName : waiting[0]?.customerName} to {table.name}
                     </button>
                   )}
                 </div>

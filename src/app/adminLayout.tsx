@@ -40,6 +40,7 @@ const pageTitles: Record<string, string> = {
 
 export function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [isLocked, setIsLocked] = useState(() => localStorage.getItem('oneshot_is_locked') === 'true');  
   
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -144,40 +145,29 @@ export function AdminLayout() {
     <>
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
       
-      {/* 🟢 FIXED: Added text-neutral-100 so all fonts dynamically invert in Light Mode */}
       <div className={`flex h-screen w-full bg-neutral-950 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
         <aside className={`
-          fixed inset-y-0 left-0 z-40 w-64 bg-neutral-950 border-r border-emerald-900/30 flex flex-col transition-transform duration-300
+          fixed inset-y-0 left-0 z-40 w-64 bg-neutral-950 border-r border-neutral-800 flex flex-col transition-transform duration-300
           lg:relative lg:translate-x-0
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         `}>
-          <div className="p-5 flex items-center justify-between border-b border-emerald-900/30">
-            <div className="flex items-center gap-3">
-              <img src={logoImg} alt="One Shot Bar" className="w-10 h-10 object-contain rounded-xl" />
+          <div className="p-5 flex items-center justify-between border-b border-neutral-800/60">
+            <button onClick={() => navigate('/admin')} className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity">
+              <img src={logoImg} alt="One Shot Bar" className="w-10 h-10 object-contain rounded-xl flex-shrink-0" />
               <div>
                 <p className="text-sm font-bold text-neutral-100 leading-tight">One Shot Bar</p>
-                <p className="text-[10px] text-emerald-500/70 uppercase tracking-widest font-semibold">Admin Portal</p>
+                <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-semibold">Admin Portal</p>
               </div>
-            </div>
+            </button>
             <button className="lg:hidden text-neutral-500 hover:text-neutral-200" onClick={() => setSidebarOpen(false)}>
               <X size={18} />
             </button>
           </div>
 
-          <div className="px-4 py-3">
-            <div className="flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5">
-              <ShieldCheck size={16} className="text-emerald-400 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-emerald-300">Administrator</p>
-                <p className="text-[10px] text-emerald-600">Full access · admin</p>
-              </div>
-            </div>
-          </div>
-
-          <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
+          <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
             <p className="text-[10px] text-neutral-600 uppercase tracking-widest font-semibold px-3 py-2">Admin Navigation</p>
             {navItems.map(item => (
               <NavLink
@@ -211,10 +201,10 @@ export function AdminLayout() {
             ))}
           </nav>
 
-          <div className="px-4 pb-4">
+          <div className="px-4 pb-4 border-t border-neutral-800/60 pt-4">
             <button
               onClick={handleSwitchToStaff}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-all text-xs font-semibold"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-all text-xs font-semibold"
             >
               <ShieldCheck size={13} />
               <span className="flex-1 text-left">Switch to Staff Portal</span>
@@ -236,36 +226,53 @@ export function AdminLayout() {
             </div>
             
             <div className="flex items-center gap-3">
-              {/* Profile display added back */}
-              <button className="flex items-center gap-2 bg-neutral-800/60 rounded-full pl-1 pr-3 py-1 border border-neutral-700/50 hover:bg-neutral-800 transition-colors mr-2 cursor-default">
-                <div className="w-6 h-6 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
-                  {staffProfile?.avatarImg ? (
-                    <img src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} alt="Profile" className="w-full h-full object-cover" />
-                  ) : (staffProfile?.fullName?.charAt(0) || 'A')}
-                </div>
-                <span className="text-xs text-neutral-400 font-medium">{staffProfile?.fullName || 'Admin'}</span>
-              </button>
-
-              <button onClick={() => {
-                if (hasUnsavedChanges) { setPendingNav('/admin/settings'); } 
-                else { navigate('/admin/settings'); }
-              }} className="p-1.5 text-neutral-400 hover:text-emerald-400 transition-colors">
-                <Settings size={16} />
-              </button>
-              
-              <button
-                onClick={handleLockTerminal}
-                className="flex items-center gap-2 text-xs text-neutral-400 hover:text-emerald-400 bg-neutral-800 hover:bg-emerald-950/20 border border-neutral-700 hover:border-emerald-800/40 px-3 py-1.5 rounded-full transition-all font-medium"
-              >
-                <Lock size={13} /> Lock
-              </button>
-              
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 text-xs text-neutral-400 hover:text-rose-400 bg-neutral-800 hover:bg-rose-950/20 border border-neutral-700 hover:border-rose-800/40 px-3 py-1.5 rounded-full transition-all font-medium"
-              >
-                <LogOut size={13} /> Logout
-              </button>
+              <div className="relative">
+                <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 bg-neutral-800/60 rounded-full pl-1 pr-3 py-1 border border-neutral-700/50 hover:bg-neutral-800 transition-colors mr-2">
+                  <div className="w-7 h-7 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
+                    {staffProfile?.avatarImg ? (
+                      <img 
+                        src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} 
+                        alt="Profile" 
+                        className="w-full h-full object-cover" 
+                      />
+                    ) : (
+                      staffProfile?.fullName?.charAt(0) || 'A'
+                    )}
+                  </div>
+                  <span className="text-xs text-neutral-400 font-medium">{staffProfile?.fullName || 'Admin'}</span>
+                </button>
+                
+                {showUserMenu && (
+                  <div className="absolute right-0 top-full mt-2 w-56 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-neutral-800 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-sm font-bold overflow-hidden flex-shrink-0">
+                        {staffProfile?.avatarImg ? (
+                          <img 
+                            src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} 
+                            alt="Profile" 
+                            className="w-full h-full object-cover" 
+                          />
+                        ) : (
+                          staffProfile?.fullName?.charAt(0) || 'A'
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-neutral-200 truncate">{staffProfile?.fullName || 'Admin User'}</p>
+                        <p className="text-[10px] text-neutral-500 truncate">{staffProfile?.role || 'Administrator'}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => { setShowUserMenu(false); if (hasUnsavedChanges) { setPendingNav('/admin/settings'); } else { navigate('/admin/settings'); } }} className="w-full px-4 py-2.5 text-left text-sm text-neutral-300 hover:bg-neutral-900/60 transition-colors flex items-center gap-2">
+                      <Settings size={14} /> Settings
+                    </button>
+                    <button onClick={() => { handleLockTerminal(); setShowUserMenu(false); }} className="w-full px-4 py-2.5 text-left text-sm text-amber-400 hover:bg-neutral-900/60 transition-colors flex items-center gap-2 border-t border-neutral-800">
+                      <Lock size={14} /> Lock Device
+                    </button>
+                    <button onClick={handleLogout} className="w-full px-4 py-2.5 text-left text-sm text-rose-400 hover:bg-neutral-900/60 transition-colors flex items-center gap-2 border-t border-neutral-800">
+                      <LogOut size={14} /> Logout
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
 

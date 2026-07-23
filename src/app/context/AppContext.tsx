@@ -89,13 +89,15 @@ export type Event = {
 export type StaffProfile = {
   username: string; password: string; fullName: string; role: string; phone: string; joinedDate: string; avatarImg?: string; 
   isAdmin?: boolean; 
-}; // Removed email
+  email?: string;
+};
 
 export type StaffUser = {
   id: string; username: string; password: string; fullName: string; role: 'manager' | 'cashier'; isAdmin: boolean; phone: string; isActive: boolean; createdAt: Date;
   recoveryPin?: string; 
   avatarImg?: string;
-}; // Removed email
+  email?: string;
+};
 
 export type RatesConfig = {
   hourlyRate: number; overtimeRate: number; downPaymentPercent: number;
@@ -155,7 +157,6 @@ type AppContextType = {
   deleteWatchlistItem: (id: string) => void;
   sessionHistory: SessionHistoryItem[];
   addSessionHistory: (i: Omit<SessionHistoryItem, 'id'>) => void;
-  updateRefundStatus: (id: string, refundStatus: string, method?: string, notes?: string) => void;
   resetPasswordWithPin: (username: string, pin: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
   isSystemOffline: boolean;
   hashPassword: (p: string) => Promise<string>;
@@ -163,6 +164,8 @@ type AppContextType = {
   primaryColor: string;
   updateTheme: (theme: 'dark' | 'light') => void;
   updatePrimaryColor: (color: string) => void;
+  updateRefundStatus: (id: string, refundStatus: string, method?: string, notes?: string) => void;
+  acknowledgeRefund: (id: string) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -196,7 +199,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('oneshot_theme') as 'dark' | 'light') || 'dark');
   const [primaryColor, setPrimaryColor] = useState(() => localStorage.getItem('oneshot_color') || 'emerald');
 
-  // Inject the theme attributes directly into the HTML Document root
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute('data-theme', theme);
@@ -216,13 +218,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
     const saved = localStorage.getItem('oneshot_staff_profile');
     return saved ? JSON.parse(saved) : { 
-      username: '', 
-      password: '', 
-      fullName: '', 
-      role: '', 
-      phone: '', 
-      joinedDate: '', 
-      isAdmin: false 
+      username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
     };
   });
   
@@ -231,7 +227,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
-
   const [isSystemOffline, setIsSystemOffline] = useState(false);
 
   useEffect(() => {
@@ -240,22 +235,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (data) {
         const lastSeen = new Date(data.last_seen_at);
         const timeDiffMs = new Date().getTime() - lastSeen.getTime();
-        setIsSystemOffline(timeDiffMs > 300000);
+        setIsSystemOffline(timeDiffMs > 300000); // 5 minutes offline threshold
       }
     };
-    
     checkHeartbeat();
     const interval = setInterval(checkHeartbeat, 60000); 
     return () => clearInterval(interval);
   }, []);
 
-  const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
-    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } : r));
-    const payload = { refundStatus, refundMethod: method, refundNotes: notes };
-    syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`);
-    addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
-  };
-  
   const refreshLiveMonitor = async () => {
     try {
       const [tablesRes, queueRes] = await Promise.all([ fetch('http://localhost:3001/api/tables').catch(() => null), fetch('http://localhost:3001/api/queue').catch(() => null) ]);
@@ -285,7 +272,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fetch('http://localhost:3001/api/watchlist').catch(() => null),
           fetch('http://localhost:3001/api/session-history').catch(() => null),
         ]);
-        if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
+        let isLocalActive = false;
+        
+        if (tablesRes && tablesRes.ok) {
+          setTables(await tablesRes.json());
+          isLocalActive = true;
+        }
         if (resRes && resRes.ok) setReservations(await resRes.json());
         if (invRes && invRes.ok) setInventory(await invRes.json());
         if (queueRes && queueRes.ok) setQueue(await queueRes.json());
@@ -312,7 +304,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRates(prev => ({ ...prev, ...dbSettings }));
           setReservationTerms(prev => ({ ...prev, ...dbSettings }));
         }
-      } catch (err) { } finally { setTimeout(() => setIsInitializing(false), 800); }
+
+        // Fallback: If local fetch fails (e.g. on Vercel), fetch critical public data directly from Supabase
+        if (!isLocalActive) {
+          const [ { data: tablesData }, { data: resData }, { data: annData }, { data: cmsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData } ] = await Promise.all([
+            supabase.from('tables').select('*'), supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), supabase.from('cms').select('*'), supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), supabase.from('events').select('*')
+          ]);
+          if (tablesData) setTables(tablesData as Table[]);
+          if (resData) setReservations(resData as Reservation[]);
+          if (annData) setAnnouncements(annData as Announcement[]);
+          if (closedDatesData) setClosedDates(closedDatesData as ClosedDate[]);
+          if (promoData) setPromoCodes(promoData as PromoCode[]);
+          if (eventsData) setEvents(eventsData as Event[]);
+          if (cmsData) {
+            const configObj = cmsData.reduce((acc: any, curr: any) => { acc[curr.keyName] = curr.settingValue; return acc; }, {});
+            setSiteConfig(configObj);
+          }
+        }
+      } catch (err) { } 
+      
+      setTimeout(() => setIsInitializing(false), 800);
     };
     fetchLocalDatabase();
   }, []);
@@ -358,6 +369,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchHolidays();
   }, []);
 
+  // Hybrid Sync helper: Silently catches if the local Edge Server (localhost:3001) is unreachable (e.g. running on Vercel)
   const syncToDB = async (endpoint: string, method: 'POST' | 'PUT' | 'DELETE', payload: any, successMsg: string) => {
     try {
       const res = await fetch(`http://localhost:3001${endpoint}`, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -368,52 +380,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) { throw e; }
   };
 
-  const syncToSupabase = useCallback((action: string, payload: any) => {}, []);
-
-  // 🟢 FIX: Always use the exact staffProfile.fullName to prevent generic "Admin" logs
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
     const actor = staffProfile?.fullName || 'System / Customer';
     const detailedDescription = `${description} (Action by: ${actor})`;
-    
     const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description: detailedDescription, timestamp: new Date(), metadata };
     setActivities(prev => [newActivity, ...prev]);
-    fetch('http://localhost:3001/api/activities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newActivity) }).catch(e => {});
+    syncToDB('/api/activities', 'POST', newActivity, "Activity logged").catch(()=>{});
   };
 
   const addLostItem = (i: Omit<LostItem, 'id'>) => {
     const newItem = { ...i, id: `lf${Date.now()}` };
     setLostItems(prev => [newItem, ...prev]);
-    syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`);
+    syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`).catch(()=>{});
     addActivity('admin_action', `Added lost item: ${i.itemName}`);
   };
   const updateLostItem = (id: string, u: Partial<LostItem>) => {
     setLostItems(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`);
+    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`).catch(()=>{});
   };
   const deleteLostItem = (id: string) => {
     setLostItems(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`);
+    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`).catch(()=>{});
   };
 
   const addWatchlistItem = (i: Omit<WatchlistItem, 'id'>) => {
     const newItem = { ...i, id: `wl${Date.now()}` };
     setWatchlist(prev => [newItem, ...prev]);
-    syncToDB('/api/watchlist', 'POST', newItem, `Added to watchlist`);
+    syncToDB('/api/watchlist', 'POST', newItem, `Added to watchlist`).catch(()=>{});
     addActivity('admin_action', `Added ${i.name} to Watchlist`);
   };
   const updateWatchlistItem = (id: string, u: Partial<WatchlistItem>) => {
     setWatchlist(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`);
+    syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`).catch(()=>{});
   };
   const deleteWatchlistItem = (id: string) => {
     setWatchlist(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
-    syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`);
+    syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`).catch(()=>{});
   };
 
   const addSessionHistory = (i: Omit<SessionHistoryItem, 'id'>) => {
     const newItem = { ...i, id: `sh${Date.now()}` };
     setSessionHistory(prev => [newItem, ...prev]);
-    syncToDB('/api/session-history', 'POST', newItem, `Logged session history`);
+    syncToDB('/api/session-history', 'POST', newItem, `Logged session history`).catch(()=>{});
   };
 
   const hashPassword = async (password: string) => {
@@ -429,20 +437,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (valid) { 
       setStaffLoggedIn(true); 
       localStorage.setItem('oneshot_staff_auth', 'true');
-      
-      // 🟢 FIX: Set 12-hour expiration & obliterate any ghost locks from previous sessions
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       localStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       localStorage.removeItem('oneshot_is_locked'); 
-      
-      updateStaffProfile({ 
-        fullName: valid.fullName, 
-        username: valid.username, 
-        role: valid.role, 
-        isAdmin: valid.isAdmin, // Or true for adminLogin
-        phone: valid.phone || '',
-        avatarImg: valid.avatarImg || ''
-      });
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
       return true; 
     }
     return false; 
@@ -454,21 +452,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (valid) {
       setAdminLoggedIn(true);
       localStorage.setItem('oneshot_admin_auth', 'true');
-      
-      // 🟢 FIX: Set 12-hour expiration & obliterate any ghost locks from previous sessions
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       localStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       localStorage.removeItem('oneshot_is_locked');
-      
-      updateStaffProfile({ 
-        fullName: valid.fullName, 
-        username: valid.username, 
-        email: valid.email, 
-        role: valid.role, 
-        isAdmin: true,
-        phone: valid.phone || '',
-        avatarImg: valid.avatarImg || ''
-      });
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
       return true;
     }
     return false; 
@@ -478,50 +465,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setStaffLoggedIn(false);
     localStorage.removeItem('oneshot_staff_auth');
     localStorage.removeItem('oneshot_auth_expiry');
-    localStorage.removeItem('oneshot_is_locked'); // 🟢 FIX: Clear locks on logout
+    localStorage.removeItem('oneshot_is_locked'); 
   };
 
   const adminLogout = () => {
     setAdminLoggedIn(false);
     localStorage.removeItem('oneshot_admin_auth');
     localStorage.removeItem('oneshot_auth_expiry');
-    localStorage.removeItem('oneshot_is_locked'); // 🟢 FIX: Clear locks on logout
+    localStorage.removeItem('oneshot_is_locked'); 
   };
 
  const resetStaffUserPassword = async (id: string) => {
     try {
-      // 🟢 SECURE FIX: Look up the user's name before logging the activity
       const targetUser = staffUsers.find(user => user.id === id);
       const displayName = targetUser ? targetUser.fullName : id;
-
       const hashedPw = await hashPassword('oneshotstaff'); 
       setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: hashedPw } : u));
-      await syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`);
+      syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`).catch(()=>{});
       addActivity('admin_action', `Reset password to default for: ${displayName}`);
-    } catch (error) {
-      console.error("Failed to reset password:", error);
-      toast.error("Failed to reset password.");
-    }
+    } catch (error) { toast.error("Failed to reset password."); }
   };
 
   const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
     const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
     if (!targetUser) return { success: false, message: 'User not found or inactive.' };
     if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
-
     const hashedNew = await hashPassword(newPassword); 
     updateStaffUser(targetUser.id, { password: hashedNew });
     addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
     return { success: true, message: 'Password reset successfully!' };
   };
 
- 
-  
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
     setStaffProfile(prev => {
       const updated = { ...prev, ...p };
       localStorage.setItem('oneshot_staff_profile', JSON.stringify(updated));
-      fetch(`http://localhost:3001/api/staff/${updated.username}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).catch(e => {});
+      syncToDB(`/api/staff/${updated.username}`, 'PUT', p, `Update profile`).catch(()=>{});
       return updated;
     });
   };
@@ -530,20 +509,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const updatedSession = { ...session, orders: [] };
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: updatedSession } : t));
     addActivity('table_assigned', `Assigned ${tables.find(t=>t.id===tableId)?.name} to ${session.customerName}`);
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`);
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`).catch(()=>{});
   };
 
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
     addActivity('table_freed', `Freed ${tables.find(t=>t.id===tableId)?.name}`);
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`);
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`).catch(()=>{});
   };
 
   const extendSession = (tableId: string, mins: number, pay: number) => {
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const updatedSession = { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay };
-        syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`);
+        syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`).catch(()=>{});
         return { ...t, session: updatedSession };
       }
       return t;
@@ -558,13 +537,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   
   const setTableMaintenance = (tableId: string, reason: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`);
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`).catch(()=>{});
     addActivity('admin_action', `Set ${tables.find(t=>t.id===tableId)?.name} to maintenance: ${reason}`);
   };
 
   const setTableEvent = (tableId: string, eventName: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'event', maintenanceReason: eventName } : t));
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`);
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`).catch(()=>{});
     addActivity('admin_action', `Reserved ${tables.find(t=>t.id===tableId)?.name} for event: ${eventName}`);
   };
 
@@ -572,18 +551,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
     setTables(prev => [...prev, newTable]);
     addActivity('admin_action', `Added new table: ${name}`);
-    syncToDB('/api/tables', 'POST', newTable, `New table added`);
+    syncToDB('/api/tables', 'POST', newTable, `New table added`).catch(()=>{});
   };
 
   const updateTable = (id: string, name: string) => {
     setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
     addActivity('admin_action', `Renamed table ID: ${id} to ${name}`);
+    syncToDB(`/api/tables/${id}`, 'PUT', { name }, `Table updated`).catch(()=>{});
   };
 
   const toggleTableActive = (id: string) => {
     setTables(prev => {
       const target = prev.find(t => t.id === id);
-      if (target) syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`);
+      if (target) syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`).catch(()=>{});
       return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
     });
     addActivity('admin_action', `Toggled active status for table ID: ${id}`);
@@ -591,26 +571,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteTable = (id: string) => {
     setTables(prev => prev.filter(t => t.id !== id));
-    syncToDB(`/api/tables/${id}`, 'DELETE', {}, `Table deleted`);
+    syncToDB(`/api/tables/${id}`, 'DELETE', {}, `Table deleted`).catch(()=>{});
     addActivity('admin_action', `Deleted table ID: ${id}`);
   };
 
   const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
     const newItem = { ...i, id: `inv${Date.now()}` };
     setInventory(prev => [...prev, newItem]);
-    syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`);
+    syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`).catch(()=>{});
     addActivity('admin_action', `Added new menu item: ${i.name}`); 
   };
 
   const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => {
     setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`);
+    syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`).catch(()=>{});
     addActivity('admin_action', `Updated details for menu item ID: ${id}`);
   };
 
   const deleteInventoryItem = (id: string) => {
     setInventory(prev => prev.filter(i => i.id !== id));
-    syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`);
+    syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`).catch(()=>{});
     addActivity('admin_action', `Deleted menu item ID: ${id}`);
   };
   
@@ -620,7 +600,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const cartItem = cart.find(c => c.id === inv.id);
       if (cartItem) {
         const newStock = inv.stock - cartItem.qty;
-        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated for ${inv.name}`);
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated`).catch(()=>{});
         return { ...inv, stock: newStock };
       }
       return inv;
@@ -638,7 +618,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return t;
     }));
-    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table orders updated`);
+    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Orders updated`).catch(()=>{});
     addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
@@ -647,7 +627,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setInventory(prev => prev.map(inv => {
       if (inv.id === order.id) {
         const newStock = inv.stock + order.qty;
-        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored for ${inv.name}`);
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored`).catch(()=>{});
         return { ...inv, stock: newStock };
       }
       return inv;
@@ -661,7 +641,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return t;
     }));
-    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Table order voided`);
+    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Order voided`).catch(()=>{});
     addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
@@ -670,94 +650,140 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextNum = Math.max(0, ...prev.map(q => q.queueNumber ?? 0)) + 1;
       const newItem = { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting' as const, queueNumber: nextNum };
       addActivity('queue_added', `Added ${i.customerName} to queue position #${nextNum}`);
-      syncToDB('/api/queue', 'POST', newItem, `Queue item added`);
+      syncToDB('/api/queue', 'POST', newItem, `Queue item added`).catch(()=>{});
       return [...prev, newItem];
     });
   };
 
   const removeFromQueue = (id: string) => {
     setQueue(prev => prev.filter(q => q.id !== id));
-    syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`);
+    syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`).catch(()=>{});
     addActivity('queue_removed', `Removed ID: ${id} from queue`);
   };
 
   const callQueueItem = (id: string) => {
     setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
     addActivity('queue_called', `Called customer ID: ${id} from queue to available table`);
-    syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`);
+    syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`).catch(()=>{});
   };
 
+  // 🟢 HYBRID SYNC: Saves locally (Electron) AND pushes to Supabase (Vercel/Cloud)
   const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
-    setReservations(prev => [...prev, newRes]);
-    syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`);
-    syncToSupabase('RESERVATION_ADDED', newRes);
+    
+    setReservations(prev => [...prev, newRes as Reservation]);
     addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`); 
+    
+    // 1. Local Edge Save
+    syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`).catch(() => {});
+    
+    // 2. Cloud Supabase Save
+    const supabasePayload = {
+      ...newRes,
+      date: newRes.date.toISOString(), 
+      createdAt: newRes.createdAt.toISOString(),
+      downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
+      balancePaid: newRes.balancePaid ? 1 : 0,
+      receiptImg: null 
+    };
+    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+      if (error) console.error("Error inserting reservation to Supabase:", error);
+    });
+    
     return id;
   };
   
+  // 🟢 FIXED RESTORED RESERVATION MUTATORS WITH HYBRID SYNC
   const updateReservationStatus = (id: string, status: ReservationStatus) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`);
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`).catch(()=>{});
+    supabase.from('reservations').update({ status }).eq('id', id).then();
     addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); 
+  };
+
+  const cancelReservation = (id: string, reason: string) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).catch(()=>{});
+    supabase.from('reservations').update({ status: 'cancelled', cancellationReason: reason }).eq('id', id).then();
+    addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
+  };
+
+  const updateDownPayment = (id: string, paid: boolean) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`).catch(()=>{});
+    supabase.from('reservations').update({ downPaymentPaid: paid ? 1 : 0 }).eq('id', id).then();
+    if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
+  };
+
+  const updateBalance = (id: string, paid: boolean) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`).catch(()=>{});
+    supabase.from('reservations').update({ balancePaid: paid ? 1 : 0 }).eq('id', id).then();
+    if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
+  };
+
+  const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } as Reservation : r));
+    const payload = { refundStatus, refundMethod: method, refundNotes: notes };
+    syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`).catch(()=>{});
+    supabase.from('reservations').update(payload).eq('id', id).then();
+    addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
+  };
+
+  const acknowledgeRefund = (id: string) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { refundStatus: 'acknowledged' }, `Refund acknowledged`).catch(()=>{});
+    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then();
   };
 
   const updateReservation = (id: string, u: Partial<Reservation>) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`);
+    syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).catch(()=>{});
+    supabase.from('reservations').update(u).eq('id', id).then();
     addActivity('reservation_updated', `Reservation ${id} details were updated`);
   };
-  
-  const cancelReservation = (id: string, reason: string) => {
-    setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`);
-    addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
-  };
-  
-  const updateDownPayment = (id: string, paid: boolean) => {
-    setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`);
-    if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
-  };
-  
-  const updateBalance = (id: string, paid: boolean) => {
-    setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`);
-    if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
-  };
 
+  // 🟢 HYBRID SYNC: Add Feedback
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
-    setFeedback(prev => [newFeedback, ...prev]);
-    syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback");
+    setFeedback(prev => [newFeedback as Feedback, ...prev]);
+    
+    // 1. Local Edge Save
+    syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback").catch(()=>{});
+    
+    // 2. Cloud Supabase Save (Strips 'rating' column that doesn't exist)
+    const { rating, ...supabasePayload } = newFeedback;
+    supabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
+      if (error) console.error("Error inserting feedback to Supabase:", error);
+    });
   };
 
   const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
     const id = `p${Date.now()}`;
     const newPromo = { ...i, id, createdAt: new Date(), usageCount: 0 };
     setPromoCodes(prev => [...prev, newPromo]);
-    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`);
+    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`).catch(()=>{});
     addActivity('admin_action', `Generated promo code: ${i.code}`);
     return id;
   };
   
   const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => {
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
-    syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`);
+    syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`).catch(()=>{});
     addActivity('admin_action', `Updated promo code ID: ${id}`);
   };
   
   const togglePromoCode = (id: string) => {
     const target = promoCodes.find(p => p.id === id);
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
-    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo');
+    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo').catch(()=>{});
     addActivity('admin_action', `Toggled visibility for promo ID: ${id}`);
   };
   
   const deletePromoCode = (id: string) => {
     setPromoCodes(prev => prev.filter(p => p.id !== id));
-    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo');
+    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo').catch(()=>{});
     addActivity('admin_action', `Deleted promo code ID: ${id}`);
   };
   
@@ -776,26 +802,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const id = `su${Date.now()}`;
     const newUser = { ...u, id, createdAt: new Date() };
     setStaffUsers(prev => [...prev, newUser]);
-    syncToDB('/api/staff', 'POST', newUser, `Added staff user`);
+    syncToDB('/api/staff', 'POST', newUser, `Added staff user`).catch(()=>{});
     addActivity('admin_action', `Created new staff user: ${u.username}`);
   };
   
   const updateStaffUser = (id: string, u: Partial<StaffUser>) => {
-    // 🟢 SECURE FIX: Look up the user's name before logging the activity
     const targetUser = staffUsers.find(user => user.id === id);
     const displayName = targetUser ? targetUser.fullName : id;
-
     setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
-    syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`);
+    syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`).catch(()=>{});
     addActivity('admin_action', `Updated details for: ${displayName}`);
   };
   
-  // 🟢 FIXED: toggleStaffUserActive is restored
   const toggleStaffUserActive = (id: string) => {
     const target = staffUsers.find(u => u.id === id);
     if (target) {
       setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
-      syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`);
+      syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`).catch(()=>{});
       addActivity('admin_action', `Toggled active status for staff user: ${target.username}`);
     }
   };
@@ -816,8 +839,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
       addActivity('admin_action', 'System rates updated');
-      
-      // Step 2: Trigger immediate Cloud Sync script on the backend
       fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
       return res;
     } catch (e) { throw e; }
@@ -835,19 +856,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
  const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {
     const newAnn = { ...a, id: `a${Date.now()}`, createdAt: new Date() };
     setAnnouncements(prev => [newAnn, ...prev]);
-    syncToDB('/api/announcements', 'POST', newAnn, `Created announcement: ${a.title}`);
+    syncToDB('/api/announcements', 'POST', newAnn, `Created announcement: ${a.title}`).catch(()=>{});
     addActivity('admin_action', `Created public announcement: ${a.title}`);
   };
 
   const updateAnnouncement = (id: string, u: Partial<Announcement>) => {
     setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, ...u } : a));
-    syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`);
+    syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`).catch(()=>{});
     addActivity('admin_action', `Updated announcement ID: ${id}`);
   };
   
   const deleteAnnouncement = (id: string) => {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
-    syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`);
+    syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`).catch(()=>{});
     addActivity('admin_action', `Deleted announcement ID: ${id}`);
   };
 
@@ -855,7 +876,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const target = announcements.find(a => a.id === id);
     if (target) {
       setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a));
-      syncToDB(`/api/announcements/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled announcement visibility`);
+      syncToDB(`/api/announcements/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled announcement visibility`).catch(()=>{});
       addActivity('admin_action', `Toggled visibility for announcement ID: ${id}`);
     }
   };
@@ -863,52 +884,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addClosedDate = (c: Omit<ClosedDate, 'id'>) => {
     const newCd = { ...c, id: `cd${Date.now()}` };
     setClosedDates(prev => [...prev, newCd]);
-    syncToDB('/api/closed-dates', 'POST', newCd, `Created closed date for ${c.date}`);
+    syncToDB('/api/closed-dates', 'POST', newCd, `Created closed date for ${c.date}`).catch(()=>{});
     addActivity('admin_action', `Added closure date: ${c.date}`);
   };
   
   const removeClosedDate = (id: string) => {
     setClosedDates(prev => prev.filter(c => c.id !== id));
-    syncToDB(`/api/closed-dates/${id}`, 'DELETE', {}, `Deleted closed date`);
+    syncToDB(`/api/closed-dates/${id}`, 'DELETE', {}, `Deleted closed date`).catch(()=>{});
     addActivity('admin_action', `Removed closure date ID: ${id}`);
   };
   
   const updateClosedDate = (id: string, u: Partial<ClosedDate>) => {
     setClosedDates(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
-    syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`);
+    syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`).catch(()=>{});
   };
 
  const updateSiteConfig = (newConfig: any) => {
     setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
-    
-    // Step 1: Save to local SQLite
-    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`);
+    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).catch(()=>{});
     addActivity('admin_action', `Updated public website CMS content`);
-
-    // Step 2: Trigger immediate Cloud Sync script on the backend
     fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
   };
 
   const addEvent = (e: Omit<Event, 'id'>) => {
     const newEvent = { ...e, id: Date.now().toString() };
     setEvents(prev => [...prev, newEvent]);
-    syncToDB('/api/events', 'POST', newEvent, `Created new event`);
+    syncToDB('/api/events', 'POST', newEvent, `Created new event`).catch(()=>{});
     addActivity('admin_action', `Created special event: ${e.title}`);
   };
   
   const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => {
     setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`);
+    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`).catch(()=>{});
     addActivity('admin_action', `Updated event ID: ${id}`);
   };
   
   const deleteEvent = (id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
-    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`);
+    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`).catch(()=>{});
     addActivity('admin_action', `Deleted event ID: ${id}`);
   };
 
- if (isInitializing) {
+  if (isInitializing) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center">
         <div className="relative w-16 h-16 mb-6">
@@ -916,7 +933,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
         </div>
         <h1 className="text-2xl font-black text-white tracking-widest">ONE SHOT</h1>
-        <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-[0.2em] mt-2 animate-pulse">Syncing Database...</p>
+        <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-[0.2em] mt-2 animate-pulse">Loading Application...</p>
       </div>
     );
   }
@@ -938,12 +955,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lostItems, addLostItem, updateLostItem, deleteLostItem,
       watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
       hashPassword,
-      
-      // 🟢 FIXED: Exported the Theme functions to the rest of the application
-      theme, 
-      primaryColor, 
-      updateTheme, 
-      updatePrimaryColor
+      theme, primaryColor, updateTheme, updatePrimaryColor,
+      updateRefundStatus, acknowledgeRefund
     }}>
       {children}
     </AppContext.Provider>

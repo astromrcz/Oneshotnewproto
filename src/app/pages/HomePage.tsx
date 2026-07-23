@@ -18,7 +18,6 @@ import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-// 🟢 FIX: Added missing todayStart variable
 const todayStart = startOfDay(new Date());
 
 type Section = 'home' | 'reservations' | 'rates' | 'events' | 'about' | 'feedback';
@@ -119,7 +118,7 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund } = useAppContext() as any; // 🟢 FIX: Added acknowledgeRefund
+  const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund } = useAppContext() as any;
 
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
@@ -194,11 +193,8 @@ export function HomePage() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  
-  // 🟢 NEW: Registration Hook Modal State
   const [showRegPromoModal, setShowRegPromoModal] = useState(false);
 
-  // Hook to show Reg Promo when visiting Reservations for the first time
   useEffect(() => {
     if (activeSection === 'reservations' && !currentUser) {
       const seen = localStorage.getItem('oneshot_reg_promo_seen');
@@ -222,7 +218,6 @@ export function HomePage() {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isPreferredTableExpanded, setIsPreferredTableExpanded] = useState(true);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [isLiveMonitorOpen, setIsLiveMonitorOpen] = useState(false);
   
   const [resForm, setResForm] = useState({ name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2 });
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
@@ -234,7 +229,7 @@ export function HomePage() {
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPercent: number } | null>(null);
   const [promoError, setPromoError] = useState('');
-  const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', message: '' });
+  const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
   let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
@@ -312,7 +307,6 @@ export function HomePage() {
 
   const RES_DRAFT_KEY = 'oneshot_reservation_draft_v1';
 
-  // 🟢 FIX: Slate Wipe for Payment - Do not persist paymentRef and receiptImg
   const saveReservationDraft = useCallback(() => {
     try {
       const draft = {
@@ -581,7 +575,6 @@ export function HomePage() {
   };
 
   const handlePaymentConfirm = () => {
-    // 🟢 FIX: GCash Fraud Validation
     if (reservations.some((r: any) => r.paymentRef === paymentRef)) {
       alert("This GCash reference number has already been recorded in our system. Please verify your transaction and enter a valid, unique reference number.");
       return;
@@ -625,8 +618,8 @@ export function HomePage() {
     setReservationStep(0);
     setAgreedToTerms(false);
     setGeneratedResId('');
-    setPaymentRef(''); // Clear for next time
-    setReceiptImg(null); // Clear for next time
+    setPaymentRef(''); 
+    setReceiptImg(null); 
     if (currentUser) setResTab('track');
   };
 
@@ -659,10 +652,23 @@ export function HomePage() {
   const handleFeedbackSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || !feedbackForm.message) return;
+    if (feedbackForm.type === 'other' && !feedbackForm.customType) return;
     
-    addFeedback({ customerName: feedbackForm.name, contactInfo: feedbackForm.contact, rating: 0, feedbackType: feedbackForm.type as any, comment: feedbackForm.message, tags: [] });
+    // 🟢 FIXED: Format custom type into the message if "Other" is selected
+    const finalMessage = feedbackForm.type === 'other' ? `[Type: ${feedbackForm.customType}]\n${feedbackForm.message}` : feedbackForm.message;
+    
+    addFeedback({ 
+      customerName: feedbackForm.name, 
+      contactInfo: feedbackForm.contact, 
+      rating: 0, 
+      feedbackType: feedbackForm.type as any, 
+      comment: finalMessage, 
+      tags: feedbackForm.type === 'other' ? [feedbackForm.customType] : [],
+      reservationId: feedbackForm.reservationId || undefined // 🟢 NEW: Pass reservation ID to Supabase
+    });
+    
     setFeedbackSent(true);
-    setTimeout(() => { setFeedbackSent(false); setFeedbackForm({ name: '', contact: '', type: '', message: '' }); }, 3000);
+    setTimeout(() => { setFeedbackSent(false); setFeedbackForm({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' }); }, 3000);
   };
 
   const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
@@ -701,8 +707,9 @@ export function HomePage() {
 
       {/* ── Top Header ── */}
       <header className="fixed top-0 left-0 right-0 z-50 h-16 bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
-        <div
-          className="h-full flex items-center px-5 pr-12 bg-emerald-700 flex-shrink-0 relative z-10"
+        <button
+          onClick={() => setActiveSection('home')}
+          className="h-full flex items-center px-5 pr-12 bg-emerald-700 hover:bg-emerald-600 transition-colors flex-shrink-0 relative z-10 cursor-pointer text-left"
           style={{ clipPath: 'polygon(0 0, 100% 0, 82% 100%, 0 100%)', minWidth: 220 }}
         >
           <div className="flex items-center gap-2.5">
@@ -712,7 +719,7 @@ export function HomePage() {
               <p className="text-emerald-200 text-[9px] uppercase tracking-[0.2em] font-semibold">Bar & Billiards</p>
             </div>
           </div>
-        </div>
+        </button>
 
         <div className="flex-1" />
 
@@ -751,7 +758,7 @@ export function HomePage() {
                   </div>
                   <div className="max-h-80 overflow-y-auto p-2">
                     {allNotifications.length === 0 ? (
-                      <p className="text-xs text-neutral-500 text-center py-6">No notifications yet</p>
+                      <p className="text-xs text-neutral-500 text-center py-6">No recent announcements</p>
                     ) : (
                       allNotifications.map((n: any) => {
                         const isUnread = isFirstTime || !readAnnouncements.includes(n.id);
@@ -843,7 +850,7 @@ export function HomePage() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    transition={{ duration: 0.9 }}
+                    transition={{ duration: 0.5 }}
                     className="absolute inset-0 w-full h-full"
                   >
                     <ImageWithFallback src={heroSlides[heroSlideIdx].src} alt={heroSlides[heroSlideIdx].alt} className="w-full h-full object-cover" />
@@ -854,7 +861,6 @@ export function HomePage() {
                 <button onClick={prevHeroSlide} className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-emerald-600 hover:border-emerald-500 z-20 cursor-pointer shadow-xl"><ChevronLeft size={24} /></button>
                 <button onClick={nextHeroSlide} className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-emerald-600 hover:border-emerald-500 z-20 cursor-pointer shadow-xl"><ChevronRight size={24} /></button>
 
-                {/* Pointer-events-none on wrapper so it doesn't block the screen, auto on the actual text content */}
                 <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 px-6 text-center z-10 pointer-events-none">
                   <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center pointer-events-auto">
                     <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">{cms.heroTitle}</p>
@@ -927,7 +933,6 @@ export function HomePage() {
             </motion.div>
           )}
           
-
           {/* ════ RESERVATIONS SECTION ════ */}
           {activeSection === 'reservations' && (
             <motion.div key="reservations" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-5xl mx-auto px-6 py-10">
@@ -966,257 +971,255 @@ export function HomePage() {
                     </div>
                   )}
 
+                  {/* 🟢 FIXED: Removed the unclosed, duplicate layout grid wrapper */}
                   <div className={`grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20 ${isSystemOffline ? 'opacity-50 pointer-events-none grayscale-[50%]' : ''}`}>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20">
-                  {/* Custom Mini Calendar */}
-                  <div>
-                    <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 1 — Pick a Date</p>
-                    <MiniCalendar
-                      selectedDate={selectedDate}
-                      onSelect={setSelectedDate}
-                      reservedDates={reservedDates}
-                      closedDates={safeClosedDates}
-                    />
-                    {selectedDate && (
-                      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-3">
-                        <div className="bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
-                          <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
-                          <span className="text-xs text-emerald-300">
-                            Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
-                          </span>
-                        </div>
-
-                        <div className="rounded-xl border border-emerald-900/20 bg-emerald-950/20 p-3">
-                          <div className="flex items-center justify-between gap-2 mb-2">
-                            <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Today's Activity Guide</p>
-                            <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max {Number(rates?.onlineCapacityLimit ?? 70)}% Online Limit</span>
-                          </div>
-                          <div className="space-y-1.5">
-                            {reservations
-                              .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), new Date(selectedDate)))
-                              .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                              .map((r: any) => (
-                                <div key={r.id} className="flex items-center gap-2 text-[10px]">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                                  <span className="text-neutral-400 w-24 flex-shrink-0">{r.timeSlot} — {format(addMinutes(new Date(`2000/01/01 ${r.timeSlot}`), r.durationHours * 60), 'HH:mm')}</span>
-                                  <span className="text-neutral-600 truncate">{r.partySize} pax booking</span>
-                                </div>
-                              ))}
-                            {reservations.filter((r: any) => r.status !== 'cancelled' && isSameDay(new Date(r.date), new Date(selectedDate))).length === 0 && (
-                              <p className="text-[10px] text-emerald-500 italic flex items-center gap-1">
-                                <CheckCircle size={10} /> Wide open! Plenty of tables available today.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </div>
-
-                  <div>
-                    {!selectedDate ? (
-                      <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-10 text-center flex flex-col items-center gap-3">
-                        <Calendar size={32} className="text-neutral-600" />
-                        <p className="text-neutral-500 text-sm">Please select a date from the calendar to continue your reservation.</p>
-                      </div>
-                    ) : (
-                      <div>
-                        <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 2 — Your Details</p>
-                        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
-                          <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Full Name <span className="text-rose-500">*</span></label>
-                            <input type="text" value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Email Address {currentUser ? '' : <span className="text-neutral-600">(Optional)</span>}</label>
-                            <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Phone Number <span className="text-rose-500">*</span></label>
-                            <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
-                            <p className="mt-1 text-[10px] text-neutral-500">Use 13 digits max, numbers only.</p>
-                          </div>
-                          
-                          {/* FLEXIBLE TIME INPUT */}
-                          <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5">
-                              <Clock size={13} className="text-white" />
-                              Preferred Time
-                            </label>
-                            <input
-                              type="time"
-                              style={{ colorScheme: 'dark' }}
-                              value={resForm.timeSlot}
-                              onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
-                              className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
-                                timeValidation === 'closed' || timeValidation === 'happyhour' || timeValidation === 'full' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
-                              }`}
-                            />
-                            
-                            <p className="text-[10px] text-amber-500/80 mt-2 font-semibold flex items-start gap-1">
-                              <AlertTriangle size={12} className="flex-shrink-0" />
-                              <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
-                            </p>
-                              
-                             {timeValidation === 'past' && (
-                              <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
-                                <XCircle size={10} /> This time slot has already passed today.
-                              </p>
-                            )}
-                            {timeValidation === 'advance' && (
-                              <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
-                                <AlertTriangle size={10} /> Bookings require at least 1 hour advance notice.
-                              </p>
-                            )}
-
-                            {timeValidation === 'closed' && (
-                              <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
-                                <XCircle size={10} /> The establishment is not accepting bookings at this hour.
-                              </p>
-                            )}
-                            {timeValidation === 'happyhour' && (
-                              <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
-                                <AlertTriangle size={10} /> Happy Hour is strictly walk-in only.
-                              </p>
-                            )}
-                            {timeValidation === 'full' && (
-                              <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
-                                <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
-                              </p>
-                            )}
-                            {timeValidation === 'event_blocked' && (
-                              <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
-                                <AlertTriangle size={12} className="flex-shrink-0" /> This time slot overlaps with a special event. Online reservations are temporarily disabled.
-                              </p>
-                            )}
+                    {/* Custom Mini Calendar */}
+                    <div>
+                      <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 1 — Pick a Date</p>
+                      <MiniCalendar
+                        selectedDate={selectedDate}
+                        onSelect={setSelectedDate}
+                        reservedDates={reservedDates}
+                        closedDates={safeClosedDates}
+                      />
+                      {selectedDate && (
+                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-3">
+                          <div className="bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
+                            <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                            <span className="text-xs text-emerald-300">
+                              Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                            </span>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5">No. of Persons</label>
-                              <input type="number" min={1} max={20} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
+                          <div className="rounded-xl border border-emerald-900/20 bg-emerald-950/20 p-3">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Today's Activity Guide</p>
+                              <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max {Number(rates?.onlineCapacityLimit ?? 70)}% Online Limit</span>
                             </div>
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
-                                <span>Duration (hours)</span>
-                                {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h based on cut-off</span>}
-                              </label>
-                              <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
-                                {/* Dynamically render options up to the max allowed */}
-                                {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
-                                  <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="flex items-center justify-between mb-2">
-                              <label className="block text-xs text-neutral-400">Preferred Table <span className="text-neutral-600">(optional)</span></label>
-                              <button type="button" onClick={() => setIsPreferredTableExpanded(prev => !prev)} className="text-[10px] font-semibold text-neutral-400 hover:text-white transition-colors">
-                                {isPreferredTableExpanded ? 'Minimize' : 'Expand'}
-                              </button>
-                            </div>
-                            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-                              {!isPreferredTableExpanded ? (
-                                <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2">
-                                  <div>
-                                    <p className="text-xs font-semibold text-neutral-200">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
-                                    <p className="text-[10px] text-neutral-500">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
+                            <div className="space-y-1.5">
+                              {reservations
+                                .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), new Date(selectedDate)))
+                                .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                                .map((r: any) => (
+                                  <div key={r.id} className="flex items-center gap-2 text-[10px]">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                                    <span className="text-neutral-400 w-24 flex-shrink-0">{r.timeSlot} — {format(addMinutes(new Date(`2000/01/01 ${r.timeSlot}`), r.durationHours * 60), 'HH:mm')}</span>
+                                    <span className="text-neutral-600 truncate">{r.partySize} pax booking</span>
                                   </div>
-                                  <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors">Expand</button>
+                                ))}
+                              {reservations.filter((r: any) => r.status !== 'cancelled' && isSameDay(new Date(r.date), new Date(selectedDate))).length === 0 && (
+                                <p className="text-[10px] text-emerald-500 italic flex items-center gap-1">
+                                  <CheckCircle size={10} /> Wide open! Plenty of tables available today.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </div>
+
+                    <div>
+                      {!selectedDate ? (
+                        <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-10 text-center flex flex-col items-center gap-3">
+                          <Calendar size={32} className="text-neutral-600" />
+                          <p className="text-neutral-500 text-sm">Please select a date from the calendar to continue your reservation.</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 2 — Your Details</p>
+                          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
+                            <div>
+                              <label className="block text-xs text-neutral-400 mb-1.5">Full Name <span className="text-rose-500">*</span></label>
+                              <input type="text" value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-neutral-400 mb-1.5">Email Address {currentUser ? '' : <span className="text-neutral-600">(Optional)</span>}</label>
+                              <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-neutral-400 mb-1.5">Phone Number <span className="text-rose-500">*</span></label>
+                              <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                              <p className="mt-1 text-[10px] text-neutral-500">Use 13 digits max, numbers only.</p>
+                            </div>
+                            
+                            {/* FLEXIBLE TIME INPUT */}
+                            <div>
+                              <label className="block text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5">
+                                <Clock size={13} className="text-white" />
+                                Preferred Time
+                              </label>
+                              <input
+                                type="time"
+                                style={{ colorScheme: 'dark' }}
+                                value={resForm.timeSlot}
+                                onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
+                                className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
+                                  timeValidation === 'closed' || timeValidation === 'happyhour' || timeValidation === 'full' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
+                                }`}
+                              />
+                              
+                              <p className="text-[10px] text-amber-500/80 mt-2 font-semibold flex items-start gap-1">
+                                <AlertTriangle size={12} className="flex-shrink-0" />
+                                <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
+                              </p>
+                                
+                               {timeValidation === 'past' && (
+                                <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+                                  <XCircle size={10} /> This time slot has already passed today.
+                                </p>
+                              )}
+                              {timeValidation === 'advance' && (
+                                <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
+                                  <AlertTriangle size={10} /> Bookings require at least 1 hour advance notice.
+                                </p>
+                              )}
+
+                              {timeValidation === 'closed' && (
+                                <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+                                  <XCircle size={10} /> The establishment is not accepting bookings at this hour.
+                                </p>
+                              )}
+                              {timeValidation === 'happyhour' && (
+                                <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
+                                  <AlertTriangle size={10} /> Happy Hour is strictly walk-in only.
+                                </p>
+                              )}
+                              {timeValidation === 'full' && (
+                                <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+                                  <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
+                                </p>
+                              )}
+                              {timeValidation === 'event_blocked' && (
+                                <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+                                  <AlertTriangle size={12} className="flex-shrink-0" /> This time slot overlaps with a special event. Online reservations are temporarily disabled.
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs text-neutral-400 mb-1.5">No. of Persons</label>
+                                <input type="number" min={1} max={20} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                                  <span>Duration (hours)</span>
+                                  {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h based on cut-off</span>}
+                                </label>
+                                <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
+                                  {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                                    <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <label className="block text-xs text-neutral-400">Preferred Table <span className="text-neutral-600">(optional)</span></label>
+                                <button type="button" onClick={() => setIsPreferredTableExpanded(prev => !prev)} className="text-[10px] font-semibold text-neutral-400 hover:text-white transition-colors">
+                                  {isPreferredTableExpanded ? 'Minimize' : 'Expand'}
+                                </button>
+                              </div>
+                              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                                {!isPreferredTableExpanded ? (
+                                  <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2">
+                                    <div>
+                                      <p className="text-xs font-semibold text-neutral-200">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
+                                      <p className="text-[10px] text-neutral-500">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
+                                    </div>
+                                    <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors">Expand</button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <button type="button" onClick={() => { setSelectedTableId(null); setIsPreferredTableExpanded(true); }} className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${!selectedTableId ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'}`}>
+                                      <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
+                                    </button>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                      {tables.filter((table: any) => table.isActive).map((table: any) => {
+                                        const isAvail = table.status === 'available';
+                                        const isRes = table.status === 'reserved';
+                                        const isOcc = table.status === 'occupied';
+                                        const isSel = selectedTableId === table.id;
+                                        const disabled = isOcc || isRes;
+                                        const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
+                                        const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
+                                        const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
+                                        
+                                        return (
+                                          <button key={table.id} type="button" disabled={disabled} onClick={() => { const nextSelection = isSel ? null : table.id; setSelectedTableId(nextSelection); setIsPreferredTableExpanded(nextSelection ? false : true); }} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${isSel ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20' : disabled ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60' : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'}`}>
+                                            <div className="flex items-center justify-between w-full mb-1">
+                                              <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
+                                              {isSel && <CheckCircle size={14} className="text-emerald-400" />}
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
+                                              <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>{statusText}</span>
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs text-neutral-400 mb-1.5">Promo Code <span className="text-neutral-600">(optional)</span></label>
+                              {appliedPromo ? (
+                                <div className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg px-3 py-2">
+                                  <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
+                                  <span className="text-xs text-emerald-300 font-semibold flex-1">{appliedPromo.code} — {appliedPromo.discountPercent}% off applied!</span>
+                                  <button onClick={handleRemovePromo} className="text-neutral-500 hover:text-rose-400 transition-colors"><X size={13} /></button>
                                 </div>
                               ) : (
-                                <>
-                                  <button type="button" onClick={() => { setSelectedTableId(null); setIsPreferredTableExpanded(true); }} className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${!selectedTableId ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'}`}>
-                                    <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
-                                  </button>
-                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                    {tables.filter((table: any) => table.isActive).map((table: any) => {
-                                      const isAvail = table.status === 'available';
-                                      const isRes = table.status === 'reserved';
-                                      const isOcc = table.status === 'occupied';
-                                      const isSel = selectedTableId === table.id;
-                                      const disabled = isOcc || isRes;
-                                      const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
-                                      const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
-                                      const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
-                                      
-                                      return (
-                                        <button key={table.id} type="button" disabled={disabled} onClick={() => { const nextSelection = isSel ? null : table.id; setSelectedTableId(nextSelection); setIsPreferredTableExpanded(nextSelection ? false : true); }} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${isSel ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20' : disabled ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60' : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'}`}>
-                                          <div className="flex items-center justify-between w-full mb-1">
-                                            <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
-                                            {isSel && <CheckCircle size={14} className="text-emerald-400" />}
-                                          </div>
-                                          <div className="flex items-center gap-1.5">
-                                            <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
-                                            <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>{statusText}</span>
-                                          </div>
-                                        </button>
-                                      );
-                                    })}
+                                <div className="space-y-1">
+                                  <div className="flex gap-2">
+                                    <input type="text" value={promoCodeInput} onChange={e => { setPromoCodeInput(e.target.value.toUpperCase()); setPromoError(''); }} placeholder="e.g. WELCOME20" className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 font-mono" />
+                                    <button onClick={handleApplyPromo} disabled={!promoCodeInput.trim()} className="px-4 py-2 bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg text-xs font-semibold hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">Apply</button>
                                   </div>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs text-neutral-400 mb-1.5">Promo Code <span className="text-neutral-600">(optional)</span></label>
-                            {appliedPromo ? (
-                              <div className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg px-3 py-2">
-                                <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
-                                <span className="text-xs text-emerald-300 font-semibold flex-1">{appliedPromo.code} — {appliedPromo.discountPercent}% off applied!</span>
-                                <button onClick={handleRemovePromo} className="text-neutral-500 hover:text-rose-400 transition-colors"><X size={13} /></button>
-                              </div>
-                            ) : (
-                              <div className="space-y-1">
-                                <div className="flex gap-2">
-                                  <input type="text" value={promoCodeInput} onChange={e => { setPromoCodeInput(e.target.value.toUpperCase()); setPromoError(''); }} placeholder="e.g. WELCOME20" className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 font-mono" />
-                                  <button onClick={handleApplyPromo} disabled={!promoCodeInput.trim()} className="px-4 py-2 bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg text-xs font-semibold hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">Apply</button>
+                                  {promoError && <p className="text-[11px] text-rose-400">{promoError}</p>}
                                 </div>
-                                {promoError && <p className="text-[11px] text-rose-400">{promoError}</p>}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="bg-neutral-800/60 rounded-xl p-4 border border-neutral-700/50">
-                            <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Booking Summary</p>
-                            <div className="space-y-1.5 text-xs">
-                              <div className="flex justify-between"><span className="text-neutral-400">Date</span><span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
-                              <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot || '—'}</span></div>
-                              <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{effectiveHourly}/hr</span></div>
-                              {appliedPromo && (
-                                <div className="flex justify-between text-emerald-400"><span>Promo ({appliedPromo.code})</span><span>−₱{discountAmount}.00</span></div>
                               )}
-                              <div className="border-t border-neutral-700 pt-1.5 mt-1.5 flex justify-between">
-                                <span className="text-neutral-400">Total Amount</span><span className="text-white font-semibold">₱{totalAmount}.00</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-amber-400">Down Payment ({rates?.downPaymentPercent || 25}%)</span><span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
+                            </div>
+
+                            <div className="bg-neutral-800/60 rounded-xl p-4 border border-neutral-700/50">
+                              <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Booking Summary</p>
+                              <div className="space-y-1.5 text-xs">
+                                <div className="flex justify-between"><span className="text-neutral-400">Date</span><span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
+                                <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot || '—'}</span></div>
+                                <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{effectiveHourly}/hr</span></div>
+                                {appliedPromo && (
+                                  <div className="flex justify-between text-emerald-400"><span>Promo ({appliedPromo.code})</span><span>−₱{discountAmount}.00</span></div>
+                                )}
+                                <div className="border-t border-neutral-700 pt-1.5 mt-1.5 flex justify-between">
+                                  <span className="text-neutral-400">Total Amount</span><span className="text-white font-semibold">₱{totalAmount}.00</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-amber-400">Down Payment ({rates?.downPaymentPercent || 25}%)</span><span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
+                                </div>
                               </div>
                             </div>
+                            <button 
+                              onClick={handleReservationSubmit} 
+                              disabled={
+                                !resForm.name.trim() || 
+                                !resForm.phone.trim() || 
+                                !resForm.timeSlot || 
+                                timeValidation !== 'valid'
+                              } 
+                              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                            >
+                              Proceed to Payment <ArrowRight size={14} />
+                            </button>
                           </div>
-                         <button 
-                                onClick={handleReservationSubmit} 
-                                disabled={
-                                  !resForm.name.trim() || 
-                                  !resForm.phone.trim() || 
-                                  !resForm.timeSlot || 
-                                  timeValidation !== 'valid'
-                                } 
-                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
-                              >
-                                Proceed to Payment <ArrowRight size={14} />
-                              </button>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
-
 
               {/* Guest Tracking View */}
               {resTab === 'track' && (
@@ -1319,7 +1322,7 @@ export function HomePage() {
                               </div>
                             )}
 
-                            {/* 🟢 NEW: Refund Status Tracker */}
+                            {/* Refund Status Tracker */}
                             {r.status === 'cancelled' && r.refundStatus && (
                               <div className="mt-4 bg-neutral-950 border border-neutral-800 rounded-xl p-4">
                                 <h4 className="text-xs font-bold text-neutral-300 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -1492,7 +1495,6 @@ export function HomePage() {
                 <p className="text-neutral-400 max-w-sm mx-auto text-sm">Join our exclusive tournaments, leagues, and special events.</p>
               </div>
 
-              {/* 🟢 NEW: Separation of Upcoming and Past Events */}
               {upcomingEvents.length > 0 && (
                 <div className="mb-10">
                   <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-4 flex items-center gap-2">
@@ -1637,13 +1639,29 @@ export function HomePage() {
                 <form onSubmit={handleFeedbackSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-5">
                   <div className="flex items-center gap-2 mb-1"><Mail className="text-sky-400" size={18} /><p className="text-sm font-semibold text-white">Direct Message to Management</p></div>
                   <div><label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label><input type="text" value={feedbackForm.name} onChange={e => setFeedbackForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1.5">Contact Information <span className="text-rose-500">*</span></label><input type="text" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value }))} placeholder="Email or Phone Number" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* 🟢 FIXED: Contact number is strictly digits and limited to 13 characters */}
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label><input type="tel" inputMode="numeric" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="e.g. 09123456789" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
+                    
+                    {/* 🟢 NEW: Optional Reservation ID input */}
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label><input type="text" value={feedbackForm.reservationId} onChange={e => setFeedbackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 font-mono tracking-widest uppercase" /></div>
+                  </div>
                   <div>
                     <label className="block text-xs text-neutral-400 mb-1.5">Type of Feedback <span className="text-rose-500">*</span></label>
                     <div className="relative"><select value={feedbackForm.type} onChange={e => setFeedbackForm(f => ({ ...f, type: e.target.value }))} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 appearance-none"><option value="" disabled>Select a category...</option><option value="compliment">Compliment</option><option value="suggestion">Suggestion</option><option value="complaint">Concern / Complaint</option><option value="lost_item">Lost Item</option><option value="other">Other</option></select><ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" /></div>
                   </div>
+
+                  {/* 🟢 FIXED: Drops down a mandatory text input when "Other" is selected */}
+                  {feedbackForm.type === 'other' && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden">
+                      <label className="block text-xs text-neutral-400 mb-1.5">Please Specify <span className="text-rose-500">*</span></label>
+                      <input type="text" value={feedbackForm.customType} onChange={e => setFeedbackForm(f => ({ ...f, customType: e.target.value }))} placeholder="e.g. Partnership Inquiry" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" />
+                    </motion.div>
+                  )}
+
                   <div><label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label><textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none" /></div>
-                  <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 text-white py-3 rounded-xl text-sm font-semibold">Submit Feedback</button>
+                  <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 text-white py-3 rounded-xl text-sm font-semibold">Submit Feedback</button>
                 </form>
               )}
             </motion.div>
@@ -1705,7 +1723,6 @@ export function HomePage() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {/* 🟢 NEW: First-Time Registration Modal */}
         {showRegPromoModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-8 w-full max-w-md shadow-2xl relative overflow-hidden">

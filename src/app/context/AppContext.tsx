@@ -138,6 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
+  const [feedback, setFeedback] = useState<Feedback[]>([]);
 
   const refreshLiveMonitor = async () => {
     try {
@@ -282,7 +283,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
-    supabase.from('feedback').insert([newFeedback]).then(({ error }) => {
+    
+    // 🟢 FIXED: Strip the 'rating' key so Supabase doesn't reject the payload
+    const { rating, ...supabasePayload } = newFeedback;
+
+    supabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
       if (error) console.error("Error inserting feedback to Supabase:", error);
     });
   };

@@ -236,9 +236,24 @@ export function HomePage() {
   try {
     const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
     if (Array.isArray(parsedImages) && parsedImages.length > 0) {
-      heroSlides = parsedImages.map((url: string) => ({ src: url, alt: 'One Shot Facility View' }));
+      heroSlides = parsedImages.map((url: string) => {
+        // 🟢 FIXED: If running on Vercel, swap inaccessible localhost images with a stock fallback
+        const isLocalUrl = url.includes('localhost');
+        const isVercel = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+        return { 
+          src: (isVercel && isLocalUrl) ? 'https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80' : url, 
+          alt: 'One Shot Facility View' 
+        };
+      });
     }
   } catch (e) {}
+
+  // 🟢 FIXED: Apply the same Vercel fallback rule to the About Us image
+  const cmsAboutImage = siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
+  const isVercelEnvironment = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+  const safeAboutImage = (isVercelEnvironment && cmsAboutImage.includes('localhost')) 
+    ? "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80" 
+    : cmsAboutImage;
 
   const cms = {
     heroTitle: siteConfig?.heroTitle || 'One Shot',
@@ -248,7 +263,7 @@ export function HomePage() {
     aboutP1: siteConfig?.aboutP1 || 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
     aboutP2: siteConfig?.aboutP2 || 'Our 10 tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
     aboutP3: siteConfig?.aboutP3 || 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
-    aboutImage: siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80",
+    aboutImage: safeAboutImage,
     address: siteConfig?.address || 'Autobase OAX, San Juan, Cainta, Rizal 1900',
     phone: siteConfig?.phone || '0917-123-4567 | 0998-765-4321',
     email: siteConfig?.email || 'oneshot.billiards@gmail.com',

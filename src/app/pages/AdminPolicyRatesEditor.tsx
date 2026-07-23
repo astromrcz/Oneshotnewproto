@@ -178,7 +178,7 @@ export default function AdminPolicyRatesEditor() {
         </div>
         <div className="flex items-center gap-3">
           <button type="button" onClick={refreshFromDB} className={`px-4 py-2 rounded-lg border ${isRefreshing ? 'bg-neutral-800/60 border-emerald-600 text-emerald-500' : 'bg-neutral-900 border-neutral-800 text-neutral-300'}`}>
-            {isRefreshing ? 'Refreshing…' : 'Refresh from DB'}
+            {isRefreshing ? 'Refreshing…' : 'Refresh'}
           </button>
           <button type="button" onClick={handleReviewChanges} className="bg-emerald-600 hover:bg-emerald-500 text-neutral-100 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors">
             <Save size={20} /> Save Changes

@@ -20,10 +20,9 @@ const PORT = 3001;
 
 // 🟢 NEW: Define your Supabase credentials (replace with your actual strings)
 const SUPABASE_URL = 'https://bqnswmjopwmvunzchqzl.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_7t0VexQXO8D0Gqk0n4StIg_IeVefuXa';
-
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 // Initialize your cloud connection 
-const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // 🟢 Phase 4: The Dead Man's Switch Heartbeat
 setInterval(async () => {
@@ -305,14 +304,15 @@ app.post('/api/sync-to-cloud', async (req, res) => {
       });
     };
 
+    // 🟢 FIXED: Push ALL admin-configured tables to Supabase with strict Integer/Null type safety
     await Promise.all([
       syncTable('cms', 'cms_content', r => ({ key_name: r.keyName, content_value: r.settingValue }), 'key_name'),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
-      syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive === 1, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
-      syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: r.is_active === 1, is_limited_uses: r.is_limited_uses === 1, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date, expires_at: r.expires_at }), 'id'),
-      syncTable('events', 'events', r => ({ id: r.id, title: r.title, date: r.date, type: r.type, description: r.description, registrationLink: r.registrationLink, maxParticipants: r.maxParticipants, slotsFull: r.slotsFull === 1, attachments: r.attachments, allowReservations: r.allowReservations === 1, caterWalkIns: r.caterWalkIns === 1, walkInTableCount: r.walkInTableCount }), 'id'),
-      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: r.is_full_day === 1, open_time: r.open_time, close_time: r.close_time }), 'id'),
-      syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive === 1 }), 'id')
+      syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
+      syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: r.is_active ? 1 : 0, is_limited_uses: r.is_limited_uses ? 1 : 0, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
+      syncTable('events', 'events', r => ({ id: r.id, title: r.title, date: r.date || null, type: r.type, description: r.description, registrationLink: r.registrationLink, maxParticipants: r.maxParticipants, slotsFull: r.slotsFull ? 1 : 0, attachments: r.attachments, allowReservations: r.allowReservations !== 0 ? 1 : 0, caterWalkIns: r.caterWalkIns !== 0 ? 1 : 0, walkInTableCount: r.walkInTableCount }), 'id'),
+      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: r.is_full_day ? 1 : 0, open_time: r.open_time, close_time: r.close_time }), 'id'),
+      syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id')
     ]);
 
     // 🟢 FIXED: Bubble the errors up to the React Frontend so you can see them!

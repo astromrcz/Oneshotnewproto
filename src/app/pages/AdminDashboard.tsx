@@ -60,16 +60,29 @@ export function AdminDashboard() {
   };
 
   const handleManualSync = async () => {
+    // 🟢 FIXED: Prevent Mixed Content Crash. Vercel cannot pull from Localhost.
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+      toast.error("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", { duration: 6000 });
+      return;
+    }
+
     setIsSyncing(true);
     toast.loading("Uploading local data to cloud...", { id: 'cloud-sync' });
     try {
-      // Added artificial delay to allow visual feedback
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const res = await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.details || 'Supabase rejected the sync payload.');
+      }
+
       if (refreshLiveMonitor) await refreshLiveMonitor();
       setLastSync(new Date());
       toast.success("Database successfully backed up to Cloud.", { id: 'cloud-sync' });
-    } catch (e) {
-      toast.error("Failed to synchronize database.", { id: 'cloud-sync' });
+      
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Sync Failed: ${e.message}`, { id: 'cloud-sync', duration: 6000 });
     } finally {
       setIsSyncing(false);
     }

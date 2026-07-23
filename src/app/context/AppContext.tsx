@@ -305,23 +305,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setReservationTerms(prev => ({ ...prev, ...dbSettings }));
         }
 
-        // Fallback: If local fetch fails (e.g. on Vercel), fetch critical public data directly from Supabase
+       // Fallback: If local fetch fails (e.g. on Vercel), fetch critical public data directly from Supabase
         if (!isLocalActive) {
-          const [ { data: tablesData }, { data: resData }, { data: annData }, { data: cmsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData } ] = await Promise.all([
-            supabase.from('tables').select('*'), supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), supabase.from('cms').select('*'), supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), supabase.from('events').select('*')
+          const [ { data: tablesData }, { data: resData }, { data: annData }, { data: cmsData }, { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData } ] = await Promise.all([
+            supabase.from('tables').select('*'), 
+            supabase.from('reservations').select('*'), 
+            supabase.from('announcements').select('*'), 
+            supabase.from('cms_content').select('*'), 
+            supabase.from('system_settings').select('*'), // 🟢 FIXED: Actually fetching the rates now
+            supabase.from('closed_dates').select('*'), 
+            supabase.from('promo_codes').select('*'), 
+            supabase.from('events').select('*')
           ]);
+          
           if (tablesData) setTables(tablesData as Table[]);
           if (resData) setReservations(resData as Reservation[]);
           if (annData) setAnnouncements(annData as Announcement[]);
-          if (closedDatesData) setClosedDates(closedDatesData as ClosedDate[]);
-          if (promoData) setPromoCodes(promoData as PromoCode[]);
-          if (eventsData) setEvents(eventsData as Event[]);
+          
+          // 🟢 FIXED: Safely map snake_case from Supabase into the camelCase the UI expects
+          if (promoData) {
+            setPromoCodes((promoData as any[]).map(r => ({
+              id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description,
+              isActive: !!r.is_active, isLimitedUses: !!r.is_limited_uses, maxUsage: r.max_usage,
+              usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at
+            })) as PromoCode[]);
+          }
+          if (closedDatesData) {
+            setClosedDates((closedDatesData as any[]).map(r => ({
+              id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week,
+              reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time
+            })) as ClosedDate[]);
+          }
+          if (eventsData) {
+             setEvents((eventsData as any[]).map(e => ({
+                ...e, 
+                slotsFull: !!e.slotsFull, 
+                allowReservations: e.allowReservations !== false,
+                caterWalkIns: e.caterWalkIns !== false,
+                walkInTableCount: e.walkInTableCount ?? 10,
+                attachments: e.attachments ? [e.attachments] : []
+             })) as Event[]);
+          }
           if (cmsData) {
-            const configObj = cmsData.reduce((acc: any, curr: any) => { acc[curr.keyName] = curr.settingValue; return acc; }, {});
+            const configObj = cmsData.reduce((acc: any, curr: any) => { acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue; return acc; }, {});
             setSiteConfig(configObj);
           }
+          if (settingsData) {
+            const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
+              let val = curr.setting_value || curr.settingValue;
+              if (val === 'true') val = true;
+              else if (val === 'false') val = false;
+              else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
+              acc[curr.key_name || curr.keyName] = val; 
+              return acc; 
+            }, {});
+            setRates(prev => ({ ...prev, ...settingsObj }));
+            setReservationTerms(prev => ({ ...prev, ...settingsObj }));
+          }
         }
-      } catch (err) { } 
+      } catch (err) { }
       
       setTimeout(() => setIsInitializing(false), 800);
     };

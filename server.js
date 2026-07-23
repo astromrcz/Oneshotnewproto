@@ -273,47 +273,54 @@ app.get('/api/watchlist', (req, res) => {
 // ==========================================
 // 📥 WRITE ROUTES (POST/PUT/DELETE) 
 // ==========================================
+
+
 // ==========================================
 // ☁️ CLOUD SYNC ROUTE (Triggered by Admin Saves)
 // ==========================================
 app.post('/api/sync-to-cloud', async (req, res) => {
-  console.log('☁️ Initiating forced cloud sync for Vercel...');
+  console.log('☁️ Initiating forced cloud backup for Vercel...');
   
+  let syncErrors = [];
+
   try {
-    // 1. Sync CMS (Site Settings)
-    db.all(`SELECT keyName, settingValue FROM cms`, [], async (err, rows) => {
-      if (err) return console.error('Local CMS read error:', err.message);
-      if (rows && rows.length > 0) {
-        // Formats local SQLite data to match your Supabase schema
-        const payload = rows.map(r => ({ key_name: r.keyName, content_value: r.settingValue }));
-        
-        const { error } = await supabase
-          .from('cms_content')
-          .upsert(payload, { onConflict: 'key_name' });
+    const syncTable = (localTable, cloudTable, mapFn, conflictKey = 'id') => {
+      return new Promise((resolve) => {
+        db.all(`SELECT * FROM ${localTable}`, [], async (err, rows) => {
+          if (err || !rows || rows.length === 0) return resolve();
           
-        if (error) console.error('❌ Supabase CMS Sync Error:', error.message);
-        else console.log('✅ CMS synced to cloud.');
-      }
-    });
-
-    // 2. Sync System Settings (Policy & Rates)
-    db.all(`SELECT keyName, settingValue FROM systemSettings`, [], async (err, rows) => {
-      if (err) return console.error('Local Rates read error:', err.message);
-      if (rows && rows.length > 0) {
-        // Formats local SQLite data to match your Supabase schema
-        const payload = rows.map(r => ({ key_name: r.keyName, setting_value: r.settingValue }));
-        
-        const { error } = await supabase
-          .from('system_settings')
-          .upsert(payload, { onConflict: 'key_name' });
+          const payload = rows.map(mapFn);
           
-        if (error) console.error('❌ Supabase Rates Sync Error:', error.message);
-        else console.log('✅ Policy & Rates synced to cloud.');
-      }
-    });
+          // 🟢 FIXED: Added onConflict parameters so Supabase knows how to overwrite data safely
+          const { error } = await supabase.from(cloudTable).upsert(payload, { onConflict: conflictKey });
+          
+          if (error) {
+            console.error(`❌ Supabase ${cloudTable} Sync Error:`, error.message);
+            syncErrors.push(`${cloudTable} failed: ${error.message}`);
+          } else {
+            console.log(`✅ ${localTable} synced to cloud.`);
+          }
+          resolve();
+        });
+      });
+    };
 
-    // Send immediate response back to frontend so the UI doesn't hang
-    res.status(200).json({ message: 'Cloud sync dispatched successfully.' });
+    await Promise.all([
+      syncTable('cms', 'cms_content', r => ({ key_name: r.keyName, content_value: r.settingValue }), 'key_name'),
+      syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
+      syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive === 1, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
+      syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: r.is_active === 1, is_limited_uses: r.is_limited_uses === 1, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date, expires_at: r.expires_at }), 'id'),
+      syncTable('events', 'events', r => ({ id: r.id, title: r.title, date: r.date, type: r.type, description: r.description, registrationLink: r.registrationLink, maxParticipants: r.maxParticipants, slotsFull: r.slotsFull === 1, attachments: r.attachments, allowReservations: r.allowReservations === 1, caterWalkIns: r.caterWalkIns === 1, walkInTableCount: r.walkInTableCount }), 'id'),
+      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: r.is_full_day === 1, open_time: r.open_time, close_time: r.close_time }), 'id'),
+      syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive === 1 }), 'id')
+    ]);
+
+    // 🟢 FIXED: Bubble the errors up to the React Frontend so you can see them!
+    if (syncErrors.length > 0) {
+      res.status(500).json({ error: 'Supabase rejected some tables', details: syncErrors.join(' | ') });
+    } else {
+      res.status(200).json({ message: 'Cloud sync dispatched successfully.' });
+    }
 
   } catch (err) {
     console.error('❌ Critical Cloud Sync Failure:', err);

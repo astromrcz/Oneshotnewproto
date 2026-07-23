@@ -2,7 +2,7 @@ import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router';
 import {
   TableProperties, Users, Calendar, TrendingUp,
-  AlertTriangle, Clock, ChevronRight, CheckCircle2, CloudRain, Sun, Cloud
+  AlertTriangle, Clock, ChevronRight, CheckCircle2, CloudRain, Sun, Cloud, ShieldAlert
 } from 'lucide-react';
 import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isFuture } from 'date-fns';
 
@@ -31,10 +31,12 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
 }
 
 export function OverviewDashboard() {
-  const { tables, queue, reservations, weather } = useAppContext();
+  const { tables, queue, reservations, weather, watchlist } = useAppContext() as any;
   const navigate = useNavigate();
 
-  const available = tables.filter(t => t.isActive && t.status === 'available').length;
+  const activeWatchlist = watchlist?.filter((w: any) => w.status === 'active' && !w.isArchived) || [];
+
+  const available = tables.filter((t: any) => t.isActive && t.status === 'available').length;
   const occupied = tables.filter(t => t.isActive && t.status === 'occupied').length;
   const reserved = tables.filter(t => t.isActive && t.status === 'reserved').length;
   const waiting = queue.filter(q => q.status === 'waiting').length;
@@ -220,10 +222,10 @@ export function OverviewDashboard() {
             </div>
           ))}
         </div>
-      </div>
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Upcoming Reservations */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Upcoming Reservations */}
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
@@ -303,6 +305,41 @@ export function OverviewDashboard() {
             </div>
           )}
         </div>
+
+        {/* Watchlist Snapshot */}
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
+              <ShieldAlert size={15} className="text-rose-500" /> Security Watchlist
+              {activeWatchlist.length > 0 && <span className="bg-rose-500 text-white text-[10px] font-black rounded-full px-2 py-0.5 flex items-center justify-center">{activeWatchlist.length}</span>}
+            </h2>
+            <button onClick={() => navigate('/staff/watchlist')} className="text-xs text-rose-500 hover:text-rose-400 flex items-center gap-1 font-semibold">
+              Manage <ChevronRight size={12} />
+            </button>
+          </div>
+          {activeWatchlist.length === 0 ? (
+            <div className="flex items-center gap-2 py-2">
+              <CheckCircle2 size={16} className="text-emerald-500" />
+              <p className="text-sm text-neutral-500">No active security alerts</p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {activeWatchlist.slice(0, 4).map((w: any) => (
+                <div key={w.id} className="flex flex-col gap-1 bg-rose-950/20 rounded-lg px-3 py-2.5 border border-rose-900/30">
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm font-bold text-rose-400 truncate pr-2">{w.name}</p>
+                    <span className="text-[9px] uppercase tracking-wider font-bold bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded flex-shrink-0">{w.reason}</span>
+                  </div>
+                  <p className="text-xs text-neutral-400 line-clamp-1">{w.description}</p>
+                </div>
+              ))}
+              {activeWatchlist.length > 4 && (
+                <p className="text-xs text-rose-500/70 pl-2">+{activeWatchlist.length - 4} more flagged</p>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

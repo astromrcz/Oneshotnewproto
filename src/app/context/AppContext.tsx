@@ -265,8 +265,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       date: newRes.date.toISOString(), 
       createdAt: newRes.createdAt.toISOString(),
       downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-      balancePaid: newRes.balancePaid ? 1 : 0,
-      receiptImg: null 
+      balancePaid: newRes.balancePaid ? 1 : 0
+      // 🟢 FIXED: Removed "receiptImg: null" so the cloud URL is preserved
     };
 
     supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../utils/supabase';
 import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay, isSameDay } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
@@ -226,6 +227,7 @@ export function HomePage() {
   const [confirmingPayment, setConfirmingPayment] = useState(false);
   const [paymentRef, setPaymentRef] = useState('');
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPercent: number } | null>(null);
   const [promoError, setPromoError] = useState('');
@@ -589,14 +591,37 @@ export function HomePage() {
     setReservationStep(2);
   };
 
-  const handlePaymentConfirm = () => {
+  // 🟢 FIXED: Converted to async to handle the cloud upload before saving the reservation
+  const handlePaymentConfirm = async () => {
     if (reservations.some((r: any) => r.paymentRef === paymentRef)) {
       alert("This GCash reference number has already been recorded in our system. Please verify your transaction and enter a valid, unique reference number.");
       return;
     }
 
     setConfirmingPayment(true);
-    setTimeout(() => {
+    
+    try {
+      let finalReceiptUrl = null;
+
+      // 1. Upload the receipt to Supabase Storage
+      if (receiptFile) {
+        const fileExt = receiptFile.name.split('.').pop();
+        const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('oneshot-assets')
+          .upload(fileName, receiptFile);
+          
+        if (uploadError) throw uploadError;
+        
+        const { data: publicUrlData } = supabase.storage
+          .from('oneshot-assets')
+          .getPublicUrl(fileName);
+          
+        finalReceiptUrl = publicUrlData.publicUrl;
+      }
+
+      // 2. Save the reservation with the secure cloud URL
       const reservationDate = new Date(selectedDate!);
       const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
       reservationDate.setHours(hours, minutes, 0, 0);
@@ -618,14 +643,19 @@ export function HomePage() {
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
         paymentRef: paymentRef,
-        receiptImg: receiptImg, 
+        receiptImg: finalReceiptUrl, // 🟢 FIXED: Passes the live Supabase URL
       });
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
       setConfirmingPayment(false);
       try { localStorage.removeItem(RES_DRAFT_KEY); } catch (e) {}
       setReservationStep(3);
-    }, 1500);
+
+    } catch (error) {
+      console.error("Payment Confirmation Error:", error);
+      alert("Failed to upload receipt. Please try again.");
+      setConfirmingPayment(false);
+    }
   };
 
   const closeReservation = () => {
@@ -1797,8 +1827,14 @@ export function HomePage() {
                       <label className="block text-xs text-neutral-400 mb-1.5">Upload Receipt Screenshot <span className="text-rose-500">*</span></label>
                       <div className="flex items-center gap-3">
                         <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 hover:border-blue-500 rounded-lg px-3 py-3 text-center transition-colors flex flex-col items-center justify-center gap-1">
-                          <input type="file" accept="image/*" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) setReceiptImg(URL.createObjectURL(file)); }} />
-                          <Upload size={14} className="text-neutral-500" />
+                          <input type="file" accept="image/*" className="hidden" onChange={e => { 
+                            const file = e.target.files?.[0]; 
+                            if (file) {
+                              setReceiptImg(URL.createObjectURL(file)); 
+                              setReceiptFile(file);
+                            } 
+                          }} />
+                            <Upload size={14} className="text-neutral-500" />
                           <span className="text-[10px] text-neutral-400">{receiptImg ? 'Change Image' : 'Tap to upload'}</span>
                         </label>
                         {receiptImg && <div className="w-14 h-14 rounded-lg border border-neutral-700 overflow-hidden flex-shrink-0 bg-neutral-900"><img src={receiptImg} alt="Receipt" className="w-full h-full object-cover" /></div>}

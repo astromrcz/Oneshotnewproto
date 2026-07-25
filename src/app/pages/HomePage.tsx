@@ -823,9 +823,9 @@ export function HomePage() {
                             </div>
                             <div className="flex items-start gap-2">
                               {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 flex-shrink-0" />}
-                              <div>
-                                <p className={`text-sm font-bold mb-1 ${isUnread ? 'text-white' : 'text-neutral-300'}`}>{n.title}</p>
-                                <p className="text-xs text-neutral-400 leading-relaxed">{n.content}</p>
+                              <div className="min-w-0 flex-1">
+                                <p className={`text-sm font-bold mb-1 truncate ${isUnread ? 'text-white' : 'text-neutral-300'}`} title={n.title}>{n.title}</p>
+                                <p className="text-xs text-neutral-400 leading-relaxed line-clamp-3">{n.content}</p>
                               </div>
                             </div>
                           </div>
@@ -842,9 +842,9 @@ export function HomePage() {
 
           {currentUser ? (
             <div className="flex items-center gap-2">
-              <button onClick={() => setShowProfileModal(true)} className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/25 rounded-full px-3 py-1.5 hover:bg-emerald-600/20 transition-colors">
-                <div className="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[9px] font-black text-white">{currentUser.name[0]}</div>
-                <span className="text-xs text-emerald-300 font-medium hidden sm:block">{currentUser.name}</span>
+              <button onClick={() => setShowProfileModal(true)} className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/25 rounded-full px-3 py-1.5 hover:bg-emerald-600/20 transition-colors max-w-[150px]">
+                <div className="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[9px] font-black text-white flex-shrink-0">{currentUser.name[0]}</div>
+                <span className="text-xs text-emerald-300 font-medium hidden sm:block truncate">{currentUser.name}</span>
               </button>
               <button onClick={() => { setCurrentUser(null); setTrackedReservations(null); }} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-2 py-1.5 transition-colors">Logout</button>
             </div>
@@ -908,10 +908,10 @@ export function HomePage() {
 
                 <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 px-6 text-center z-10 pointer-events-none">
                   <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center pointer-events-auto">
-                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">{cms.heroTitle}</p>
-                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight">{cms.heroTitle}</h1>
-                    <p className="text-emerald-300 text-xl font-light mb-5">{cms.heroSubtitle}</p>
-                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed">{cms.heroDescription}</p>
+                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3 truncate max-w-[90vw]">{cms.heroTitle}</p>
+                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight line-clamp-2 max-w-[90vw]">{cms.heroTitle}</h1>
+                    <p className="text-emerald-300 text-xl font-light mb-5 line-clamp-2 max-w-[90vw]">{cms.heroSubtitle}</p>
+                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed line-clamp-4">{cms.heroDescription}</p>
                     
                     <div className="flex flex-wrap justify-center gap-3 mb-6">
                       <button onClick={() => setActiveSection('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-900/40 hover:shadow-emerald-800/60">
@@ -1168,12 +1168,12 @@ export function HomePage() {
                               </div>
                               <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
                                 {!isPreferredTableExpanded ? (
-                                  <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2">
-                                    <div>
-                                      <p className="text-xs font-semibold text-neutral-200">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
-                                      <p className="text-[10px] text-neutral-500">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
+                                  <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2 gap-3">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-semibold text-neutral-200 truncate">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
+                                      <p className="text-[10px] text-neutral-500 truncate">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
                                     </div>
-                                    <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors">Expand</button>
+                                    <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors flex-shrink-0">Expand</button>
                                   </div>
                                 ) : (
                                   <>
@@ -1558,10 +1558,13 @@ export function HomePage() {
                         )}
                         <div className="p-6 relative z-10 flex-1 flex flex-col">
                           <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center mb-4">
-                            <div><span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2.5 py-1 rounded-md mb-2 inline-block">{event.type}</span><h3 className="text-xl font-bold text-neutral-100 mb-1">{event.title}</h3></div>
+                            <div className="min-w-0 flex-1">
+                              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2.5 py-1 rounded-md mb-2 inline-block truncate max-w-full">{event.type}</span>
+                              <h3 className="text-xl font-bold text-neutral-100 mb-1 line-clamp-2" title={event.title}>{event.title}</h3>
+                            </div>
                             <div className="text-left sm:text-right shrink-0"><p className="text-sm font-black text-emerald-500 bg-emerald-950/30 border border-emerald-900/50 px-3 py-1 rounded-lg">{new Date(event.date.split(',')[0]).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p></div>
                           </div>
-                          <p className="text-sm text-neutral-400 mb-6 leading-relaxed flex-1">{event.description}</p>
+                          <p className="text-sm text-neutral-400 mb-6 leading-relaxed flex-1 line-clamp-4">{event.description}</p>
                           <div className="flex items-center justify-between border-t border-neutral-800/60 pt-4 mt-auto">
                             <div className="text-xs text-neutral-500 font-medium">{event.maxParticipants ? (event.slotsFull ? <span className="text-rose-400 font-bold bg-rose-950/30 px-2 py-1 rounded">Sold Out</span> : <span>Max {event.maxParticipants} participants</span>) : <span>Open to all</span>}</div>
                             {event.registrationLink ? <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-white text-black font-semibold px-4 py-2.5 rounded-full hover:bg-neutral-200 flex items-center gap-1.5">Register Now <ExternalLink size={12} strokeWidth={2.5} /></a> : <div className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">No Registration Required</div>}
@@ -1638,15 +1641,15 @@ export function HomePage() {
                   <div className="space-y-4">
                     <div className="bg-neutral-900 border border-neutral-800 hover:border-emerald-600/30 rounded-xl p-5 transition-all flex gap-4">
                        <div className="w-10 h-10 rounded-xl bg-emerald-600/10 border border-emerald-600/20 flex items-center justify-center flex-shrink-0"><MapPin size={16} className="text-emerald-400" /></div>
-                       <div><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Address</p><p className="text-sm text-neutral-200 whitespace-pre-line">{cms.address}</p></div>
+                       <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Address</p><p className="text-sm text-neutral-200 whitespace-pre-line break-words line-clamp-3">{cms.address}</p></div>
                     </div>
                     <div className="bg-neutral-900 border border-neutral-800 hover:border-sky-600/30 rounded-xl p-5 transition-all flex gap-4">
                        <div className="w-10 h-10 rounded-xl bg-sky-600/10 border border-sky-600/20 flex items-center justify-center flex-shrink-0"><Phone size={16} className="text-sky-400" /></div>
-                       <div><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Phone / Viber</p><p className="text-sm text-neutral-200 whitespace-pre-line">{cms.phone}</p></div>
+                       <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Phone / Viber</p><p className="text-sm text-neutral-200 whitespace-pre-line break-words line-clamp-2">{cms.phone}</p></div>
                     </div>
                     <div className="bg-neutral-900 border border-neutral-800 hover:border-violet-600/30 rounded-xl p-5 transition-all flex gap-4">
                        <div className="w-10 h-10 rounded-xl bg-violet-600/10 border border-violet-600/20 flex items-center justify-center flex-shrink-0"><Mail size={16} className="text-violet-400" /></div>
-                       <div><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Email</p><p className="text-sm text-neutral-200">{cms.email}</p></div>
+                       <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Email</p><p className="text-sm text-neutral-200 truncate">{cms.email}</p></div>
                     </div>
                   </div>
                   <div className="space-y-4">

@@ -1724,10 +1724,7 @@ export function HomePage() {
               {cms.address} · Mon–Thu {fmt12(rates?.weekdayStartTime || '12:00')}–{fmt12(rates?.weekdayEndTime || '02:00')} · Fri–Sun {fmt12(rates?.weekendStartTime || '12:00')}–{fmt12(rates?.weekendEndTime || '02:00')}
             </p>
 
-            <div className="flex justify-center gap-4 border-t border-neutral-800/60 pt-4 mt-4">
-              <button onClick={() => { adminLogin('admin', 'admin123'); navigate('/admin'); }} className="text-[10px] text-neutral-600 hover:text-amber-400 transition-colors">Admin Login</button>
-              <button onClick={() => { staffLogin('staff', 'staff123'); navigate('/staff'); }} className="text-[10px] text-neutral-600 hover:text-emerald-400 transition-colors">Staff Login</button>
-            </div>
+            
             <p className="text-neutral-700 text-[10px]">© 2026 One Shot Bar & Billiards. All rights reserved.</p>
           </div>
         </footer>

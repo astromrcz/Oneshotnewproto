@@ -41,7 +41,6 @@ export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'comple
 
 export type Reservation = {
   id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
-  // 🟢 NEW: Refund Tracking
   refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
   refundMethod?: 'gcash' | 'cash' | 'session_credit';
   refundNotes?: string;
@@ -115,7 +114,7 @@ type AppContextType = {
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; 
   applyPromoCode: (c: string) => PromoCode | null;
   refreshLiveMonitor: () => Promise<void>;
-  acknowledgeRefund: (id: string) => void; // 🟢 NEW: Added refund acknowledgment
+  acknowledgeRefund: (id: string) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -140,6 +139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
 
+  // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions
   const refreshLiveMonitor = async () => {
     try {
       const [ { data: newTables }, { data: newQueue } ] = await Promise.all([
@@ -148,15 +148,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ]);
       
       if (newTables) {
-        setTables(prev => JSON.stringify(prev) !== JSON.stringify(newTables) ? newTables as Table[] : prev);
+        const mappedTables = newTables.map((t: any) => ({
+          ...t,
+          session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
+          isActive: t.isActive === 1 || t.isActive === true
+        }));
+        setTables(prev => JSON.stringify(prev) !== JSON.stringify(mappedTables) ? mappedTables as Table[] : prev);
       }
       if (newQueue) {
-        setQueue(prev => JSON.stringify(prev) !== JSON.stringify(newQueue) ? newQueue as QueueItem[] : prev);
+        const mappedQueue = newQueue.map((q: any) => ({
+          ...q,
+          customerName: q.customerName || q.customer_name,
+          partySize: q.partySize || q.party_size,
+          arrivalTime: q.arrivalTime || q.arrival_time,
+          queueNumber: q.queueNumber || q.queue_number,
+        }));
+        setQueue(prev => JSON.stringify(prev) !== JSON.stringify(mappedQueue) ? mappedQueue as QueueItem[] : prev);
       }
     } catch (error) {
       console.error("Live Monitor Refresh Error:", error);
     }
   };
+
+  // 🟢 NEW: Auto-refresh loop so the customer website stays in sync
+  useEffect(() => {
+    if (isInitializing) return;
+    const interval = setInterval(() => {
+      refreshLiveMonitor();
+    }, 5000); // Check Supabase every 5 seconds
+    return () => clearInterval(interval);
+  }, [isInitializing]);
 
   useEffect(() => {
     const fetchSupabaseData = async () => {
@@ -167,7 +188,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { data: queueData },
           { data: annData },
           { data: cmsData },
-          { data: settingsData }, // 🟢 FIXED: Added settings fetch
+          { data: settingsData }, 
           { data: closedDatesData },
           { data: promoData },
           { data: eventsData }
@@ -177,15 +198,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
           supabase.from('queue').select('*'),
           supabase.from('announcements').select('*'),
           supabase.from('cms').select('*'),
-          supabase.from('system_settings').select('*'), // 🟢 FIXED: Fetching from system_settings
+          supabase.from('system_settings').select('*'), 
           supabase.from('closed_dates').select('*'),
           supabase.from('promo_codes').select('*'),
           supabase.from('events').select('*')
         ]);
         
-        if (tablesData) setTables(tablesData as Table[]);
+        if (tablesData) {
+          setTables(tablesData.map((t: any) => ({
+            ...t,
+            session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
+            isActive: t.isActive === 1 || t.isActive === true
+          })) as Table[]);
+        }
         if (resData) setReservations(resData as Reservation[]);
-        if (queueData) setQueue(queueData as QueueItem[]);
+        if (queueData) {
+          setQueue(queueData.map((q: any) => ({
+            ...q,
+            customerName: q.customerName || q.customer_name,
+            partySize: q.partySize || q.party_size,
+            arrivalTime: q.arrivalTime || q.arrival_time,
+            queueNumber: q.queueNumber || q.queue_number,
+          })) as QueueItem[]);
+        }
         if (annData) setAnnouncements(annData as Announcement[]);
         if (closedDatesData) setClosedDates(closedDatesData as ClosedDate[]);
         if (promoData) setPromoCodes(promoData as PromoCode[]);
@@ -200,14 +235,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         if (cmsData) {
           const configObj = cmsData.reduce((acc: any, curr: any) => {
-            // Accommodate both snake_case and camelCase DB columns
             acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue;
             return acc;
           }, {});
           setSiteConfig(configObj);
         }
 
-        // 🟢 NEW: Process and map your rates/settings to the app
         if (settingsData) {
           const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
             let val = curr.setting_value || curr.settingValue;
@@ -284,7 +317,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createdAt: newRes.createdAt.toISOString(),
       downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
       balancePaid: newRes.balancePaid ? 1 : 0
-      // 🟢 FIXED: Removed "receiptImg: null" so the cloud URL is preserved
     };
 
     supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
@@ -302,7 +334,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
     
-    // 🟢 FIXED: Strip the 'rating' key so Supabase doesn't reject the payload
     const { rating, ...supabasePayload } = newFeedback;
 
     supabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
@@ -321,12 +352,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }) || null;
   };
 
-  // 🟢 NEW: Acknowledge Refund action for the customer
   const acknowledgeRefund = (id: string) => {
-    // Optimistic UI
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
-    
-    // Supabase update
     supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
       if (error) console.error("Error updating refund status:", error);
     });
@@ -350,7 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       tables, queue, reservations, promoCodes, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement, siteConfig, events,
       addReservation, addFeedback, applyPromoCode, refreshLiveMonitor,
-      acknowledgeRefund // 🟢 NEW
+      acknowledgeRefund
     }}>
       {children}
     </AppContext.Provider>

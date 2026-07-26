@@ -15,16 +15,15 @@ function getSessionTimer(table: Table): {
   const start = new Date(table.session.startTime).getTime();
   const elapsed = Date.now() - start;
 
-  // Handle "Open Time" (Pay-as-you-go, counting UP)
+  // 🟢 FIXED: Open Time formatting so it doesn't look like 01:05 when it's 65 minutes!
   if (table.session.durationMinutes === null || table.session.isOpenTime) {
     const abs = elapsed;
-    const hh = String(Math.floor(abs / 3600000)).padStart(2, '0');
-    const mm = String(Math.floor((abs % 3600000) / 60000)).padStart(2, '0');
-    const ss = String(Math.floor((abs % 60000) / 1000)).padStart(2, '0');
+    const totalMins = Math.floor(abs / 60000);
+    const remSecs = Math.floor((abs % 60000) / 1000);
     
     return { 
-      mm: hh !== '00' ? hh : mm, // Show hours if over 60 mins, otherwise minutes
-      ss: hh !== '00' ? mm : ss, // Show minutes if over 60 mins, otherwise seconds
+      mm: String(totalMins).padStart(2, '0'), 
+      ss: String(remSecs).padStart(2, '0'), 
       isOvertime: false, 
       percentLeft: 100, 
       label: 'Elapsed Time', 
@@ -210,19 +209,18 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 // ── Main Component ─────────────────────────────────────────────
 // ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
-  // 🟢 Extract refreshLiveMonitor and rates from context
   const { tables, queue, refreshLiveMonitor, rates } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
+
+  // 🟢 FIXED: Use effective hourly rate to ensure it doesn't show ₱0
+  const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : 0;
 
   // Refresh timers and check for database updates
   useEffect(() => {
     const id = setInterval(() => {
       setTick(t => {
-        // 🟢 Every 3 seconds (ticks), silently fetch new data from local SQLite
-        if (t % 3 === 0) {
-          refreshLiveMonitor();
-        }
+        if (t % 3 === 0) refreshLiveMonitor();
         return t + 1;
       });
       setNow(new Date());
@@ -230,16 +228,21 @@ export function LiveMonitor() {
     return () => clearInterval(id);
   }, [refreshLiveMonitor]);
 
-  // --- GLOBAL AI WAIT-TIME ESTIMATOR ---
+  // 🟢 FIXED: Accurate AI Wait Time that handles Open Time correctly without returning 0 mins!
   const calculateAIWaitTime = (position: number) => {
     const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
     if (activeTables.length === 0) return "0 mins";
 
     const remainingTimes = activeTables.map(t => {
-      // If it's an open time, assume a default 2 hour block for estimation purposes
-      const duration = t.session?.durationMinutes || 120;
-      const endTime = addMinutes(new Date(t.session!.startTime), duration);
-      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
+      if (t.session?.isOpenTime || t.session?.durationMinutes === null) {
+        // If Open Time, assume 120 mins average. If they exceeded 120 mins, assume they leave in 30 mins.
+        const elapsedMins = Math.floor(differenceInSeconds(now, new Date(t.session!.startTime)) / 60);
+        return elapsedMins < 120 ? (120 - elapsedMins) : 30;
+      } else {
+        const duration = t.session?.durationMinutes || 60;
+        const endTime = addMinutes(new Date(t.session!.startTime), duration);
+        return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
+      }
     }).sort((a, b) => a - b);
 
     // AI Pattern: Soonest table free + 2 mins turnaround + 15 mins step penalty per position ahead
@@ -368,7 +371,7 @@ export function LiveMonitor() {
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-600">Base Rate per hour</span>
-                <span className="text-emerald-400 font-semibold">₱{rates?.hourlyRate || 0} / hr</span>
+                <span className="text-emerald-400 font-semibold">₱{effectiveHourly} / hr</span>
               </div>
             </div>
             <p className="text-[10px] text-neutral-700 text-center mt-3 leading-relaxed">

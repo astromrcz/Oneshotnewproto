@@ -167,6 +167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { data: queueData },
           { data: annData },
           { data: cmsData },
+          { data: settingsData }, // 🟢 FIXED: Added settings fetch
           { data: closedDatesData },
           { data: promoData },
           { data: eventsData }
@@ -176,6 +177,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           supabase.from('queue').select('*'),
           supabase.from('announcements').select('*'),
           supabase.from('cms').select('*'),
+          supabase.from('system_settings').select('*'), // 🟢 FIXED: Fetching from system_settings
           supabase.from('closed_dates').select('*'),
           supabase.from('promo_codes').select('*'),
           supabase.from('events').select('*')
@@ -198,10 +200,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         if (cmsData) {
           const configObj = cmsData.reduce((acc: any, curr: any) => {
-            acc[curr.keyName] = curr.settingValue;
+            // Accommodate both snake_case and camelCase DB columns
+            acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue;
             return acc;
           }, {});
           setSiteConfig(configObj);
+        }
+
+        // 🟢 NEW: Process and map your rates/settings to the app
+        if (settingsData) {
+          const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
+            let val = curr.setting_value || curr.settingValue;
+            if (val === 'true') val = true;
+            else if (val === 'false') val = false;
+            else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
+            acc[curr.key_name || curr.keyName] = val; 
+            return acc; 
+          }, {});
+          
+          setRates(prev => ({ ...prev, ...settingsObj }));
+          setReservationTerms(prev => ({ ...prev, ...settingsObj }));
         }
 
       } catch (err) {

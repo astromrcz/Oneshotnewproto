@@ -1,9 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Calendar as CalendarIcon, Plus, Trash2, Edit2, Tag, Paperclip, X, Link,
   Users, ToggleLeft, ToggleRight, ChevronDown, ChevronUp,
   Wand2, Copy, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight,
-  RefreshCw, CalendarX2, List, Network, Clock, Mail, SlidersHorizontal
+  RefreshCw, CalendarX2, List, Network, Clock, Mail, SlidersHorizontal,
+  MoreVertical, Power, PowerOff
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -15,15 +16,21 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefor
 const EVENT_TYPES = ['Tournament', 'League', 'Other']; 
 const todayStart = startOfDay(new Date());
 
-// ── Types ────────────────────────────────────────────────────────
 type FormState = {
   title: string; dates: string[]; type: string; description: string;
   isWholeDay: boolean; startTime: string; endTime: string;
-  registrationLink: string; bracketLink: string; maxParticipants: string; slotsFull: boolean;
+  registrationLink: string; bracketLink: string;
+  minParticipants: string; maxParticipants: string;
+  slotsFull: boolean;
   attachments: string[];
   allowReservations: boolean; 
+  reservationTableCount: number;
   caterWalkIns: boolean;       
-  walkInTableCount: number;    
+  walkInTableCount: number;
+  eventTableCount: number;    
+  walkInTableIds: string[];
+  reservationTableIds: string[];
+  eventTableIds: string[];
 };
 
 type PromoForm = {
@@ -37,14 +44,20 @@ type ClosureForm = {
   reason: string; isFullDay: boolean; openTime: string; closeTime: string; 
   type: 'specific' | 'weekly'; dayOfWeek: number; 
 };
+
 const emptyClosureForm: ClosureForm = { reason: '', isFullDay: true, openTime: '12:00', closeTime: '22:00', type: 'specific', dayOfWeek: 0 };
 
 const emptyEventForm: FormState = { 
   title: '', dates: [], type: 'Tournament', description: '', isWholeDay: false, 
   startTime: '18:00', endTime: '22:00', registrationLink: '', bracketLink: '', 
-  maxParticipants: '', slotsFull: false, attachments: [],
-  allowReservations: true, caterWalkIns: true, walkInTableCount: 10 
+  minParticipants: '8', maxParticipants: '32',
+  slotsFull: false, attachments: [],
+  allowReservations: true, reservationTableCount: 3,
+  caterWalkIns: true, walkInTableCount: 3,
+  eventTableCount: 4,
+  walkInTableIds: [], reservationTableIds: [], eventTableIds: []
 };
+
 const emptyPromoForm: PromoForm = { code: '', discountPercent: 10, description: '', isLimitedUses: true, maxUsage: 100, deleteWhenDepleted: false, isActive: true, hasExpiry: false, expiresAt: '', hasStart: false, startDate: '' };
 
 export function AdminEvents() {
@@ -53,8 +66,8 @@ export function AdminEvents() {
     promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
     closedDates, addClosedDate, removeClosedDate, updateClosedDate,
     reservations, updateReservation, updateReservationStatus, tables,
-    rates // 🟢 FIX: Added rates here to resolve the ReferenceError
-  } = useAppContext();
+    rates 
+  } = useAppContext() as any;
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
   const [viewMonth, setViewMonth] = useState(new Date());
@@ -75,6 +88,8 @@ export function AdminEvents() {
   const [editingPromoId, setEditingPromoId] = useState<string | null>(null);
   const [promoForm, setPromoForm] = useState<PromoForm>(emptyPromoForm);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [openPromoDropdownId, setOpenPromoDropdownId] = useState<string | null>(null);
+  const promoDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Closure Form State
   const [showClosureModal, setShowClosureModal] = useState(false);
@@ -82,19 +97,28 @@ export function AdminEvents() {
   const [closureForm, setClosureForm] = useState<ClosureForm>(emptyClosureForm);
   const [closureDateStr, setClosureDateStr] = useState('');
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (promoDropdownRef.current && !promoDropdownRef.current.contains(event.target as Node)) {
+        setOpenPromoDropdownId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
-  // ── Mappers & Helpers ──────────────────────────────────────────
   const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
   
   const closedMap = new Map(
     closedDates
-      .filter(c => c.type !== 'weekly' && c.date && !isNaN(new Date(c.date).getTime()))
-      .map(c => [c.date, c])
+      .filter((c: any) => c.type !== 'weekly' && c.date && !isNaN(new Date(c.date).getTime()))
+      .map((c: any) => [c.date, c])
   );
-  const weeklyClosures = closedDates.filter(c => c.type === 'weekly');
+  const weeklyClosures = closedDates.filter((c: any) => c.type === 'weekly');
 
-  const resMap = reservations.reduce((acc, r) => {
+  const resMap = reservations.reduce((acc: any, r: any) => {
     if (r.status !== 'cancelled') {
       const d = dateKey(new Date(r.date));
       if (!acc[d]) acc[d] = [];
@@ -103,10 +127,10 @@ export function AdminEvents() {
     return acc;
   }, {} as Record<string, Reservation[]>);
 
-  const eventsMap = events.reduce((acc, e) => {
+  const eventsMap = events.reduce((acc: any, e: any) => {
     if (!e.date) return acc;
     const datesArray = e.date.split(',');
-    datesArray.forEach(d => {
+    datesArray.forEach((d: any) => {
       const key = d.trim();
       if (!acc[key]) acc[key] = [];
       acc[key].push(e);
@@ -114,7 +138,7 @@ export function AdminEvents() {
     return acc;
   }, {} as Record<string, Event[]>);
   
-  const promosMap = promoCodes.reduce((acc, p) => {
+  const promosMap = promoCodes.reduce((acc: any, p: any) => {
     if(p.expiresAt) {
       const d = format(new Date(p.expiresAt), 'yyyy-MM-dd');
       if (!acc[d]) acc[d] = [];
@@ -130,11 +154,31 @@ export function AdminEvents() {
     return { label: 'Active', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
   };
 
-  // ── Opening Modals ──────────────────────────────────────────────
   const openEventCreate = (prefillDate?: Date) => {
     setEditingEventId(null);
     const initialDates = prefillDate ? [dateKey(prefillDate)] : [];
-    setEventForm({ ...emptyEventForm, dates: initialDates, walkInTableCount: tables.length || 10 });
+    
+    // Automatically sequentialize table assignments starting from Table 1
+    const activeTables = tables.filter((t: any) => t.isActive);
+    const allIds = activeTables.map((t: any) => t.id);
+    const eCount = Math.floor(allIds.length * 0.4);
+    const rCount = Math.floor(allIds.length * 0.3);
+    const wCount = Math.floor(allIds.length * 0.3);
+
+    const eIds = allIds.slice(0, eCount);
+    const rIds = allIds.slice(eCount, eCount + rCount);
+    const wIds = allIds.slice(eCount + rCount, eCount + rCount + wCount);
+
+    setEventForm({
+      ...emptyEventForm,
+      dates: initialDates,
+      eventTableCount: eIds.length,
+      reservationTableCount: rIds.length,
+      walkInTableCount: wIds.length,
+      eventTableIds: eIds,
+      reservationTableIds: rIds,
+      walkInTableIds: wIds
+    });
     setModalMonth(prefillDate || new Date());
     setDayActionDate(null);
     setShowEventModal(true);
@@ -156,12 +200,18 @@ export function AdminEvents() {
       endTime: isWholeDay ? '22:00' : (durationParts[1] || '22:00'),
       registrationLink: ev.registrationLink ?? '', 
       bracketLink: ev.bracketLink ?? '', 
-      maxParticipants: ev.maxParticipants?.toString() ?? '',
+      minParticipants: ev.minParticipants?.toString() ?? '8',
+      maxParticipants: ev.maxParticipants?.toString() ?? '32',
       slotsFull: ev.slotsFull ?? false, 
       attachments: ev.attachments ?? [],
       allowReservations: ev.allowReservations !== false,
+      reservationTableCount: ev.reservationTableCount ?? 3,
       caterWalkIns: ev.caterWalkIns !== false,
-      walkInTableCount: ev.walkInTableCount ?? (tables.length || 10)
+      walkInTableCount: ev.walkInTableCount ?? 3,
+      eventTableCount: ev.eventTableIds?.length ?? 4,
+      walkInTableIds: ev.walkInTableIds ?? [],
+      reservationTableIds: ev.reservationTableIds ?? [],
+      eventTableIds: ev.eventTableIds ?? []
     });
     
     if (savedDates.length > 0) setModalMonth(new Date(savedDates[0]));
@@ -170,16 +220,13 @@ export function AdminEvents() {
 
   const openClosureCreate = (d: Date) => {
     setEditingClosureId(null); 
-    
     const isActionToday = isSameDay(d, new Date());
-    
     setClosureForm({ 
       ...emptyClosureForm, 
       dayOfWeek: d.getDay(),
       isFullDay: isActionToday ? true : emptyClosureForm.isFullDay,
       type: isActionToday ? 'specific' : emptyClosureForm.type
     });
-    
     setClosureDateStr(dateKey(d)); 
     setDayActionDate(null); 
     setShowClosureModal(true);
@@ -212,16 +259,117 @@ export function AdminEvents() {
     setDayActionDate(null); setShowPromoModal(true);
   };
 
-  // ── Saving Modals ───────────────────────────────────────────────
+  // 🟢 STRICT AUTOMATIC SEQUENTIAL SLIDER HANDLER
+  const handleAllocationSlider = (category: 'reservation' | 'walkIn' | 'event', targetCount: number) => {
+    setEventForm(prev => {
+      const activeTables = tables.filter((t: any) => t.isActive);
+      const allIds = activeTables.map((t: any) => t.id);
+
+      let resIds = [...prev.reservationTableIds];
+      let walkIds = [...prev.walkInTableIds];
+      let evIds = [...prev.eventTableIds];
+
+      let currentIds =
+        category === 'reservation' ? resIds :
+        category === 'walkIn' ? walkIds : evIds;
+
+      if (targetCount > currentIds.length) {
+        // Grab sequentially from Table 1 onwards for tables not yet assigned
+        const assignedSet = new Set([...resIds, ...walkIds, ...evIds]);
+        const needed = targetCount - currentIds.length;
+        let added = 0;
+        for (const id of allIds) {
+          if (!assignedSet.has(id) && added < needed) {
+            currentIds.push(id);
+            assignedSet.add(id);
+            added++;
+          }
+        }
+      } else if (targetCount < currentIds.length) {
+        // Remove from the end when sliding backward
+        currentIds = currentIds.slice(0, targetCount);
+      }
+
+      if (category === 'reservation') resIds = currentIds;
+      else if (category === 'walkIn') walkIds = currentIds;
+      else evIds = currentIds;
+
+      return {
+        ...prev,
+        reservationTableIds: resIds,
+        walkInTableIds: walkIds,
+        eventTableIds: evIds,
+        reservationTableCount: resIds.length,
+        walkInTableCount: walkIds.length,
+        eventTableCount: evIds.length
+      };
+    });
+  };
+
+  // 🟢 CLICK TABLE BUTTON TO CYCLE PURPOSE (Unassigned -> Event -> Rsv -> Walk-In)
+  const toggleTableSelection = (tableId: string) => {
+    setEventForm(prev => {
+      let eIds = [...prev.eventTableIds];
+      let rIds = [...prev.reservationTableIds];
+      let wIds = [...prev.walkInTableIds];
+
+      const isEvent = eIds.includes(tableId);
+      const isRes = rIds.includes(tableId);
+      const isWalkIn = wIds.includes(tableId);
+
+      eIds = eIds.filter(id => id !== tableId);
+      rIds = rIds.filter(id => id !== tableId);
+      wIds = wIds.filter(id => id !== tableId);
+
+      if (!isEvent && !isRes && !isWalkIn) {
+        eIds.push(tableId);
+      } else if (isEvent) {
+        rIds.push(tableId);
+      } else if (isRes) {
+        wIds.push(tableId);
+      } // if was walkIn, stays unassigned
+
+      return {
+        ...prev,
+        eventTableIds: eIds,
+        reservationTableIds: rIds,
+        walkInTableIds: wIds,
+        eventTableCount: eIds.length,
+        reservationTableCount: rIds.length,
+        walkInTableCount: wIds.length
+      };
+    });
+  };
+
   const saveEvent = () => {
     if (!eventForm.title || eventForm.dates.length === 0) {
       alert("Please provide a title and select at least one date.");
       return;
     }
 
-    if ((eventForm.type === 'Tournament' || eventForm.type === 'League') && !eventForm.maxParticipants) {
-      alert("Max Participants is required for Tournaments and Leagues.");
-      return;
+    if (!eventForm.isWholeDay) {
+      if (eventForm.startTime === eventForm.endTime) {
+        alert("Start time and End time cannot be exactly the same.");
+        return;
+      }
+    }
+
+    if (eventForm.type === 'Tournament' || eventForm.type === 'League') {
+      const minP = parseInt(eventForm.minParticipants) || 0;
+      const maxP = parseInt(eventForm.maxParticipants) || 0;
+
+      if (!eventForm.minParticipants || !eventForm.maxParticipants) {
+        alert("Both Min Participants and Max Participants are required for Tournaments and Leagues.");
+        return;
+      }
+      if (minP <= 0 || maxP <= 0) {
+        alert("Min and Max participants must be greater than 0.");
+        return;
+      }
+      if (minP > maxP) {
+        alert(`Minimum participants (${minP}) cannot be greater than Maximum participants (${maxP}).`);
+        return;
+      }
     }
 
     const highwayClosed = eventForm.dates.some(d => closedMap.has(d));
@@ -258,21 +406,33 @@ export function AdminEvents() {
       duration: eventForm.isWholeDay ? 'Whole Day' : `${eventForm.startTime} - ${eventForm.endTime}`,
       registrationLink: eventForm.registrationLink || undefined,
       bracketLink: eventForm.bracketLink || undefined,
+      minParticipants: eventForm.minParticipants ? parseInt(eventForm.minParticipants) : undefined,
       maxParticipants: eventForm.maxParticipants ? parseInt(eventForm.maxParticipants) : undefined,
       slotsFull: eventForm.slotsFull, 
       attachments: eventForm.attachments.length ? eventForm.attachments : undefined,
       allowReservations: eventForm.allowReservations, 
+      reservationTableCount: eventForm.allowReservations ? eventForm.reservationTableCount : 0,
       caterWalkIns: eventForm.caterWalkIns,           
-      walkInTableCount: eventForm.caterWalkIns ? eventForm.walkInTableCount : 0 
+      walkInTableCount: eventForm.caterWalkIns ? eventForm.walkInTableCount : 0,
+      walkInTableIds: eventForm.walkInTableIds,
+      reservationTableIds: eventForm.reservationTableIds,
+      eventTableIds: eventForm.eventTableIds
     };
+
     if (editingEventId) updateEvent(editingEventId, payload);
     else addEvent(payload);
     
-    setShowEventModal(false); flash('Event saved successfully!');
+    setShowEventModal(false);
+    flash('Event saved successfully!');
   };
 
   const saveClosure = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!closureForm.isFullDay && closureForm.openTime === closureForm.closeTime) {
+      alert("Open time and Close time cannot be the same for partial closures.");
+      return;
+    }
+
     const payload = {
       ...closureForm,
       date: closureForm.type === 'weekly' ? '' : closureDateStr
@@ -286,6 +446,13 @@ export function AdminEvents() {
     e.preventDefault();
     if (!promoForm.code || !promoForm.description) return;
     
+    if (promoForm.hasExpiry && promoForm.expiresAt) {
+       if (new Date(promoForm.expiresAt) <= new Date()) {
+         alert("Expiry date must be set in the future.");
+         return;
+       }
+    }
+
     if (promoForm.hasStart && promoForm.hasExpiry && promoForm.startDate && promoForm.expiresAt) {
       if (new Date(promoForm.expiresAt) <= new Date(promoForm.startDate)) {
         alert("Expiry date must be after the start date.");
@@ -312,25 +479,19 @@ export function AdminEvents() {
     flash('Promo code saved successfully!');
   };
 
-  // ── Utils ────────────────────────────────────────────────────────
   const isImage = (dataUrl: string) => dataUrl.startsWith('data:image/');
   const getFileName = (dataUrl: string, index: number) => {
     const match = dataUrl.match(/^data:([^;]+);/);
     return `attachment-${index + 1}.${match?.[1]?.split('/')[1] ?? 'bin'}`;
   };
 
-  // 🟢 FIX: Added 50MB and Image-Only Validation
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    
     files.forEach(file => {
-      // Image format check
       if (!file.type.startsWith('image/')) {
         alert(`File "${file.name}" is not a valid image format. Please upload JPG, PNG, WEBP, or GIF only.`);
         return;
       }
-      
-      // 50MB size limit check
       if (file.size > 50 * 1024 * 1024) {
         alert(`File "${file.name}" exceeds the maximum 50MB limit.`);
         return;
@@ -342,15 +503,22 @@ export function AdminEvents() {
       };
       reader.readAsDataURL(file);
     });
-    
-    if (fileInputRef.current) fileInputRef.current.value = '';
+   if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const removeAttachment = (index: number) => {
     setEventForm(prev => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }));
   };
 
-  // ── Render Helpers ───────────────────────────────────────────────
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
+  };
+
   const renderCalendar = () => {
     const monthStart = startOfMonth(viewMonth);
     const monthEnd   = endOfMonth(viewMonth);
@@ -382,7 +550,7 @@ export function AdminEvents() {
               const isPast = isBefore(day, todayStart);
               const isToday = isSameDay(day, new Date());
               
-              const dayCls = closedMap.get(key) || weeklyClosures.find(c => c.dayOfWeek === day.getDay());
+              const dayCls = closedMap.get(key) || weeklyClosures.find((c: any) => c.dayOfWeek === day.getDay());
               const dayEvs = eventsMap[key] || [];
               const dayPrs = promosMap[key] || [];
               const dayRes = resMap[key] || [];
@@ -411,12 +579,12 @@ export function AdminEvents() {
                       </div>
                     )}
                     
-                    {!dayCls && dayEvs.map(e => (
+                    {!dayCls && dayEvs.map((e: any) => (
                       <div key={e.id} className={`w-full text-[8px] rounded px-1 truncate font-semibold ${e.type === 'Holiday' ? 'bg-sky-500/20 text-sky-400' : 'bg-amber-500/20 text-amber-400'}`}>
                         {e.title}
                       </div>
                     ))}
-                    {!dayCls && dayPrs.map(p => (
+                    {!dayCls && dayPrs.map((p: any) => (
                       <div key={p.id} className="w-full text-[8px] bg-violet-500/20 text-violet-400 rounded px-1 truncate font-semibold">{p.code} exp</div>
                     ))}
                   </div>
@@ -451,7 +619,6 @@ export function AdminEvents() {
             const key = dateKey(day);
             const isSelected = eventForm.dates.includes(key);
             const isPastOrToday = isBefore(day, todayStart) || isSameDay(day, todayStart);
-            
             const isDisabled = isPastOrToday && !isSelected;
             
             return (
@@ -489,7 +656,7 @@ export function AdminEvents() {
             const isExpanded = expandedAttachments.has(ev.id);
             const attachments = ev.attachments ?? [];
             const imageAttachments = attachments.filter(isImage);
-            const fileAttachments = attachments.filter(a => !isImage(a));
+            const fileAttachments = attachments.filter((a: any) => !isImage(a));
             
             const eventDates = ev.date ? ev.date.split(',') : [];
             const sortedDates = [...eventDates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
@@ -525,13 +692,24 @@ export function AdminEvents() {
                   <p className="text-sm text-neutral-400 mb-3 line-clamp-3">{ev.description}</p>
 
                   <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800/60 mb-3 space-y-1.5 text-xs text-neutral-400">
-                    <div className="flex justify-between"><span>Online Bookings:</span><span className={ev.allowReservations !== false ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{ev.allowReservations !== false ? 'Enabled' : 'Disabled'}</span></div>
-                    <div className="flex justify-between"><span>Walk-Ins Setup:</span><span className="text-neutral-200 font-medium">{ev.caterWalkIns !== false ? `${ev.walkInTableCount} Tables Dedicated` : 'Blocked'}</span></div>
+                    <div className="flex justify-between">
+                      <span>Online Bookings:</span>
+                      <span className={ev.allowReservations !== false ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                        {ev.allowReservations !== false ? `${ev.reservationTableCount || 3} Tables` : 'Disabled'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Walk-Ins Setup:</span>
+                      <span className="text-neutral-200 font-medium">
+                        {ev.caterWalkIns !== false ? `${ev.walkInTableCount || 3} Tables` : 'Blocked'}
+                      </span>
+                    </div>
                   </div>
 
                   {ev.maxParticipants && (
-                    <div className="flex items-center gap-1.5 text-xs text-neutral-500 mb-2">
-                      <Users size={11} /><span>Max {ev.maxParticipants} participants</span>
+                    <div className="flex items-center gap-1.5 text-xs text-neutral-500 mb-2 font-medium">
+                      <Users size={11} />
+                      <span>Min {ev.minParticipants || 8} – Max {ev.maxParticipants} participants</span>
                     </div>
                   )}
 
@@ -556,8 +734,8 @@ export function AdminEvents() {
                       </button>
                       {isExpanded && (
                         <div className="mt-2 space-y-1.5">
-                          {imageAttachments.slice(1).map((att, i) => <img key={i} src={att} alt="" className="w-full h-20 object-cover rounded-lg opacity-80" />)}
-                          {fileAttachments.map((att, i) => (
+                          {imageAttachments.slice(1).map((att: any, i: number) => <img key={i} src={att} alt="" className="w-full h-20 object-cover rounded-lg opacity-80" />)}
+                          {fileAttachments.map((att: any, i: number) => (
                             <a key={i} href={att} download={getFileName(att, i)} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 rounded-lg px-2.5 py-1.5 truncate">
                               <Paperclip size={10} className="flex-shrink-0" />{getFileName(att, i)}
                             </a>
@@ -619,58 +797,101 @@ export function AdminEvents() {
   };
 
   const renderPromosList = () => (
-    <div className="space-y-3">
-      {promoCodes.length === 0 ? (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-12 text-center">
-          <Tag size={32} className="mx-auto text-neutral-700 mb-3" />
-          <p className="text-neutral-500">No promo codes yet.</p>
-        </div>
-      ) : promoCodes.map((pc: any) => {
-        const status = getPromoStatus(pc);
-        return (
-          <div key={pc.id} className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 flex items-center gap-4 hover:border-neutral-700 transition-colors">
-            <div className="w-12 h-12 rounded-xl bg-violet-600/15 border border-violet-600/25 flex flex-col items-center justify-center flex-shrink-0">
-              <span className="text-sm font-black text-violet-400">{pc.discountPercent}%</span>
-              <span className="text-[9px] text-violet-600 font-semibold">OFF</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                <div className="flex items-center gap-1.5 bg-neutral-800 rounded-lg px-2.5 py-1">
-                  <Tag size={10} className="text-neutral-400" />
-                  <span className="text-xs font-black text-white tracking-wider">{pc.code}</span>
-                </div>
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${status.color}`}>{status.label}</span>
-              </div>
-              <p className="text-xs text-neutral-400 mb-1">{pc.description}</p>
-              <div className="flex items-center gap-3 text-[10px] text-neutral-600">
-                {pc.isLimitedUses !== false ? (
-                  <span>Uses: <strong className="text-neutral-400">{pc.usageCount}</strong>/{pc.maxUsage} {pc.deleteWhenDepleted && '(Auto-delete)'}</span>
-                ) : (
-                  <span>Uses: <strong className="text-neutral-400">{pc.usageCount}</strong> / Unlimited</span>
-                )}
-                {pc.startDate && <span>Starts: <strong className="text-neutral-400">{format(new Date(pc.startDate), 'MMM d, yyyy')}</strong></span>}
-                {pc.expiresAt && <span>Expires: <strong className="text-neutral-400">{format(new Date(pc.expiresAt), 'MMM d, yyyy')}</strong></span>}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <button onClick={() => { navigator.clipboard.writeText(pc.code); setCopiedCode(pc.code); setTimeout(()=>setCopiedCode(null),2000); }} title="Copy code"
-                className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors">
-                {copiedCode === pc.code ? <CheckCircle size={14} className="text-emerald-400" /> : <Copy size={14} />}
-              </button>
-              <button onClick={() => openPromoEdit(pc)} className="p-1.5 rounded-lg text-neutral-500 hover:text-blue-400 hover:bg-neutral-800 transition-colors">
-                <Edit2 size={14} />
-              </button>
-              <button onClick={() => togglePromoCode(pc.id)} title={pc.isActive ? 'Deactivate' : 'Activate'}
-                className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors">
-                {pc.isActive ? <ToggleRight size={16} className="text-emerald-400" /> : <ToggleLeft size={16} />}
-              </button>
-              <button onClick={() => deletePromoCode(pc.id)} className="p-1.5 rounded-lg text-neutral-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors">
-                <Trash2 size={14} />
-              </button>
-            </div>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          onClick={() => openPromoCreate()}
+          className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-violet-900/30"
+        >
+          <Plus size={15} /> Add Promo Code
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {promoCodes.length === 0 ? (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-12 text-center">
+            <Tag size={32} className="mx-auto text-neutral-700 mb-3" />
+            <p className="text-neutral-500">No promo codes yet.</p>
           </div>
-        );
-      })}
+        ) : promoCodes.map((pc: any) => {
+          const status = getPromoStatus(pc);
+          return (
+            <div key={pc.id} className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 flex items-center gap-4 hover:border-neutral-700 transition-colors">
+              <div className="w-12 h-12 rounded-xl bg-violet-600/15 border border-violet-600/25 flex flex-col items-center justify-center flex-shrink-0">
+                <span className="text-sm font-black text-violet-400">{pc.discountPercent}%</span>
+                <span className="text-[9px] text-violet-600 font-semibold">OFF</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <div className="flex items-center gap-1.5 bg-neutral-800 rounded-lg px-2.5 py-1">
+                    <Tag size={10} className="text-neutral-400" />
+                    <span className="text-xs font-black text-white tracking-wider">{pc.code}</span>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${status.color}`}>{status.label}</span>
+                </div>
+                <p className="text-xs text-neutral-400 mb-1">{pc.description}</p>
+                <div className="flex items-center gap-3 text-[10px] text-neutral-600">
+                  {pc.isLimitedUses !== false ? (
+                    <span>Uses: <strong className="text-neutral-400">{pc.usageCount}</strong>/{pc.maxUsage} {pc.deleteWhenDepleted && '(Auto-delete)'}</span>
+                  ) : (
+                    <span>Uses: <strong className="text-neutral-400">{pc.usageCount}</strong> / Unlimited</span>
+                  )}
+                  {pc.startDate && <span>Starts: <strong className="text-neutral-400">{format(new Date(pc.startDate), 'MMM d, yyyy')}</strong></span>}
+                  {pc.expiresAt && <span>Expires: <strong className="text-neutral-400">{format(new Date(pc.expiresAt), 'MMM d, yyyy')}</strong></span>}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => { navigator.clipboard.writeText(pc.code); setCopiedCode(pc.code); setTimeout(()=>setCopiedCode(null),2000); }}
+                  title="Copy code"
+                  className="p-2 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+                >
+                  {copiedCode === pc.code ? <CheckCircle size={15} className="text-emerald-400" /> : <Copy size={15} />}
+                </button>
+
+                <div className="relative" ref={openPromoDropdownId === pc.id ? promoDropdownRef : null}>
+                  <button
+                    onClick={() => setOpenPromoDropdownId(openPromoDropdownId === pc.id ? null : pc.id)}
+                    className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700 transition-colors"
+                    title="Promo Actions"
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+
+                  {openPromoDropdownId === pc.id && (
+                    <div className="absolute right-0 top-full mt-2 w-44 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
+                      <button
+                        onClick={() => { setOpenPromoDropdownId(null); openPromoEdit(pc); }}
+                        className="w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 transition-colors flex items-center gap-2"
+                      >
+                        <Edit2 size={13} className="text-blue-400" />
+                        <span>Edit Promo</span>
+                      </button>
+
+                      <button
+                        onClick={() => { setOpenPromoDropdownId(null); togglePromoCode(pc.id); }}
+                        className="w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
+                      >
+                        {pc.isActive ? <PowerOff size={13} className="text-amber-400" /> : <Power size={13} className="text-emerald-400" />}
+                        <span>{pc.isActive ? 'Deactivate' : 'Activate'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => { setOpenPromoDropdownId(null); deletePromoCode(pc.id); }}
+                        className="w-full px-4 py-2.5 text-left text-xs text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete Promo</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 
@@ -717,7 +938,7 @@ export function AdminEvents() {
             
             {/* Action Required Carousel for Staff */}
             {(() => {
-              const pendingActions = reservations.filter(r => 
+              const pendingActions = reservations.filter((r: any) => 
                 r.status === 'pending' || 
                 (r.status === 'cancelled' && r.cancellationReason === 'Closure Refund Request')
               ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -728,7 +949,7 @@ export function AdminEvents() {
                 <div className="bg-rose-950/20 border border-rose-900/50 rounded-xl p-5 shadow-lg shadow-rose-950/20">
                   <h3 className="text-sm font-bold text-rose-400 mb-3 flex items-center gap-2"><AlertTriangle size={16} /> Action Required</h3>
                   <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
-                    {pendingActions.map(r => (
+                    {pendingActions.map((r: any) => (
                       <div key={r.id} className="bg-neutral-950 border border-neutral-800 rounded-lg p-3">
                         <div className="flex justify-between items-start mb-2">
                           <div>
@@ -768,7 +989,7 @@ export function AdminEvents() {
                 <h3 className="text-xs font-bold text-neutral-300 uppercase tracking-widest">Upcoming Agenda</h3>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {events.filter(e => e.date && !isBefore(new Date(e.date.split(',')[0]), todayStart)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5).map(e => (
+                {events.filter((e: any) => e.date && !isBefore(new Date(e.date.split(',')[0]), todayStart)).sort((a: any,b: any)=>a.date.localeCompare(b.date)).slice(0,5).map((e: any) => (
                   <div key={e.id} className="flex gap-3">
                     <div className={`w-1 rounded-full ${e.type === 'Holiday' ? 'bg-sky-500' : 'bg-amber-500'}`} />
                     <div>
@@ -777,12 +998,11 @@ export function AdminEvents() {
                     </div>
                   </div>
                 ))}
-                {/* 🟢 FIX: Ensure c.date exists and is a valid Date object before processing */}
                 {closedDates
-                  .filter(c => c.type !== 'weekly' && c.date && !isNaN(new Date(c.date).getTime()) && !isBefore(new Date(c.date), todayStart))
-                  .sort((a,b)=>a.date.localeCompare(b.date))
+                  .filter((c: any) => c.type !== 'weekly' && c.date && !isNaN(new Date(c.date).getTime()) && !isBefore(new Date(c.date), todayStart))
+                  .sort((a: any,b: any)=>a.date.localeCompare(b.date))
                   .slice(0,5)
-                  .map(c => (
+                  .map((c: any) => (
                   <div key={c.id} className="flex gap-3">
                     <div className="w-1 bg-rose-500 rounded-full" />
                     <div className="flex-1 flex justify-between items-start">
@@ -794,7 +1014,7 @@ export function AdminEvents() {
                     </div>
                   </div>
                 ))}
-                {weeklyClosures.map(c => {
+                {weeklyClosures.map((c: any) => {
                   const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][c.dayOfWeek || 0];
                   return (
                   <div key={c.id} className="flex gap-3">
@@ -808,7 +1028,7 @@ export function AdminEvents() {
                     </div>
                   </div>
                 )})}
-                {promoCodes.filter(p => p.expiresAt && !isBefore(new Date(p.expiresAt), todayStart)).sort((a:any,b:any)=>a.expiresAt!.localeCompare(b.expiresAt!)).slice(0,3).map(p => (
+                {promoCodes.filter((p: any) => p.expiresAt && !isBefore(new Date(p.expiresAt), todayStart)).sort((a:any,b:any)=>a.expiresAt!.localeCompare(b.expiresAt!)).slice(0,3).map((p: any) => (
                   <div key={p.id} className="flex gap-3">
                     <div className="w-1 bg-violet-500 rounded-full" />
                     <div>
@@ -823,7 +1043,6 @@ export function AdminEvents() {
         </div>
       )}
 
-      {/* Render Event & Promo Lists when tabs are active */}
       {activeTab === 'events' && renderEventsGrid()}
       {activeTab === 'promos' && renderPromosList()}
 
@@ -843,7 +1062,7 @@ export function AdminEvents() {
                 const key = dateKey(dayActionDate);
                 const dayEvs = eventsMap[key] || [];
                 const dayPrs = promosMap[key] || [];
-                const dayCls = closedMap.get(key) || weeklyClosures.find(c => c.dayOfWeek === dayActionDate.getDay());
+                const dayCls = closedMap.get(key) || weeklyClosures.find((c: any) => c.dayOfWeek === dayActionDate.getDay());
                 const dayRes = resMap[key] || []; 
                 const hasItems = dayEvs.length || dayPrs.length || dayCls;
 
@@ -858,7 +1077,7 @@ export function AdminEvents() {
                             <button onClick={() => openClosureEdit(dayCls)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
                           </div>
                         )}
-                        {dayEvs.map(e => (
+                        {dayEvs.map((e: any) => (
                           <div key={e.id} className="flex items-center justify-between text-xs mt-2">
                             <span className={`font-semibold truncate pr-2 ${e.type === 'Holiday' ? 'text-sky-400' : 'text-amber-400'}`}>
                               {e.type === 'Holiday' ? '🏛️ Holiday: ' : 'Event: '} {e.title}
@@ -868,7 +1087,7 @@ export function AdminEvents() {
                             )}
                           </div>
                         ))}
-                        {dayPrs.map(p => (
+                        {dayPrs.map((p: any) => (
                           <div key={p.id} className="flex items-center justify-between text-xs mt-2">
                             <span className="text-violet-400 font-semibold truncate pr-2">Promo Expiry: {p.code}</span>
                             <button onClick={() => openPromoEdit(p)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
@@ -881,7 +1100,7 @@ export function AdminEvents() {
                       <div className="space-y-2 mb-4 bg-neutral-900/50 rounded-lg p-3 border border-neutral-800">
                         <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">Customer Reservations ({dayRes.length})</p>
                         <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
-                          {dayRes.map(r => (
+                          {dayRes.map((r: any) => (
                             <div key={r.id} className="bg-neutral-950 border border-neutral-800 rounded-md p-2.5 flex flex-col gap-1.5">
                               <div className="flex justify-between items-start">
                                 <span className="text-xs font-semibold text-neutral-200 truncate">{r.customerName}</span>
@@ -913,7 +1132,6 @@ export function AdminEvents() {
 
               <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold border-t border-neutral-800 pt-4 mt-2">Add New</p>
               
-              {/* 🟢 NEW: Strict Security Rules for "Today" */}
               {(() => {
                 const isActionToday = isSameDay(dayActionDate, new Date());
                 const isWeekend = dayActionDate.getDay() === 0 || dayActionDate.getDay() === 5 || dayActionDate.getDay() === 6;
@@ -925,7 +1143,6 @@ export function AdminEvents() {
 
                 return (
                   <div className="grid grid-cols-1 gap-2">
-                    {/* Hide Standard Event Creation for Today */}
                     {!isActionToday && (
                       <button onClick={() => openEventCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-amber-500/10 border border-neutral-800 hover:border-amber-500/30 text-left transition-colors group">
                         <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:bg-amber-500/20"><CalendarIcon size={14}/></div>
@@ -933,7 +1150,6 @@ export function AdminEvents() {
                       </button>
                     )}
 
-                    {/* Standard Closure vs Emergency Closure */}
                     {!isActionToday ? (
                       <button onClick={() => openClosureCreate(dayActionDate)} className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 hover:bg-rose-500/10 border border-neutral-800 hover:border-rose-500/30 text-left transition-colors group">
                         <div className="w-8 h-8 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500 group-hover:bg-rose-500/20"><AlertTriangle size={14}/></div>
@@ -961,7 +1177,7 @@ export function AdminEvents() {
         </div>
       )}
 
-      {/* 2. Event Modal */}
+      {/* 2. Event Modal (Compact & Strict Venue Allocation Setup) */}
       {showEventModal && (
         <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[92vh]">
@@ -1007,48 +1223,80 @@ export function AdminEvents() {
                     )}
                   </div>
 
-                  {/* Tournament Venue Takeover Dashboard */}
+                  {/* 🟢 COMPACT & STRICT VENUE ALLOCATION SETUP */}
+                  {/* 🟢 SIMPLIFIED DEFENSIBLE VENUE ALLOCATION */}
                   {(eventForm.type === 'Tournament' || eventForm.type === 'League') && (
                     <div className="bg-neutral-950 p-4 rounded-xl border border-amber-900/30 space-y-4">
-                       <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-1.5"><SlidersHorizontal size={12}/> Venue Allocation Setup</p>
-                       
-                       <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
-                         <div>
-                           <p className="text-xs font-semibold text-neutral-300">Allow Online Reservations</p>
-                           <p className="text-[10px] text-neutral-500">Uncheck to block out online bookings for the event duration</p>
-                         </div>
-                         <button type="button" onClick={() => setEventForm(f=>({...f, allowReservations: !f.allowReservations}))}>
-                           {eventForm.allowReservations ? <ToggleRight size={26} className="text-amber-500" /> : <ToggleLeft size={26} className="text-neutral-600" />}
-                         </button>
-                       </div>
+                      <div className="flex justify-between items-center">
+                        <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-1.5">
+                          <SlidersHorizontal size={12}/> Venue Allocation Policy
+                        </p>
+                        <span className="text-[10px] font-mono text-neutral-400 bg-neutral-900 px-2 py-0.5 rounded border border-neutral-800">
+                          Total Venue: {tables.filter((t: any) => t.isActive).length || 10} Tables
+                        </span>
+                      </div>
 
-                       <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
-                         <div>
-                           <p className="text-xs font-semibold text-neutral-300">Cater to Walk-In Play</p>
-                           <p className="text-[10px] text-neutral-500">Reserve a portion of the arena for standard walk-ins</p>
-                         </div>
-                         <button type="button" onClick={() => setEventForm(f=>({...f, caterWalkIns: !f.caterWalkIns}))}>
-                           {eventForm.caterWalkIns ? <ToggleRight size={26} className="text-amber-500" /> : <ToggleLeft size={26} className="text-neutral-600" />}
-                         </button>
-                       </div>
+                      <div className="grid grid-cols-1 gap-2.5">
+                        {/* Option A: Full Takeover */}
+                        <label className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition-colors ${
+                          !eventForm.allowReservations && !eventForm.caterWalkIns
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                            : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:bg-neutral-800'
+                        }`}>
+                          <input 
+                            type="radio" 
+                            name="venuePolicy"
+                            checked={!eventForm.allowReservations && !eventForm.caterWalkIns}
+                            onChange={() => setEventForm(f => ({ ...f, allowReservations: false, caterWalkIns: false }))}
+                            className="mt-0.5 accent-amber-500"
+                          />
+                          <div>
+                            <p className="font-bold text-white">Full Venue Takeover (Exclusive)</p>
+                            <p className="text-[10px] text-neutral-500 mt-0.5">Closes all online bookings and walk-ins for the event duration.</p>
+                          </div>
+                        </label>
 
-                       {eventForm.caterWalkIns && (
-                         <div className="space-y-2 animate-in fade-in duration-200">
-                           <div className="flex justify-between text-xs font-medium text-neutral-400">
-                             <span>Tables Allocated for Walk-Ins Only</span>
-                             <span className="text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">{eventForm.walkInTableCount} Tables</span>
-                           </div>
-                           <input 
-                             type="range" 
-                             min="1" 
-                             max={tables.length || 10} 
-                             value={eventForm.walkInTableCount} 
-                             onChange={(e) => setEventForm(f => ({ ...f, walkInTableCount: parseInt(e.target.value) }))}
-                             className="w-full accent-amber-500 h-1.5 bg-neutral-900 rounded-lg appearance-none cursor-pointer" 
-                           />
-                           <p className="text-[10px] text-neutral-600 italic">Remaining {(tables.length || 10) - eventForm.walkInTableCount} table(s) will automatically flag as dedicated for the event.</p>
-                         </div>
-                       )}
+                        {/* Option B: Partial Allocation */}
+                        <label className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition-colors ${
+                          eventForm.allowReservations || eventForm.caterWalkIns
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                            : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:bg-neutral-800'
+                        }`}>
+                          <input 
+                            type="radio" 
+                            name="venuePolicy"
+                            checked={eventForm.allowReservations || eventForm.caterWalkIns}
+                            onChange={() => setEventForm(f => ({ ...f, allowReservations: true, caterWalkIns: true, reservationTableCount: 3, walkInTableCount: 3 }))}
+                            className="mt-0.5 accent-amber-500"
+                          />
+                          <div className="flex-1">
+                            <p className="font-bold text-white">Mixed Operation (Event + Open Tables)</p>
+                            <p className="text-[10px] text-neutral-500 mt-0.5">Allocate a specific number of tables for the tournament; the rest remain open for public play.</p>
+                            
+                            {(eventForm.allowReservations || eventForm.caterWalkIns) && (
+                              <div className="mt-3 pt-3 border-t border-amber-500/20 space-y-3">
+                                <div>
+                                  <div className="flex justify-between text-[11px] font-semibold text-neutral-300 mb-1">
+                                    <span>Tables Reserved for Tournament</span>
+                                    <span className="text-amber-400 font-mono font-bold">{eventForm.eventTableCount || 4} Tables</span>
+                                  </div>
+                                  <input 
+                                    type="number" 
+                                    min="1" 
+                                    max={tables.filter((t: any) => t.isActive).length || 10}
+                                    value={eventForm.eventTableCount || 4}
+                                    onChange={e => setEventForm(f => ({ ...f, eventTableCount: parseInt(e.target.value) || 1 }))}
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white"
+                                  />
+                                </div>
+                                <p className="text-[10px] text-neutral-500 italic">
+                                  Remaining {Math.max(0, (tables.filter((t: any) => t.isActive).length || 10) - (eventForm.eventTableCount || 4))} tables stay open for regular walk-ins and standard bookings.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      </div>
                     </div>
                   )}
 
@@ -1057,8 +1305,11 @@ export function AdminEvents() {
                 {/* Right Column: Event Details */}
                 <div className="space-y-4">
                   <div>
-                    <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Event Title *</label>
-                    <Input value={eventForm.title} onChange={e => setEventForm({...eventForm, title: e.target.value})} placeholder="e.g. 8-Ball Championship" className="bg-neutral-950 border-neutral-800" />
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-semibold text-neutral-400">Event Title *</label>
+                      <CharCount current={eventForm.title} max={50} />
+                    </div>
+                    <Input maxLength={50} value={eventForm.title} onChange={e => setEventForm({...eventForm, title: e.target.value})} placeholder="e.g. 8-Ball Championship" className="bg-neutral-950 border-neutral-800" />
                   </div>
                   
                   <div>
@@ -1069,8 +1320,11 @@ export function AdminEvents() {
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Description</label>
-                    <textarea value={eventForm.description} onChange={e => setEventForm({...eventForm, description: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-md p-3 text-sm text-neutral-200 h-24 resize-none focus:outline-none focus:border-amber-500" placeholder="Event details..." />
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-semibold text-neutral-400">Description</label>
+                      <CharCount current={eventForm.description} max={400} />
+                    </div>
+                    <textarea maxLength={400} value={eventForm.description} onChange={e => setEventForm({...eventForm, description: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-md p-3 text-sm text-neutral-200 h-24 resize-none focus:outline-none focus:border-amber-500" placeholder="Event details..." />
                   </div>
 
                   {eventForm.type === 'Tournament' && (
@@ -1088,11 +1342,33 @@ export function AdminEvents() {
                   )}
 
                   <div className={`grid ${editingEventId ? 'grid-cols-2' : 'grid-cols-1'} gap-4`}>
-                    <div>
-                      <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5">
-                        <Users size={11} /> Max Participants {(eventForm.type === 'Tournament' || eventForm.type === 'League') && <span className="text-rose-500">*</span>}
-                      </label>
-                      <Input type="number" value={eventForm.maxParticipants} onChange={e => setEventForm({...eventForm, maxParticipants: e.target.value})} placeholder="e.g. 32" min="1" className="bg-neutral-950 border-neutral-800" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5">
+                          <Users size={11} /> Min Pax {(eventForm.type === 'Tournament' || eventForm.type === 'League') && <span className="text-rose-500">*</span>}
+                        </label>
+                        <Input
+                          type="number"
+                          value={eventForm.minParticipants}
+                          onChange={e => setEventForm({...eventForm, minParticipants: e.target.value})}
+                          placeholder="8"
+                          min="1"
+                          className="bg-neutral-950 border-neutral-800"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5">
+                          <Users size={11} /> Max Pax {(eventForm.type === 'Tournament' || eventForm.type === 'League') && <span className="text-rose-500">*</span>}
+                        </label>
+                        <Input
+                          type="number"
+                          value={eventForm.maxParticipants}
+                          onChange={e => setEventForm({...eventForm, maxParticipants: e.target.value})}
+                          placeholder="32"
+                          min="1"
+                          className="bg-neutral-950 border-neutral-800"
+                        />
+                      </div>
                     </div>
                     {editingEventId && (
                       <div>
@@ -1191,8 +1467,11 @@ export function AdminEvents() {
                     )}
 
                     <div>
-                      <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Reason *</label>
-                      <input type="text" value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder={isActionToday ? "e.g. Bad Weather, Power Outage" : "e.g. Holiday, Private Event"} />
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-xs text-neutral-400 font-medium">Reason *</label>
+                        <CharCount current={closureForm.reason} max={50} />
+                      </div>
+                      <input type="text" maxLength={50} value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder={isActionToday ? "e.g. Bad Weather, Power Outage" : "e.g. Holiday, Private Event"} />
                     </div>
                     
                     {!isActionToday && (
@@ -1253,9 +1532,15 @@ export function AdminEvents() {
             </div>
             <form onSubmit={preparePromoSave} className="p-6 space-y-5">
               
-              <div className="flex gap-2">
-                <input required value={promoForm.code} onChange={e => setPromoForm(f=>({...f, code: e.target.value.toUpperCase()}))} placeholder="CODE (e.g. SUMMER20)" className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 font-mono tracking-wider focus:outline-none focus:border-violet-500" />
-                <button type="button" onClick={() => setPromoForm(f=>({...f, code: generateRandomPromoCode()}))} className="px-3 bg-violet-600/20 text-violet-400 rounded-lg hover:bg-violet-600/30"><Wand2 size={15} /></button>
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Promo Code *</label>
+                  <CharCount current={promoForm.code} max={15} />
+                </div>
+                <div className="flex gap-2">
+                  <input required maxLength={15} value={promoForm.code} onChange={e => setPromoForm(f=>({...f, code: e.target.value.toUpperCase().replace(/\s/g, '')}))} placeholder="CODE (e.g. SUMMER20)" className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 font-mono tracking-wider focus:outline-none focus:border-violet-500" />
+                  <button type="button" onClick={() => setPromoForm(f=>({...f, code: generateRandomPromoCode()}))} className="px-3 bg-violet-600/20 text-violet-400 rounded-lg hover:bg-violet-600/30"><Wand2 size={15} /></button>
+                </div>
               </div>
 
               <div>
@@ -1271,8 +1556,11 @@ export function AdminEvents() {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Description *</label>
-                <input required value={promoForm.description} onChange={e => setPromoForm(f=>({...f, description: e.target.value}))} placeholder="e.g. 20% off weekend nights" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Description *</label>
+                  <CharCount current={promoForm.description} max={60} />
+                </div>
+                <input required maxLength={60} value={promoForm.description} onChange={e => setPromoForm(f=>({...f, description: e.target.value}))} placeholder="e.g. 20% off weekend nights" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
               </div>
 
               <div className="p-4 rounded-xl border border-violet-900/30 bg-violet-950/10 space-y-4">

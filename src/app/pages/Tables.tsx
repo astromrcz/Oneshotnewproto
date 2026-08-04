@@ -5,7 +5,7 @@ import {
   Search, Play, Zap, X, UserPlus, Clock,
   Calendar, Users, CheckCircle, ChevronRight,
   CreditCard, Banknote, AlertTriangle, CircleCheck,
-  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History
+  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History, Info
 } from 'lucide-react';
 import { isToday, differenceInSeconds, addMinutes } from 'date-fns';
 
@@ -23,7 +23,8 @@ export function Tables() {
  const { 
     tables, queue, reservations, assignTable, extendSession, freeTable, 
     inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile, rates, reservationTerms,
-    addSessionHistory, addActivity, addWatchlistItem // 🟢 Added these
+    addSessionHistory, addActivity, addWatchlistItem,
+    removeFromQueue, updateReservationStatus
   } = useAppContext() as any;
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
@@ -38,6 +39,9 @@ export function Tables() {
   const [voidPassword,     setVoidPassword]     = useState('');
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
+  
+  // 🟢 NEW: State to track if the staff wants to prorate an early-leaver
+  const [useProrated,      setUseProrated]      = useState(false);
 
   // Menu Editing States
   const isAdmin = staffProfile?.role?.toLowerCase() === 'manager' || staffProfile?.username === 'admin';
@@ -53,7 +57,7 @@ export function Tables() {
   const [paymentOption,    setPaymentOption]     = useState<'payNow' | 'payLater'>('payNow');
 
   // Extend form state
-  const [extendMinutes,       setExtendMinutes]       = useState(60);
+  const [extendMinutes,       setExtendMinutes]       = useState<number | 'open'>(60);
   const [extendPayStatus,     setExtendPayStatus]     = useState<PaymentStatus>('paid');
   const [extendPayMethod,     setExtendPayMethod]     = useState<PaymentMethod>('cash');
   const [extendPartialAmount, setExtendPartialAmount] = useState('');
@@ -118,16 +122,17 @@ export function Tables() {
     let isOvertime = false;
     let overtimeMins = 0;
 
-    if (isOpenTime || bookedMins === null) {
-      const fullHours = Math.floor(elapsedMins / 60);
-      const remainingMins = elapsedMins % 60;
+    // 🟢 FIXED: If prorated, we calculate standard fraction math but enforce 1 hour minimum
+    const calculateBasedOnElapsed = isOpenTime || bookedMins === null || useProrated;
+
+    if (calculateBasedOnElapsed) {
+      const minElapsed = Math.max(60, elapsedMins); // 1-hour minimum charge
+      const fullHours = Math.floor(minElapsed / 60);
+      const remainingMins = minElapsed % 60;
       
       let extraCharge = 0;
-      if (remainingMins > 0 && remainingMins <= 30) {
-        extraCharge = hourlyRate / 2;
-      } else if (remainingMins > 30) {
-        extraCharge = hourlyRate;
-      }
+      if (remainingMins > 0 && remainingMins <= 30) extraCharge = hourlyRate / 2;
+      else if (remainingMins > 30) extraCharge = hourlyRate;
 
       bookedCharge = (fullHours * hourlyRate) + extraCharge;
     } else {
@@ -142,13 +147,28 @@ export function Tables() {
     const totalDue = bookedCharge + overtimeCharge + posOrdersTotal;
     const balance = Math.max(0, totalDue - alreadyPaid);
     
-    return { elapsedMins, alreadyPaid, bookedCharge, overtimeCharge, posOrdersTotal, totalDue, balance, isOvertime, overtimeMins, isOpenTime };
+    // 🟢 NEW: Calculate if we owe the customer a cash refund (because they paid upfront but left early)
+    const refundDue = Math.max(0, alreadyPaid - totalDue); 
+    
+    return { elapsedMins, alreadyPaid, bookedCharge, overtimeCharge, posOrdersTotal, totalDue, balance, refundDue, isOvertime, overtimeMins, isOpenTime };
   };
   const endInfo = getEndSessionInfo();
 
+  // 🟢 NEW: Void Session Handler for < 5 minute mistakes
+  const handleVoidSession = () => {
+    if (!endingTableId || !endingTable?.session) return;
+    if (window.confirm('Are you sure you want to void this session? No charges will be logged, and the table will be freed.')) {
+      if (addActivity) {
+        addActivity('admin_action', `Voided session for ${endingTable.session.customerName} at ${endingTable.name} (Played: ${endInfo?.elapsedMins}m).`);
+      }
+      freeTable(endingTableId);
+      setEndingTableId(null);
+    }
+  };
+
   const extendingTable = tables.find((t: any) => t.id === extendingTableId);
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
-  const extendCharge = (extendMinutes / 60) * effectiveHourly;
+  const extendCharge = extendMinutes === 'open' ? 0 : ((extendMinutes as number) / 60) * effectiveHourly;
 
   const posTable = tables.find((t: any) => t.id === posTableId);
   const confirmedOrders = posTable?.session?.orders || [];
@@ -193,6 +213,7 @@ export function Tables() {
     setEndingTableId(tableId);
     setEndPayStatus('paid'); setEndPayMethod('cash'); setEndPartialAmount(''); setEndCashTendered(''); setEndGcashRef('');
     setDebtName(table?.session?.customerName || ''); setDebtContact('');
+    setUseProrated(false); // 🟢 FIXED: Reset prorate toggle
   };
 
   const openExtend = (tableId: string) => {
@@ -230,6 +251,14 @@ export function Tables() {
       orders: [],
       paymentStatus: paymentOption,
     });
+
+    if (selectedCustomer) {
+      if (selectedCustomer.kind === 'queue') {
+        removeFromQueue(selectedCustomer.id);
+      } else if (selectedCustomer.kind === 'reservation') {
+        updateReservationStatus(selectedCustomer.id, 'completed');
+      }
+    }
     
     setAssigningTableId(null);
     setSelectedCustomer(null);
@@ -239,15 +268,13 @@ export function Tables() {
     setPaymentOption('payNow');
   };
 
-const handleConfirmEnd = () => {
+  const handleConfirmEnd = () => {
     if (!endingTableId || !endInfo || !endingTable?.session) return;
     
-    // Calculate exact payments for this checkout
     const partialPaid = parseFloat(endPartialAmount) || 0;
     const totalPaidNow = endPayStatus === 'paid' ? endInfo.balance : endPayStatus === 'partial' ? partialPaid : 0;
     const remainingBalance = endInfo.balance - totalPaidNow;
 
-    // 🟢 NEW: Auto-add to watchlist if there is an unpaid debt
     if (remainingBalance > 0 && addWatchlistItem) {
       const targetName = debtName || endingTable.session.customerName;
       addWatchlistItem({
@@ -262,7 +289,6 @@ const handleConfirmEnd = () => {
       }
     }
 
-    // Log the session to history before freeing the table
     addSessionHistory({
       customerName: endingTable.session.customerName,
       tableId: endingTable.id,
@@ -279,12 +305,10 @@ const handleConfirmEnd = () => {
     setEndingTableId(null);
   };
 
-  // 🟢 NEW: Walkout / Absconded Handler
   const handleWalkout = () => {
     if (!endingTableId || !endInfo || !endingTable?.session) return;
     const customer = endingTable.session.customerName;
     
-    // Log session history as unpaid
     addSessionHistory({
       customerName: customer,
       tableId: endingTable.id,
@@ -293,11 +317,10 @@ const handleConfirmEnd = () => {
       endTime: new Date(),
       durationMinutes: endInfo.elapsedMins,
       totalAmount: endInfo.totalDue,
-      amountPaid: endInfo.alreadyPaid, // 0 new payment
+      amountPaid: endInfo.alreadyPaid,
       orders: endingTable.session.orders || []
     });
 
-    // Automatically push to Security Watchlist
     if (addWatchlistItem) {
       addWatchlistItem({
         name: customer,
@@ -318,9 +341,21 @@ const handleConfirmEnd = () => {
 
   const handleConfirmExtend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!extendingTableId) return;
+    if (!extendingTableId || !extendingTable?.session) return;
     const charge = extendPayStatus === 'paid' ? extendCharge : extendPayStatus === 'partial' ? parseFloat(extendPartialAmount) || 0 : 0;
-    extendSession(extendingTableId, extendMinutes, charge);
+    
+    // 🟢 FIXED: Handle converting fixed session to Open Time via assignTable override
+    if (extendMinutes === 'open') {
+      assignTable(extendingTableId, {
+         ...extendingTable.session,
+         isOpenTime: true,
+         durationMinutes: null,
+         amountPaid: extendingTable.session.amountPaid + charge
+      });
+    } else {
+      extendSession(extendingTableId, extendMinutes as number, charge);
+    }
+    
     setExtendingTableId(null);
   };
 
@@ -365,7 +400,6 @@ const handleConfirmEnd = () => {
     }
   };
 
-  // ── Inline Menu Handlers ──
   const handleSaveMenuItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItemForm.name || newItemForm.price <= 0) return;
@@ -405,53 +439,85 @@ const handleConfirmEnd = () => {
     { key: 'maintenance', label: 'Maintenance', count: maintenance,         color: 'bg-orange-500/10 text-orange-400 border-orange-500/30' },
   ];
 
- // 🟢 NEW: Dynamic Hour Calculator based on closing time
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
+  };
+
+  const getNextClosingTime = () => {
+    const now = new Date();
+    const isWeekend = now.getDay() === 5 || now.getDay() === 6;
+    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    if (!closeTimeStr) return null;
+    
+    const [hr, min] = closeTimeStr.split(':').map(Number);
+    const closeDate = new Date(now);
+    closeDate.setHours(hr, min, 0, 0);
+    
+    // If the computed closing time is in the past, it means closing happens tomorrow
+    if (closeDate <= now) {
+      closeDate.setDate(closeDate.getDate() + 1);
+    }
+    return closeDate;
+  };
+
   const getAvailableDurations = () => {
     const now = new Date();
-    // Friday (5) and Saturday (6) are treated as Weekend nights
-    const isWeekend = now.getDay() === 5 || now.getDay() === 6; 
-    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    
-    // Default fallback to maxHours if no closing time is set
     let maxMins = (reservationTerms?.maxHours || 8) * 60;
-
-    if (closeTimeStr) {
-      const [hr, min] = closeTimeStr.split(':').map(Number);
-      const closeDate = new Date(now);
-      closeDate.setHours(hr, min, 0, 0);
-      
-      // If closing time is early AM (e.g., 03:00) and we are currently in PM, push it to tomorrow
-      if (hr <= 12 && now.getHours() >= 12) {
-         closeDate.setDate(closeDate.getDate() + 1);
-      }
-      
+    const closeDate = getNextClosingTime();
+    
+    if (closeDate) {
       const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
-      if (minsLeft > 0) {
-         maxMins = Math.min(maxMins, minsLeft);
-      }
+      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
     }
 
     const opts = [];
-    // Generate options in 60-minute blocks only
-    for (let m = 60; m <= maxMins; m += 60) {
-      opts.push(m);
-    }
-    // Always provide at least 1 hour, even if right at closing
+    for (let m = 60; m <= maxMins; m += 60) opts.push(m);
     return opts.length > 0 ? opts : [60]; 
   };
 
   const availableDurations = getAvailableDurations();
 
+  // 🟢 NEW: Enhanced Extension Limits factoring in upcoming reservations
+  const getExtensionLimits = (tableId: string) => {
+    const now = new Date();
+    let maxMins = (reservationTerms?.maxHours || 8) * 60;
+    let blocksOpenTime = false;
+    let conflictWarning = "";
+
+    const closeDate = getNextClosingTime();
+    if (closeDate) {
+      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
+      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
+    }
+
+    const nextRes = getNextReservation(tableId);
+    if (nextRes) {
+      const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, now) / 60);
+      if (minsUntilRes > 0) {
+        maxMins = Math.min(maxMins, minsUntilRes);
+        blocksOpenTime = true;
+        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${nextRes.timeSlot}.`;
+      } else {
+        maxMins = 0;
+        blocksOpenTime = true;
+        conflictWarning = `Table is reserved for ${nextRes.customerName} NOW. Extension blocked.`;
+      }
+    }
+
+    const opts = [];
+    for (let m = 60; m <= maxMins; m += 60) opts.push(m);
+    return { opts, maxMins, blocksOpenTime, conflictWarning };
+  };
+
   const isOpenTimeDisabled = (() => {
     const now = new Date();
-    const isWeekend = now.getDay() === 5 || now.getDay() === 6; 
-    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    if (!closeTimeStr) return false;
-    
-    const [hr, min] = closeTimeStr.split(':').map(Number);
-    const closeDate = new Date(now);
-    closeDate.setHours(hr, min, 0, 0);
-    if (hr <= 12 && now.getHours() >= 12) closeDate.setDate(closeDate.getDate() + 1);
+    const closeDate = getNextClosingTime();
+    if (!closeDate) return false;
     
     const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
     const cutoff = rates?.bookingCutoffMinutes || 60;
@@ -482,10 +548,10 @@ const handleConfirmEnd = () => {
         sessionStorage.removeItem('assignTableId');
       }
     }
-  }, []);
+  }, [effectiveHourly]);
 
-  const PayStatusBtn = ({ value, current, label, onChange }: { value: PaymentStatus; current: PaymentStatus; label: string; onChange: (v: PaymentStatus) => void }) => (
-    <button type="button" onClick={() => onChange(value)} className={`flex-1 py-2 rounded-xl border text-xs font-semibold transition-all ${current === value ? value === 'paid' ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : value === 'partial' ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-rose-600/15 border-rose-600 text-rose-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
+  const PayStatusBtn = ({ value, current, label, onChange, disabled }: { value: PaymentStatus; current: PaymentStatus; label: string; onChange: (v: PaymentStatus) => void; disabled?: boolean }) => (
+    <button type="button" disabled={disabled} onClick={() => onChange(value)} className={`flex-1 py-2 rounded-xl border text-xs font-semibold transition-all ${disabled ? 'opacity-50 cursor-not-allowed bg-neutral-900/50 border-neutral-800 text-neutral-600' : current === value ? value === 'paid' ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : value === 'partial' ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-rose-600/15 border-rose-600 text-rose-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
       {label}
     </button>
   );
@@ -523,10 +589,12 @@ const handleConfirmEnd = () => {
               return (
                 <div key={t.id} className="flex items-center gap-3 bg-amber-950/40 border border-amber-700/50 rounded-xl px-4 py-3">
                   <AlertTriangle size={15} className="text-amber-400 flex-shrink-0" />
-                  <p className="flex-1 text-xs text-amber-300">
-                    <strong>{t.name}</strong> — session ends in <strong>{minsLeft} minute{minsLeft !== 1 ? 's' : ''}</strong>.{' '}
-                    <span className="text-amber-400/70">{t.session!.customerName} · Consider extending.</span>
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-amber-300 truncate">
+                      <strong>{t.name}</strong> — ends in <strong>{minsLeft} min{minsLeft !== 1 ? 's' : ''}</strong>.
+                    </p>
+                    <p className="text-[10px] text-amber-400/70 truncate">{t.session!.customerName} · Consider extending.</p>
+                  </div>
                   <button onClick={() => setDismissedNearEnd(prev => new Set([...prev, t.id]))} className="p-1 text-amber-600 hover:text-amber-300 transition-colors flex-shrink-0">
                     <X size={13} />
                   </button>
@@ -689,8 +757,11 @@ const handleConfirmEnd = () => {
                 <div className="space-y-4">
                   {!showArchivedMenu && (
                     <form onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
-                      <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold mb-2">{editingItem ? 'Edit Item' : 'Add New Item'}</p>
-                      <input type="text" value={newItemForm.name} onChange={e => setNewItemForm(f => ({ ...f, name: e.target.value }))} placeholder="Item Name" required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                      <div className="flex justify-between items-center mb-1">
+                         <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold">{editingItem ? 'Edit Item' : 'Add New Item'}</p>
+                         <CharCount current={newItemForm.name} max={30} />
+                      </div>
+                      <input type="text" maxLength={30} value={newItemForm.name} onChange={e => setNewItemForm(f => ({ ...f, name: e.target.value }))} placeholder="Item Name" required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
                       <div className="grid grid-cols-2 gap-2">
                         <select value={newItemForm.category} onChange={e => setNewItemForm(f => ({ ...f, category: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 appearance-none">
                           <option value="Drinks">Drinks</option>
@@ -716,8 +787,8 @@ const handleConfirmEnd = () => {
                     
                     {inventory.filter((i: any) => showArchivedMenu ? !i.isActive : i.isActive).map((item: any) => (
                       <div key={item.id} className={`w-full flex items-center justify-between p-3 rounded-xl border ${showArchivedMenu ? 'bg-neutral-950 border-neutral-800/50 opacity-70' : 'bg-neutral-900 border-neutral-800'}`}>
-                        <div>
-                          <p className={`text-sm font-semibold ${showArchivedMenu ? 'text-neutral-400 line-through' : 'text-neutral-200'}`}>{item.name}</p>
+                        <div className="min-w-0 pr-2">
+                          <p className={`text-sm font-semibold truncate ${showArchivedMenu ? 'text-neutral-400 line-through' : 'text-neutral-200'}`} title={item.name}>{item.name}</p>
                           <p className="text-[10px] text-neutral-500">{item.category} · Stock: {item.stock}</p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -734,7 +805,6 @@ const handleConfirmEnd = () => {
                                 updateInventoryItem(item.id, { isActive: false });
                                 setConfirmArchiveId(null);
                               }} 
-                              // 🟢 FIX: Removed the onMouseLeave that caused it to disappear
                               className="px-2 py-1.5 text-white bg-rose-600 hover:bg-rose-500 rounded-md transition-colors text-[10px] font-bold" 
                               title="Confirm Archive"
                             >
@@ -925,7 +995,6 @@ const handleConfirmEnd = () => {
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
                     <Clock size={11} /> Duration
                   </label>
-                  {/* 🟢 NEW: Clean Dropdown for Start Session */}
                   <select 
                     value={durationMinutes === 'open' ? 'open' : durationMinutes}
                     onChange={e => {
@@ -954,11 +1023,15 @@ const handleConfirmEnd = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment Option</label>
                   <div className="flex gap-2">
+                    {/* 🟢 FIXED: Disable "Pay Now" if Open Time is selected */}
                     <button
                       type="button"
+                      disabled={durationMinutes === 'open'}
                       onClick={() => setPaymentOption('payNow')}
                       className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                        paymentOption === 'payNow'
+                        durationMinutes === 'open'
+                          ? 'opacity-50 cursor-not-allowed bg-neutral-900/50 border-neutral-800 text-neutral-600'
+                          : paymentOption === 'payNow'
                           ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
                           : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
                       }`}
@@ -1013,7 +1086,8 @@ const handleConfirmEnd = () => {
                     Cancel
                   </button>
                   <button type="submit"
-                    className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2 font-semibold">
+                    disabled={paymentOption === 'payNow' && durationMinutes !== 'open' && (!amountPaid || parseFloat(amountPaid) <= 0)}
+                    className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2 font-semibold disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed">
                     <Play size={14} /> Start Timer
                   </button>
                 </div>
@@ -1068,6 +1142,38 @@ const handleConfirmEnd = () => {
                 </div>
               </div>
 
+              {/* 🟢 NEW: Early Departure & Void UI */}
+              {!endInfo.isOpenTime && endInfo.elapsedMins < (endingTable.session.durationMinutes || 0) && (
+                <div className="bg-blue-950/20 border border-blue-900/40 p-4 rounded-xl space-y-3">
+                  <div>
+                    <h4 className="text-xs font-bold text-blue-400 mb-1 flex items-center gap-1.5"><Info size={14}/> Early Departure Detected</h4>
+                    <p className="text-[10px] text-blue-300/80">Customer played for {endInfo.elapsedMins}m out of {(endingTable.session.durationMinutes as number)}m.</p>
+                  </div>
+                  
+                  {endInfo.elapsedMins <= 5 ? (
+                    <button onClick={handleVoidSession} className="w-full py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-700/50 rounded-lg text-xs font-bold transition-colors">
+                      Void Session (Mistake under 5 mins)
+                    </button>
+                  ) : (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <div className={`w-8 h-4 rounded-full relative transition-colors ${useProrated ? 'bg-blue-500' : 'bg-neutral-700'}`} onClick={() => setUseProrated(!useProrated)}>
+                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${useProrated ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </div>
+                      <span className="text-xs text-neutral-300 font-semibold">Prorate bill to actual time ({Math.max(60, endInfo.elapsedMins)}m minimum)</span>
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {/* 🟢 NEW: Warning to return change if they overpaid upfront and prorated down */}
+              {endInfo.refundDue > 0 && (
+                <div className="bg-amber-950/40 border border-amber-900/50 rounded-lg p-3">
+                  <p className="text-[11px] text-amber-400 font-bold mb-0.5">Overpayment / Change Due</p>
+                  <p className="text-[10px] text-amber-300/80">Customer paid {formatPHP(endInfo.alreadyPaid)} upfront. Prorated bill is {formatPHP(endInfo.totalDue)}.</p>
+                  <p className="text-xs text-amber-400 font-black mt-1.5 flex items-center gap-1.5"><Banknote size={14}/> Return to Customer: {formatPHP(endInfo.refundDue)}</p>
+                </div>
+              )}
+
               {endInfo.balance > 0 && (
                 <>
                   <div className="space-y-2">
@@ -1092,19 +1198,24 @@ const handleConfirmEnd = () => {
                           <label className="text-xs text-neutral-400 mb-1.5 block">GCash Reference Number *</label>
                           <input type="text" value={endGcashRef} onChange={e => setEndGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit ref no." className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 font-mono" />
                         </div>
-                      ) : (
+                      ) : endPayStatus === 'paid' ? (
                         <div>
                           <label className="text-xs text-neutral-400 mb-1.5 block">Cash Tendered *</label>
                           <input type="number" value={endCashTendered} onChange={e => setEndCashTendered(e.target.value)} placeholder={`e.g. ${endInfo.balance + 100}`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
-                          {parseFloat(endCashTendered) > (endPayStatus === 'partial' ? (parseFloat(endPartialAmount) || 0) : endInfo.balance) && (
-                            <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(endCashTendered) - (endPayStatus === 'partial' ? (parseFloat(endPartialAmount) || 0) : endInfo.balance))}</p>
+                          
+                          {parseFloat(endCashTendered) > endInfo.balance && (
+                            <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(endCashTendered) - endInfo.balance)}</p>
+                          )}
+                          
+                          {parseFloat(endCashTendered) >= 0 && parseFloat(endCashTendered) < endInfo.balance && (
+                            <p className="text-[11px] text-rose-400 mt-1 font-bold flex items-center gap-1"><AlertTriangle size={10} /> Insufficient cash tendered.</p>
                           )}
                         </div>
-                      )}
+                      ) : null}
                       
                       {endPayStatus === 'partial' && (
                         <div className="pt-2 border-t border-neutral-800">
-                          <label className="text-xs text-neutral-400 mb-1.5 block">Amount Collected Today (PHP) *</label>
+                          <label className="text-xs text-neutral-400 mb-1.5 block">Exact Amount Collected Today (PHP) *</label>
                           <input type="number" value={endPartialAmount} onChange={e => setEndPartialAmount(e.target.value)} placeholder={`Amount collected`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40" />
                         </div>
                       )}
@@ -1113,18 +1224,63 @@ const handleConfirmEnd = () => {
 
                   {(endPayStatus === 'partial' || endPayStatus === 'unpaid') && (
                     <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4 space-y-3">
-                      <p className="text-[10px] text-amber-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><AlertTriangle size={11}/> Debt Tracking Required</p>
-                      <input type="text" value={debtName} onChange={e=>setDebtName(e.target.value)} placeholder="Customer Name" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200" />
-                      <input type="text" value={debtContact} onChange={e=>setDebtContact(e.target.value)} placeholder="Contact Number / ID Info" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200" />
+                      <div className="flex justify-between items-center">
+                        <p className="text-[10px] text-amber-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><AlertTriangle size={11}/> Debt Tracking Required</p>
+                      </div>
+                      <input type="text" maxLength={50} value={debtName} onChange={e=>setDebtName(e.target.value)} placeholder="Customer Name" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200" />
+                      <input type="text" maxLength={50} value={debtContact} onChange={e=>setDebtContact(e.target.value)} placeholder="Contact Number / ID Info" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200" />
                     </div>
                   )}
                 </>
               )}
 
-              <div className="flex gap-3 pt-2 border-t border-neutral-800">
-                <button type="button" onClick={() => setEndingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
-                <button type="button" onClick={handleConfirmEnd} className="flex-1 px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white text-sm rounded-xl shadow-lg shadow-rose-900/30 transition-all flex items-center justify-center gap-2 font-semibold"><CircleCheck size={15} /> Finish & Close</button>
-              </div>
+              {(() => {
+                let canEnd = true;
+                
+                if (endInfo.balance > 0) {
+                  if (endPayStatus === 'paid') {
+                    if (endPayMethod === 'cash') {
+                      canEnd = !!endCashTendered && parseFloat(endCashTendered) >= endInfo.balance;
+                    } else if (endPayMethod === 'gcash') {
+                      canEnd = endGcashRef.length >= 13;
+                    }
+                  } else if (endPayStatus === 'partial') {
+                    const partial = parseFloat(endPartialAmount) || 0;
+                    if (partial <= 0 || partial >= endInfo.balance) {
+                      canEnd = false;
+                    } else {
+                      if (endPayMethod === 'cash') {
+                        canEnd = true; 
+                      } else if (endPayMethod === 'gcash') {
+                        canEnd = endGcashRef.length >= 13;
+                      }
+                    }
+                    if (!debtName.trim()) canEnd = false; 
+                  } else if (endPayStatus === 'unpaid') {
+                    if (!debtName.trim()) canEnd = false;
+                  }
+                }
+
+                return (
+                  <div className="flex gap-3 pt-2 border-t border-neutral-800">
+                    <button type="button" onClick={() => setEndingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
+                      Cancel
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={handleConfirmEnd} 
+                      disabled={!canEnd}
+                      className={`flex-1 px-4 py-2.5 text-sm rounded-xl transition-all flex items-center justify-center gap-2 font-semibold ${
+                        canEnd 
+                          ? 'bg-rose-700 hover:bg-rose-600 text-white shadow-lg shadow-rose-900/30' 
+                          : 'bg-neutral-800 text-neutral-500 cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      <CircleCheck size={15} /> Finish & Close
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1140,28 +1296,55 @@ const handleConfirmEnd = () => {
             </div>
 
             <form onSubmit={handleConfirmExtend} className="overflow-y-auto flex-1 p-6 space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Extra Time</label>
-                <select 
-                  value={extendMinutes}
-                  onChange={e => setExtendMinutes(Number(e.target.value))}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
-                >
-                  {availableDurations.map(d => (
-                    <option key={d} value={d}>+{d / 60} Hour{d / 60 > 1 ? 's' : ''} (+{formatPHP((d / 60) * effectiveHourly)})</option>
-                  ))}
-                </select>
-              </div>
+              {/* 🟢 FIXED: Dynamic Extension Limit warnings based on reservations */}
+              {(() => {
+                const extLimits = getExtensionLimits(extendingTableId);
+                return (
+                  <>
+                    {extLimits.conflictWarning && (
+                      <div className="bg-amber-950/30 border border-amber-900/50 p-3 rounded-lg flex items-start gap-2">
+                        <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                        <p className="text-[10px] text-amber-400 font-semibold">{extLimits.conflictWarning}</p>
+                      </div>
+                    )}
+                    
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Extra Time</label>
+                      <select 
+                        value={extendMinutes === 'open' ? 'open' : extendMinutes}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === 'open') {
+                            setExtendMinutes('open');
+                            setExtendPayStatus('unpaid');
+                          } else {
+                            setExtendMinutes(Number(val));
+                          }
+                        }}
+                        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                      >
+                        {extLimits.opts.map(d => (
+                          <option key={d} value={d}>+{d / 60} Hour{d / 60 > 1 ? 's' : ''} (+{formatPHP((d / 60) * effectiveHourly)})</option>
+                        ))}
+                        <option value="open" disabled={extLimits.blocksOpenTime || isOpenTimeDisabled || extendingTable.session?.isOpenTime}>
+                          {extendingTable.session?.isOpenTime ? 'Already on Open Time' : 'Switch to Open Time'} {(extLimits.blocksOpenTime || isOpenTimeDisabled) && !extendingTable.session?.isOpenTime ? '(Blocked by reservations or cut-off)' : ''}
+                        </option>
+                      </select>
+                    </div>
 
-              <div className="bg-neutral-900 rounded-xl p-3 text-xs border border-neutral-800 flex justify-between">
-                <span className="text-neutral-400">Extension charge</span><span className="font-semibold text-amber-400">{formatPHP(extendCharge)}</span>
-              </div>
+                    <div className="bg-neutral-900 rounded-xl p-3 text-xs border border-neutral-800 flex justify-between">
+                      <span className="text-neutral-400">Extension charge</span><span className="font-semibold text-amber-400">{extendMinutes === 'open' ? 'Billed at checkout' : formatPHP(extendCharge)}</span>
+                    </div>
+                  </>
+                );
+              })()}
 
               <div className="space-y-2">
                 <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
                 <div className="flex gap-2">
-                  <PayStatusBtn value="paid" current={extendPayStatus} label="Paid Now" onChange={setExtendPayStatus} />
-                  <PayStatusBtn value="partial" current={extendPayStatus} label="Partial" onChange={setExtendPayStatus} />
+                  {/* 🟢 FIXED: Disables Paid Now and Partial when switching to Open Time */}
+                  <PayStatusBtn disabled={extendMinutes === 'open'} value="paid" current={extendPayStatus} label="Paid Now" onChange={setExtendPayStatus} />
+                  <PayStatusBtn disabled={extendMinutes === 'open'} value="partial" current={extendPayStatus} label="Partial" onChange={setExtendPayStatus} />
                   <PayStatusBtn value="unpaid" current={extendPayStatus} label="Defer to End" onChange={setExtendPayStatus} />
                 </div>
               </div>
@@ -1174,21 +1357,23 @@ const handleConfirmEnd = () => {
                   </div>
                   {extendPayMethod === 'gcash' ? (
                     <input type="text" value={extendGcashRef} onChange={e => setExtendGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit GCash Ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-blue-500/40 font-mono" />
-                  ) : (
+                  ) : extendPayStatus === 'paid' ? (
                     <div>
                       <input type="number" value={extendCashTendered} onChange={e => setExtendCashTendered(e.target.value)} placeholder="Amount Tendered" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-emerald-500/40" />
-                      {parseFloat(extendCashTendered) > (extendPayStatus === 'partial' ? parseFloat(extendPartialAmount)||0 : extendCharge) && (
-                        <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(extendCashTendered) - (extendPayStatus === 'partial' ? parseFloat(extendPartialAmount)||0 : extendCharge))}</p>
+                      {parseFloat(extendCashTendered) > extendCharge && (
+                        <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(extendCashTendered) - extendCharge)}</p>
+                      )}
+                      {parseFloat(extendCashTendered) >= 0 && parseFloat(extendCashTendered) < extendCharge && (
+                        <p className="text-[11px] text-rose-400 mt-1 font-bold flex items-center gap-1"><AlertTriangle size={10} /> Insufficient cash tendered.</p>
                       )}
                     </div>
-                  )}
+                  ) : null}
                   {extendPayStatus === 'partial' && (
-                    <input type="number" value={extendPartialAmount} onChange={e => setExtendPartialAmount(e.target.value)} placeholder={`Amount collected today`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-amber-500/40" />
+                    <input type="number" value={extendPartialAmount} onChange={e => setExtendPartialAmount(e.target.value)} placeholder={`Exact amount collected today`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-amber-500/40" />
                   )}
                 </div>
               )}
 
-              {/* 🟢 NEW: Dynamic Action Buttons & Validation */}
               {(() => {
                 let canExtend = true;
                 
@@ -1198,8 +1383,8 @@ const handleConfirmEnd = () => {
                 } else if (extendPayStatus === 'partial') {
                   const partial = parseFloat(extendPartialAmount) || 0;
                   if (partial <= 0) canExtend = false;
-                  else if (extendPayMethod === 'cash') canExtend = !!extendCashTendered && parseFloat(extendCashTendered) >= partial;
-                  else if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length === 13;
+                  else if (extendPayMethod === 'cash') canExtend = true;
+                  else if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length >= 13;
                 }
 
                 return (

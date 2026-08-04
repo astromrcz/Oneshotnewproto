@@ -1,16 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Save, CheckCircle, X, LayoutTemplate, ShieldAlert, Lock, Upload, Trash2, Image as ImageIcon, AlertTriangle } from 'lucide-react';
-import { useOutletContext } from 'react-router';
+import { supabase } from '../utils/supabase'; 
 
 export function AdminSiteSettings() {
-  // 🟢 FIXED: Pulled in hashPassword and staffProfile for secure authentication
   const { siteConfig, updateSiteConfig, staffUsers, hashPassword, staffProfile } = useAppContext() as any;
   const [form, setForm] = useState(siteConfig || {});
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'hero' | 'about' | 'contact'>('hero');
   
-  // Security Modal States
   const [showConfirm, setShowConfirm] = useState(false);
   const [password, setPassword] = useState('');
   const [passError, setPassError] = useState('');
@@ -31,7 +29,6 @@ export function AdminSiteSettings() {
     setPassError('');
   };
 
-  // 🟢 FIXED: Converted to async to handle the SHA-256 hashing
   const handleConfirmSave = async () => {
     setIsProcessing(true);
     setPassError('');
@@ -59,17 +56,20 @@ export function AdminSiteSettings() {
     setUploading(true);
     try {
       for (const file of files) {
-        const formData = new FormData();
-        formData.append('image', file);
-
-        const res = await fetch('http://localhost:3001/api/images', {
-          method: 'POST',
-          body: formData,
-        });
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${target}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
         
-        if (!res.ok) throw new Error('Upload failed');
+        const { error: uploadError } = await supabase.storage
+          .from('oneshot-assets')
+          .upload(fileName, file);
+          
+        if (uploadError) throw uploadError;
         
-        const { url } = await res.json();
+        const { data: publicUrlData } = supabase.storage
+          .from('oneshot-assets')
+          .getPublicUrl(fileName);
+          
+        const url = publicUrlData.publicUrl;
         
         if (target === 'hero') {
           setForm((prev: any) => {
@@ -81,9 +81,9 @@ export function AdminSiteSettings() {
           setForm((prev: any) => ({ ...prev, aboutImage: url }));
         }
       }
-    } catch (error) {
-      console.error(error);
-      alert("Image upload failed. Make sure your server is running.");
+    } catch (error: any) {
+      console.error('Supabase Upload Error:', error);
+      alert(`Image upload failed: ${error.message || 'Ensure your oneshot-assets bucket is created and public.'}`);
     } finally {
       setUploading(false);
       e.target.value = ''; 
@@ -97,6 +97,16 @@ export function AdminSiteSettings() {
     }));
   };
 
+  // 🟢 NEW: Reusable Character Counter Component
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
+  };
+
   return (
     <div className="space-y-5 max-w-4xl">
       {saved && (
@@ -108,7 +118,7 @@ export function AdminSiteSettings() {
       <div className="bg-sky-950/20 border border-sky-900/30 rounded-xl p-4 flex items-start gap-3">
         <LayoutTemplate size={15} className="text-sky-500 flex-shrink-0 mt-0.5" />
         <p className="text-xs text-sky-400/80 leading-relaxed">
-          <strong>Content Management System (CMS):</strong> Changes made here directly reflect on the customer-facing Homepage. Upload images directly from your device.
+          <strong>Content Management System (CMS):</strong> Changes made here directly reflect on the customer-facing Homepage. Strict text limits are enforced to prevent visual bugs on mobile devices.
         </p>
       </div>
 
@@ -135,7 +145,6 @@ export function AdminSiteSettings() {
                   <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Hero Text</h3>
                   <span className="text-[9px] font-bold bg-neutral-900 text-neutral-600 px-2 py-1 rounded flex items-center gap-1"><Lock size={10}/> LOCKED</span>
                 </div>
-                {/* 🟢 FIXED: Disabled the core Hero text fields */}
                 <div>
                   <label className="block text-xs text-neutral-500 mb-1.5 font-medium">Main Title</label>
                   <input type="text" disabled value={form.heroTitle || ''} className="w-full bg-neutral-950 border border-neutral-800/50 rounded-xl px-3 py-2 text-sm text-neutral-500 cursor-not-allowed outline-none" />
@@ -182,26 +191,39 @@ export function AdminSiteSettings() {
           </div>
         )}
 
-        {/* ════ ABOUT SECTION ════ */}
         {activeTab === 'about' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-300">
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 space-y-4">
               <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold border-b border-neutral-800 pb-3 mb-4">About Us Copy</h3>
+              {/* 🟢 FIXED: Limited to 50 Chars */}
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Header Title</label>
-                <input type="text" value={form.aboutTitle || ''} onChange={e => setForm(f => ({...f, aboutTitle: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:border-sky-500 outline-none" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Header Title</label>
+                  <CharCount current={form.aboutTitle} max={50} />
+                </div>
+                <input type="text" maxLength={50} value={form.aboutTitle || ''} onChange={e => setForm(f => ({...f, aboutTitle: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:border-sky-500 outline-none" />
+              </div>
+              {/* 🟢 FIXED: Limited paragraphs to 400 Chars */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Paragraph 1 (The Hook)</label>
+                  <CharCount current={form.aboutP1} max={400} />
+                </div>
+                <textarea rows={3} maxLength={400} value={form.aboutP1 || ''} onChange={e => setForm(f => ({...f, aboutP1: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Paragraph 1 (The Hook)</label>
-                <textarea rows={3} value={form.aboutP1 || ''} onChange={e => setForm(f => ({...f, aboutP1: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Paragraph 2 (The Facility)</label>
+                  <CharCount current={form.aboutP2} max={400} />
+                </div>
+                <textarea rows={3} maxLength={400} value={form.aboutP2 || ''} onChange={e => setForm(f => ({...f, aboutP2: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Paragraph 2 (The Facility)</label>
-                <textarea rows={3} value={form.aboutP2 || ''} onChange={e => setForm(f => ({...f, aboutP2: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
-              </div>
-              <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Paragraph 3 (The Closing)</label>
-                <textarea rows={3} value={form.aboutP3 || ''} onChange={e => setForm(f => ({...f, aboutP3: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Paragraph 3 (The Closing)</label>
+                  <CharCount current={form.aboutP3} max={400} />
+                </div>
+                <textarea rows={3} maxLength={400} value={form.aboutP3 || ''} onChange={e => setForm(f => ({...f, aboutP3: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
               </div>
             </div>
 
@@ -231,38 +253,58 @@ export function AdminSiteSettings() {
           </div>
         )}
 
-        {/* ════ CONTACT & SOCIALS ════ */}
         {activeTab === 'contact' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-300">
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 space-y-4">
               <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold border-b border-neutral-800 pb-3 mb-4">Contact Details</h3>
+              {/* 🟢 FIXED: Limited to 150 Chars */}
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Physical Address</label>
-                <textarea rows={2} value={form.address || ''} onChange={e => setForm(f => ({...f, address: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none resize-none" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Physical Address</label>
+                  <CharCount current={form.address} max={150} />
+                </div>
+                <textarea rows={2} maxLength={150} value={form.address || ''} onChange={e => setForm(f => ({...f, address: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none resize-none" />
+              </div>
+              {/* 🟢 FIXED: Limited to 50 Chars */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Phone Numbers</label>
+                  <CharCount current={form.phone} max={50} />
+                </div>
+                <input type="text" maxLength={50} value={form.phone || ''} onChange={e => setForm(f => ({...f, phone: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none" placeholder="e.g. 0917-XXX-XXXX | 0998-XXX-XXXX" />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Phone Numbers</label>
-                <input type="text" value={form.phone || ''} onChange={e => setForm(f => ({...f, phone: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none" placeholder="e.g. 0917-XXX-XXXX | 0998-XXX-XXXX" />
-              </div>
-              <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Email Address</label>
-                <input type="text" value={form.email || ''} onChange={e => setForm(f => ({...f, email: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Email Address</label>
+                  <CharCount current={form.email} max={50} />
+                </div>
+                <input type="text" maxLength={50} value={form.email || ''} onChange={e => setForm(f => ({...f, email: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none" />
               </div>
             </div>
 
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 space-y-4">
               <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold border-b border-neutral-800 pb-3 mb-4">Social Media Handles</h3>
+              {/* 🟢 FIXED: Social handles strictly limited to 50 Chars */}
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Facebook Handle</label>
-                <input type="text" value={form.facebook || ''} onChange={e => setForm(f => ({...f, facebook: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-blue-400 focus:border-sky-500 outline-none font-mono" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Facebook Handle</label>
+                  <CharCount current={form.facebook} max={50} />
+                </div>
+                <input type="text" maxLength={50} value={form.facebook || ''} onChange={e => setForm(f => ({...f, facebook: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-blue-400 focus:border-sky-500 outline-none font-mono" />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Instagram Handle</label>
-                <input type="text" value={form.instagram || ''} onChange={e => setForm(f => ({...f, instagram: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-rose-400 focus:border-sky-500 outline-none font-mono" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Instagram Handle</label>
+                  <CharCount current={form.instagram} max={50} />
+                </div>
+                <input type="text" maxLength={50} value={form.instagram || ''} onChange={e => setForm(f => ({...f, instagram: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-rose-400 focus:border-sky-500 outline-none font-mono" />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium">TikTok Handle</label>
-                <input type="text" value={form.tiktok || ''} onChange={e => setForm(f => ({...f, tiktok: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none font-mono" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">TikTok Handle</label>
+                  <CharCount current={form.tiktok} max={50} />
+                </div>
+                <input type="text" maxLength={50} value={form.tiktok || ''} onChange={e => setForm(f => ({...f, tiktok: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-sky-500 outline-none font-mono" />
               </div>
             </div>
           </div>
@@ -274,7 +316,6 @@ export function AdminSiteSettings() {
         </button>
       </form>
 
-      {/* ════ CONFIRMATION MODAL ════ */}
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">

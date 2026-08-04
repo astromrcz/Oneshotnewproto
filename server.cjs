@@ -1,0 +1,725 @@
+// ==========================================
+// ONE SHOT BAR & BILLIARDS: LOCAL EDGE SERVER (CommonJS)
+// ==========================================
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+const sqlite3Pkg = require('sqlite3');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const { createClient } = require('@supabase/supabase-js');
+
+// 🟢 GLOBAL CRASH GUARDS: Prevent server shutdowns from unhandled errors
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ [Uncaught Exception Guard]:', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ [Unhandled Rejection Guard]:', reason);
+});
+
+// 🟢 SAFE JSON PARSER: Prevents "Unexpected token 'd', 'data:image'..." from crashing requests
+const safeParseJSON = (str, fallback = null) => {
+  if (!str) return fallback;
+  try {
+    return JSON.parse(str);
+  } catch (e) {
+    return Array.isArray(fallback) ? [str] : str;
+  }
+};
+
+const sqlite3 = sqlite3Pkg.verbose();
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+const SUPABASE_URL = 
+  process.env.SUPABASE_URL || 
+  process.env.VITE_SUPABASE_URL || 
+  'https://bqnswmjopwmvunzchqzl.supabase.co';
+const SUPABASE_SERVICE_KEY = 
+  process.env.SUPABASE_SERVICE_KEY || 
+  process.env.VITE_SUPABASE_SERVICE_KEY || 
+  process.env.SUPABASE_SECRET_KEY || 
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
+  process.env.VITE_SUPABASE_ANON_KEY || 
+  process.env.SUPABASE_ANON_KEY || 
+  '';
+
+if (!SUPABASE_SERVICE_KEY) {
+  console.error('❌ [CONFIG ERROR]: Supabase key is empty! Check your variable name in .env');
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+setInterval(async () => {
+  try {
+    const { error } = await supabase
+      .from('system_status')
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq('id', 1);
+
+    if (error) throw error;
+  } catch (err) {
+    console.log('[Heartbeat Alert] Failed to reach Supabase. Venue might be offline.');
+  }
+}, 60000); 
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+app.use(cors()); 
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+const userDataPath = process.env.USER_DATA_PATH || __dirname;
+const dbPath = path.resolve(userDataPath, 'oneshot.db');
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('❌ Error connecting to SQLite database:', err.message);
+  } else {
+    console.log('✅ Connected to local SQLite database.');
+    db.configure('busyTimeout', 5000);
+    
+    db.serialize(() => {
+      db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
+      db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0, recoveryPin TEXT)`);
+      db.run(`CREATE TABLE IF NOT EXISTS tables (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, isActive INTEGER DEFAULT 1, maintenanceReason TEXT, sessionData TEXT)`);
+      db.run(`CREATE TABLE IF NOT EXISTS inventory (id TEXT PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER DEFAULT 0, isActive INTEGER DEFAULT 1, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, partySize INTEGER, status TEXT, queueNumber INTEGER, notes TEXT, arrivalTime DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, email TEXT, date DATETIME, timeSlot TEXT, durationHours INTEGER, partySize INTEGER, tableId TEXT, status TEXT, totalAmount REAL, downPaymentAmount REAL, downPaymentPaid INTEGER DEFAULT 0, balancePaid INTEGER DEFAULT 0, paymentRef TEXT, receiptImg TEXT, cancellationReason TEXT, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS session_history (id TEXT PRIMARY KEY, customerName TEXT, tableId TEXT, tableName TEXT, startTime DATETIME, endTime DATETIME, durationMinutes INTEGER, totalAmount REAL, amountPaid REAL, orders TEXT)`);
+      db.run(`CREATE TABLE IF NOT EXISTS promo_codes (id TEXT PRIMARY KEY, code TEXT UNIQUE, discount_percent REAL, description TEXT, is_active INTEGER DEFAULT 1, is_limited_uses INTEGER DEFAULT 0, max_usage INTEGER DEFAULT 0, usage_count INTEGER DEFAULT 0, start_date DATETIME, expires_at DATETIME)`);
+      db.run(`CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, title TEXT, date TEXT, type TEXT, description TEXT, registrationLink TEXT, bracketLink TEXT, minParticipants INTEGER DEFAULT 8, maxParticipants INTEGER, slotsFull INTEGER DEFAULT 0, attachments TEXT, allowReservations INTEGER DEFAULT 1, reservationTableCount INTEGER DEFAULT 4, caterWalkIns INTEGER DEFAULT 1, walkInTableCount INTEGER DEFAULT 4, walkInTableIds TEXT, reservationTableIds TEXT, eventTableIds TEXT)`);
+      db.run(`CREATE TABLE IF NOT EXISTS closed_dates (id TEXT PRIMARY KEY, closed_date TEXT, type TEXT DEFAULT 'specific', day_of_week INTEGER, reason TEXT, is_full_day INTEGER DEFAULT 1, open_time TEXT, close_time TEXT)`);
+      db.run(`CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY, title TEXT, content TEXT, type TEXT, isActive INTEGER DEFAULT 1, expiresAt DATETIME, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, customerName TEXT, contactInfo TEXT, feedbackType TEXT, comment TEXT, reservationId TEXT, tags TEXT, date DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS lost_and_found (id TEXT PRIMARY KEY, itemName TEXT, description TEXT, foundDate DATETIME, status TEXT, image TEXT, claimedBy TEXT, claimedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
+      db.run(`CREATE TABLE IF NOT EXISTS watchlist (id TEXT PRIMARY KEY, name TEXT, reason TEXT, description TEXT, status TEXT, evidenceLink TEXT, dateAdded DATETIME, resolvedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
+      db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`);
+
+      const newEventCols = [
+        'bracketLink TEXT',
+        'minParticipants INTEGER DEFAULT 8',
+        'reservationTableCount INTEGER DEFAULT 4',
+        'walkInTableIds TEXT',
+        'reservationTableIds TEXT',
+        'eventTableIds TEXT'
+      ];
+      newEventCols.forEach((col) => {
+        db.run(`ALTER TABLE events ADD COLUMN ${col}`, () => {});
+      });
+
+      db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) SELECT key_name, setting_value FROM system_settings`, (err) => {
+        if (!err) {
+          db.run(`DELETE FROM systemSettings WHERE keyName LIKE '%_%'`);
+          db.run(`DROP TABLE IF EXISTS system_settings`);
+        }
+      });
+      db.run(`INSERT OR IGNORE INTO cms (keyName, settingValue) SELECT key_name, content_value FROM cms_content`, (err) => {
+        if (!err) db.run(`DROP TABLE IF EXISTS cms_content`);
+      });
+
+      const createSuperAdmin = `
+        INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin)
+        SELECT 'admin_001', 'superadmin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'System Administrator', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492'
+        WHERE NOT EXISTS (SELECT 1 FROM staff WHERE username = 'superadmin')
+      `;
+      db.run(createSuperAdmin);
+
+      const makeImmortal = `
+        CREATE TRIGGER IF NOT EXISTS prevent_superadmin_deletion
+        BEFORE DELETE ON staff
+        FOR EACH ROW
+        WHEN OLD.username = 'superadmin'
+        BEGIN
+            SELECT RAISE(ABORT, 'CRITICAL SECURITY ALERT: The Master Super Admin account cannot be deleted from the database.');
+        END;
+      `;
+      db.run(makeImmortal);
+    });
+  }
+});
+
+// ==========================================
+// 🚀 READ ROUTES (GET)
+// ==========================================
+app.get('/api/staff', (req, res) => {
+  db.all(`SELECT * FROM staff`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1, isAdmin: r.isAdmin === 1 })));
+  });
+});
+
+app.get('/api/promo-codes', (req, res) => {
+  db.all(`SELECT * FROM promo_codes`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({
+      id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description,
+      isActive: r.is_active === 1, isLimitedUses: r.is_limited_uses === 1, maxUsage: r.max_usage,
+      usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at
+    })));
+  });
+});
+
+app.get('/api/images/:id', (req, res) => {
+  db.get(`SELECT mimeType, data FROM images WHERE id = ?`, [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).send('Image not found');
+    res.setHeader('Content-Type', row.mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); 
+    res.send(row.data); 
+  });
+});
+
+app.get('/api/closed-dates', (req, res) => {
+  db.all(`SELECT * FROM closed_dates ORDER BY closed_date ASC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({
+      id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week,
+      reason: r.reason, isFullDay: r.is_full_day === 1, openTime: r.open_time, closeTime: r.close_time
+    })));
+  });
+});
+
+// 🟢 FIXED: Use safeParseJSON for tables sessionData
+app.get('/api/tables', (req, res) => {
+  db.all(`SELECT * FROM tables`, [], (err, rows) => {
+    if (err) {
+       console.error("CRASH IN /api/tables:", err.message);
+       return res.status(500).json({ error: err.message });
+    }
+    res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1, session: safeParseJSON(r.sessionData, undefined) })));
+  });
+});
+
+app.get('/api/reservations', (req, res) => {
+  db.all(`SELECT * FROM reservations ORDER BY createdAt DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({ ...r, downPaymentPaid: r.downPaymentPaid === 1, balancePaid: r.balancePaid === 1 })));
+  });
+});
+
+app.get('/api/inventory', (req, res) => {
+  db.all(`SELECT * FROM inventory`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1 })));
+  });
+});
+
+app.get('/api/queue', (req, res) => {
+  db.all(`SELECT * FROM queue WHERE status IN ('waiting', 'called') ORDER BY queueNumber ASC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+// 🟢 FIXED: Use safeParseJSON for activities metadata
+app.get('/api/activities', (req, res) => {
+  db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`, () => {
+    db.all(`SELECT * FROM activities ORDER BY timestamp DESC LIMIT 200`, [], (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(rows.map(r => ({ ...r, metadata: safeParseJSON(r.metadata, undefined) })));
+    });
+  });
+});
+
+// 🟢 FIXED: Use safeParseJSON for all event arrays
+app.get('/api/events', (req, res) => {
+  db.all(`SELECT * FROM events`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(e => ({ 
+      ...e, 
+      slotsFull: e.slotsFull === 1, 
+      allowReservations: e.allowReservations !== 0,
+      caterWalkIns: e.caterWalkIns !== 0,
+      walkInTableCount: e.walkInTableCount ?? 4,
+      reservationTableCount: e.reservationTableCount ?? 4,
+      minParticipants: e.minParticipants ?? 8,
+      attachments: safeParseJSON(e.attachments, []),
+      walkInTableIds: safeParseJSON(e.walkInTableIds, []),
+      reservationTableIds: safeParseJSON(e.reservationTableIds, []),
+      eventTableIds: safeParseJSON(e.eventTableIds, [])
+    })));
+  });
+});
+
+// 🟢 FIXED: Use safeParseJSON for feedback tags
+app.get('/api/feedback', (req, res) => {
+  db.all(`SELECT * FROM feedback ORDER BY date DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(f => ({ ...f, tags: safeParseJSON(f.tags, []) })));
+  });
+});
+
+app.get('/api/announcements', (req, res) => {
+  db.all(`SELECT * FROM announcements ORDER BY createdAt DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(a => ({ ...a, isActive: a.isActive === 1 })));
+  });
+});
+
+// 🟢 FIXED: Use safeParseJSON for session history orders
+app.get('/api/session-history', (req, res) => {
+  db.all(`SELECT * FROM session_history ORDER BY endTime DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({ ...r, orders: safeParseJSON(r.orders, []) })));
+  });
+});
+
+app.get('/api/settings/rates', (req, res) => {
+  db.all(`SELECT keyName, settingValue FROM systemSettings`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const config = {};
+    rows.forEach(row => {
+      let val = row.settingValue;
+      if (val === 'true') val = true;
+      else if (val === 'false') val = false;
+      else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
+      config[row.keyName] = val;
+    });
+    res.json(config);
+  });
+});
+
+// 🟢 FIXED: Use safeParseJSON for CMS heroImages
+app.get('/api/cms', (req, res) => {
+  db.all(`SELECT keyName, settingValue FROM cms`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const config = {};
+    rows.forEach(row => {
+      config[row.keyName] = row.keyName === 'heroImages' ? safeParseJSON(row.settingValue, []) : row.settingValue;
+    });
+    res.json(config);
+  });
+});
+
+app.get('/api/lost-and-found', (req, res) => {
+  db.all(`SELECT * FROM lost_and_found ORDER BY foundDate DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({ ...r, isArchived: r.isArchived === 1 })));
+  });
+});
+
+app.get('/api/watchlist', (req, res) => {
+  db.all(`SELECT * FROM watchlist ORDER BY dateAdded DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows.map(r => ({ ...r, isArchived: r.isArchived === 1 })));
+  });
+});
+
+// ==========================================
+// 📥 WRITE ROUTES (POST/PUT/DELETE) 
+// ==========================================
+app.post('/api/sync-to-cloud', async (req, res) => {
+  let syncErrors = [];
+  try {
+    const syncTable = (localTable, cloudTable, mapFn, conflictKey = 'id') => {
+      return new Promise((resolve) => {
+        db.all(`SELECT * FROM ${localTable}`, [], async (err, rows) => {
+          if (err || !rows || rows.length === 0) return resolve();
+          const payload = rows.map(mapFn);
+          const { error } = await supabase.from(cloudTable).upsert(payload, { onConflict: conflictKey });
+          if (error) syncErrors.push(`${cloudTable} failed: ${error.message}`);
+          resolve();
+        });
+      });
+    };
+
+    await Promise.all([
+      syncTable('cms', 'cms', r => ({ keyName: r.keyName, settingValue: r.settingValue }), 'keyName'),
+      syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
+      syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
+      syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: r.is_active ? 1 : 0, is_limited_uses: r.is_limited_uses ? 1 : 0, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
+      syncTable('events', 'events', r => ({ id: r.id, title: r.title, date: r.date || null, type: r.type, description: r.description, registrationLink: r.registrationLink, maxParticipants: r.maxParticipants, slotsFull: r.slotsFull ? 1 : 0, attachments: r.attachments, allowReservations: r.allowReservations !== 0 ? 1 : 0, caterWalkIns: r.caterWalkIns !== 0 ? 1 : 0, walkInTableCount: r.walkInTableCount }), 'id'),
+      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: r.is_full_day ? 1 : 0, open_time: r.open_time, close_time: r.close_time }), 'id'),
+      syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id'),
+      // 🟢 ADDED: Customer-facing reservations (with refund support)
+      syncTable('reservations', 'reservations', r => ({
+        id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, email: r.email,
+        date: r.date, timeSlot: r.timeSlot, durationHours: r.durationHours, partySize: r.partySize,
+        status: r.status, totalAmount: r.totalAmount, downPaymentAmount: r.downPaymentAmount,
+        downPaymentPaid: r.downPaymentPaid ? 1 : 0, balancePaid: r.balancePaid ? 1 : 0,
+        paymentRef: r.paymentRef, receiptImg: r.receiptImg, cancellationReason: r.cancellationReason,
+        refundStatus: r.refundStatus || null, refundMethod: r.refundMethod || null, refundNotes: r.refundNotes || null
+      }), 'id'),
+      // 🟢 ADDED: Walk-in Queue & Customer Feedback
+      syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime }), 'id'),
+      syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date }), 'id')
+    ]);
+
+    if (syncErrors.length > 0) {
+      res.status(500).json({ error: 'Supabase rejected some tables', details: syncErrors.join(' | ') });
+    } else {
+      res.status(200).json({ message: 'Cloud sync dispatched successfully.' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to dispatch cloud sync.' });
+  }
+});
+
+app.post('/api/lost-and-found', (req, res) => {
+  const { id, itemName, description, foundDate, status, image, claimedBy, claimedDate } = req.body;
+  db.run(`INSERT INTO lost_and_found (id, itemName, description, foundDate, status, image, claimedBy, claimedDate, isArchived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+  [id, itemName, description, foundDate, status, image, claimedBy, claimedDate], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Lost item added." });
+  });
+});
+
+app.post('/api/watchlist', (req, res) => {
+  const { id, name, reason, description, status, evidenceLink, dateAdded, resolvedDate } = req.body;
+  db.run(`INSERT INTO watchlist (id, name, reason, description, status, evidenceLink, dateAdded, resolvedDate, isArchived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+  [id, name, reason, description, status, evidenceLink, dateAdded, resolvedDate], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Watchlist item added." });
+  });
+});
+
+app.post('/api/session-history', (req, res) => {
+  const { id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, orders } = req.body;
+  db.run(`INSERT INTO session_history (id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, orders) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, JSON.stringify(orders || [])], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Session history logged." });
+  });
+});
+
+app.post('/api/promo-codes', (req, res) => {
+  const { id, code, discountPercent, description, isActive, isLimitedUses, maxUsage, startDate, expiresAt } = req.body;
+  db.run(`INSERT INTO promo_codes (id, code, discount_percent, description, is_active, is_limited_uses, max_usage, start_date, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+  [id, code, discountPercent, description, isActive ? 1 : 0, isLimitedUses ? 1 : 0, maxUsage, startDate, expiresAt], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Promo added to DB." });
+  });
+});
+
+app.post('/api/images', upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+  const id = 'img_' + Date.now() + '_' + Math.round(Math.random() * 1000);
+  db.run(`INSERT INTO images (id, mimeType, data) VALUES (?, ?, ?)`, [id, req.file.mimetype, req.file.buffer], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ url: `http://localhost:3001/api/images/${id}` });
+  });
+});
+
+app.post('/api/tables', (req, res) => {
+  const { id, name, status, isActive } = req.body;
+  db.run(
+    `INSERT INTO tables (id, name, status, isActive) VALUES (?, ?, ?, ?)`,
+    [id, name, status || 'available', isActive ? 1 : 0],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: 'Table created successfully', id: id });
+    }
+  );
+});
+
+app.put('/api/tables/:id', (req, res) => {
+  const { status, session, isActive, name, maintenanceReason } = req.body;
+  const sessionData = session ? JSON.stringify(session) : null;
+  let updates = [], params = [];
+  if (status !== undefined) { updates.push("status = ?"); params.push(status); }
+  if (session !== undefined || req.body.hasOwnProperty('session')) { updates.push("sessionData = ?"); params.push(sessionData); }
+  if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
+  if (name !== undefined) { updates.push("name = ?"); params.push(name); }
+  if (maintenanceReason !== undefined) { updates.push("maintenanceReason = ?"); params.push(maintenanceReason); }
+  if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  params.push(req.params.id);
+  db.run(`UPDATE tables SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Table updated successfully." });
+  });
+});
+
+app.post('/api/queue', (req, res) => {
+  const { id, customerName, contactNumber, partySize, status, queueNumber, notes } = req.body;
+  db.run(`INSERT INTO queue (id, customerName, contactNumber, partySize, status, queueNumber, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`, 
+  [id, customerName, contactNumber, partySize, status, queueNumber, notes || ''], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: 'Added to queue' });
+  });
+});
+
+app.post('/api/reservations', (req, res) => {
+  const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
+  db.run(`INSERT INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+  [id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef, receiptImg], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: 'Reservation created successfully', id: id });
+  });
+});
+
+app.post('/api/events', (req, res) => {
+  const { id, title, date, type, description, registrationLink, bracketLink, minParticipants, maxParticipants, slotsFull, attachments, allowReservations, reservationTableCount, caterWalkIns, walkInTableCount, walkInTableIds, reservationTableIds, eventTableIds } = req.body;
+  db.run(
+    `INSERT INTO events (id, title, date, type, description, registrationLink, bracketLink, minParticipants, maxParticipants, slotsFull, attachments, allowReservations, reservationTableCount, caterWalkIns, walkInTableCount, walkInTableIds, reservationTableIds, eventTableIds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id, title, date, type, description,
+      registrationLink || '', bracketLink || '',
+      minParticipants || 8, maxParticipants || 32, slotsFull ? 1 : 0,
+      JSON.stringify(attachments || []),
+      allowReservations ? 1 : 0, reservationTableCount || 4,
+      caterWalkIns ? 1 : 0, walkInTableCount || 4,
+      JSON.stringify(walkInTableIds || []),
+      JSON.stringify(reservationTableIds || []),
+      JSON.stringify(eventTableIds || [])
+    ],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Event created.", id });
+    }
+  );
+});
+
+app.put('/api/events/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    if (Array.isArray(val)) return JSON.stringify(val);
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE events SET ${setClause} WHERE id = ?`, values, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Event updated." });
+  });
+});
+
+app.delete('/api/events/:id', (req, res) => {
+  db.run(`DELETE FROM events WHERE id = ?`, [req.params.id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Event deleted." });
+  });
+});
+
+app.post('/api/closed-dates', (req, res) => {
+  const { id, date, type, dayOfWeek, reason, isFullDay, openTime, closeTime } = req.body;
+  db.run(
+    `INSERT INTO closed_dates (id, closed_date, type, day_of_week, reason, is_full_day, open_time, close_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, date || '', type || 'specific', dayOfWeek || 0, reason, isFullDay ? 1 : 0, openTime || '12:00', closeTime || '22:00'],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Closed date added.", id });
+    }
+  );
+});
+
+app.put('/api/closed-dates/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => {
+    if (k === 'date') return 'closed_date = ?';
+    if (k === 'dayOfWeek') return 'day_of_week = ?';
+    if (k === 'isFullDay') return 'is_full_day = ?';
+    if (k === 'openTime') return 'open_time = ?';
+    if (k === 'closeTime') return 'close_time = ?';
+    return `${k} = ?`;
+  }).join(', ');
+
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE closed_dates SET ${setClause} WHERE id = ?`, values, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Closed date updated." });
+  });
+});
+
+app.delete('/api/closed-dates/:id', (req, res) => {
+  db.run(`DELETE FROM closed_dates WHERE id = ?`, [req.params.id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Closed date deleted." });
+  });
+});
+
+app.put('/api/promo-codes/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => {
+    if (k === 'discountPercent') return 'discount_percent = ?';
+    if (k === 'isActive') return 'is_active = ?';
+    if (k === 'isLimitedUses') return 'is_limited_uses = ?';
+    if (k === 'maxUsage') return 'max_usage = ?';
+    if (k === 'usageCount') return 'usage_count = ?';
+    if (k === 'startDate') return 'start_date = ?';
+    if (k === 'expiresAt') return 'expires_at = ?';
+    return `${k} = ?`;
+  }).join(', ');
+
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE promo_codes SET ${setClause} WHERE id = ?`, values, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Promo updated." });
+  });
+});
+
+app.delete('/api/promo-codes/:id', (req, res) => {
+  db.run(`DELETE FROM promo_codes WHERE id = ?`, [req.params.id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Promo deleted." });
+  });
+});
+
+app.post('/api/staff', (req, res) => {
+  const { id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin } = req.body;
+  db.run(
+    `INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      username,
+      password,
+      fullName,
+      role || 'cashier',
+      phone || '',
+      joinedDate || new Date().toISOString(),
+      avatarImg || '',
+      isActive ? 1 : 0,
+      isAdmin ? 1 : 0,
+      recoveryPin || ''
+    ],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Staff user created successfully.", id });
+    }
+  );
+});
+
+app.put('/api/staff/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE staff SET ${setClause} WHERE id = ?`, values, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Staff user updated successfully." });
+  });
+});
+
+app.post('/api/activities', (req, res) => {
+  const { id, type, description, timestamp, metadata } = req.body;
+  const metaStr = metadata ? JSON.stringify(metadata) : null;
+  db.run(
+    `INSERT OR IGNORE INTO activities (id, type, description, timestamp, metadata) VALUES (?, ?, ?, ?, ?)`,
+    [id, type, description, timestamp, metaStr],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Activity logged." });
+    }
+  );
+});
+
+app.put('/api/reservations/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE reservations SET ${setClause} WHERE id = ?`, values, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Reservation updated." });
+  });
+});
+
+app.delete('/api/reservations/:id', (req, res) => {
+  db.run(`DELETE FROM reservations WHERE id = ?`, [req.params.id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Reservation deleted." });
+  });
+});
+
+app.post('/api/inventory', (req, res) => {
+  const { id, name, category, price, stock, isActive } = req.body;
+  db.run(`INSERT INTO inventory (id, name, category, price, stock, isActive) VALUES (?, ?, ?, ?, ?, ?)`, [id, name, category, price, stock, isActive ? 1 : 0], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Inventory item saved to DB." });
+  });
+});
+
+app.put('/api/settings/rates', (req, res) => {
+  const payload = req.body;
+  const keys = Object.keys(payload);
+  if (keys.length === 0) return res.json({ message: "No rates to update" });
+  let index = 0; let errors = [];
+  const processNextKey = () => {
+    if (index >= keys.length) {
+      if (errors.length > 0) return res.status(500).json({ error: "Some rates failed to save.", details: errors });
+      return res.json({ message: "Rates updated successfully." });
+    }
+    const key = keys[index];
+    const value = typeof payload[key] === 'boolean' ? String(payload[key]) : (payload[key] ?? '').toString();
+    db.run(`INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`, [key, value], function(err) {
+      if (err) { errors.push({ key, error: err.message }); }
+      index++; processNextKey();
+    });
+  };
+  processNextKey();
+});
+
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction) {
+  const distPath = path.join(__dirname, 'dist');
+  app.use(express.static(distPath));
+  
+  app.get(/(.*)/, (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
+// Automatically update Supabase heartbeat every 60 seconds so UI stays ONLINE
+setInterval(async () => {
+  try {
+    await supabase
+      .from('system_status')
+      .upsert({ id: 1, last_seen_at: new Date().toISOString() });
+  } catch (err) {
+    // Ignore silent network glitches
+  }
+}, 60000);
+
+// Also ping immediately on server startup
+supabase
+  .from('system_status')
+  .upsert({ id: 1, last_seen_at: new Date().toISOString() })
+  .then(() => console.log('💓 Supabase heartbeat pinged successfully.'))
+  .catch(() => {});
+
+app.listen(PORT, () => {
+  console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${PORT}`);
+});

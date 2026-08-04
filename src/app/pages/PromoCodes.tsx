@@ -28,14 +28,7 @@ export function PromoCodesPage() {
 
   return (
     <div className="space-y-5">
-      {/* Admin-only note */}
-      <div className="flex items-start gap-3 bg-amber-950/20 border border-amber-900/30 rounded-xl px-4 py-3">
-        <ShieldCheck size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-600/80 leading-relaxed">
-          Promo codes are managed in the <strong className="text-amber-500">Admin Portal</strong>. This page is read-only.
-          Exact codes are hidden for security purposes. Contact your administrator to issue new codes.
-        </p>
-      </div>
+     
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

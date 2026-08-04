@@ -66,9 +66,19 @@ export function SettingsPage() {
 
   const flashSaved = (key: string) => { setSaved(key); setTimeout(() => setSaved(null), 2500); };
 
+  // 🟢 FIXED: Added strict validation checks before saving
   const handleSaveProfile = () => {
-    updateStaffProfile({ fullName: profileForm.fullName, phone: profileForm.phone });
-    setProfileEdit(false); flashSaved('profile');
+    if (!profileForm.fullName.trim()) {
+      toast.error("Full Name cannot be empty.");
+      return;
+    }
+    if (profileForm.phone.length !== 11) {
+      toast.error("Phone number must be exactly 11 digits.");
+      return;
+    }
+    updateStaffProfile({ fullName: profileForm.fullName.trim(), phone: profileForm.phone });
+    setProfileEdit(false); 
+    flashSaved('profile');
   };
 
   const handleSaveAvatar = async () => {
@@ -198,8 +208,62 @@ export function SettingsPage() {
             {!profileEdit ? <button onClick={() => { setProfileEdit(true); setProfileForm({ fullName: staffProfile.fullName, phone: staffProfile.phone, role: staffProfile.role }); }} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => setProfileEdit(false)} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
           </div>
           <div className="p-6 space-y-4">
-            <FieldRow icon={User} label="Full Name" value={staffProfile.fullName} editing={profileEdit} input={<input type="text" value={profileForm.fullName} onChange={e => setProfileForm(f => ({ ...f, fullName: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" />} />
-            <FieldRow icon={Phone} label="Phone Number" value={staffProfile.phone} editing={profileEdit} input={<input type="tel" value={profileForm.phone} onChange={e => setProfileForm(f => ({ ...f, phone: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" />} />
+            {/* 🟢 FIXED: Full Name input with strict regex (no symbols), 50 chars max, and live counter */}
+            <FieldRow 
+              icon={User} 
+              label="Full Name" 
+              value={staffProfile.fullName} 
+              editing={profileEdit} 
+              input={
+                <div className="space-y-1">
+                  <input 
+                    type="text" 
+                    value={profileForm.fullName} 
+                    maxLength={50}
+                    onChange={e => {
+                      const cleanName = e.target.value.replace(/[^a-zA-Z\s]/g, '').slice(0, 50);
+                      setProfileForm(f => ({ ...f, fullName: cleanName }));
+                    }} 
+                    placeholder="Letters and spaces only" 
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" 
+                  />
+                  <div className="flex justify-between items-center text-[10px] text-neutral-500">
+                    <span>Letters and spaces only (no symbols)</span>
+                    <span className={profileForm.fullName.length === 50 ? 'text-amber-400 font-bold' : ''}>
+                      {profileForm.fullName.length}/50
+                    </span>
+                  </div>
+                </div>
+              } 
+            />
+            {/* 🟢 FIXED: Phone Number input with digits only, 11 digits max, and live counter */}
+            <FieldRow 
+              icon={Phone} 
+              label="Phone Number" 
+              value={staffProfile.phone} 
+              editing={profileEdit} 
+              input={
+                <div className="space-y-1">
+                  <input 
+                    type="tel" 
+                    value={profileForm.phone} 
+                    maxLength={11}
+                    onChange={e => {
+                      const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 11);
+                      setProfileForm(f => ({ ...f, phone: digitsOnly }));
+                    }} 
+                    placeholder="e.g. 09171234567" 
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" 
+                  />
+                  <div className="flex justify-between items-center text-[10px] text-neutral-500">
+                    <span>Must be exactly 11 numeric digits</span>
+                    <span className={profileForm.phone.length === 11 ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
+                      {profileForm.phone.length}/11
+                    </span>
+                  </div>
+                </div>
+              } 
+            />
             <FieldRow icon={Tag} label="Role / Position" value={staffProfile.role} editing={false} input={null} />
             <FieldRow icon={Calendar} label="Date Joined" value={new Date(staffProfile.joinedDate).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })} editing={false} input={null} />
             {profileEdit && (
@@ -212,7 +276,7 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* 🟢 APPEARANCE TAB (Modern Inspiration Setup) */}
+      {/* APPEARANCE */}
       {activeSection === 'appearance' && (
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2">
           <div className="px-6 py-5 border-b border-neutral-800">
@@ -221,7 +285,6 @@ export function SettingsPage() {
           </div>
           
           <div className="p-6 space-y-8">
-            {/* Dark / Light Mode */}
             <div>
               <p className="text-xs text-neutral-400 font-bold uppercase tracking-wider mb-3">Base Mode</p>
               <div className="grid grid-cols-2 gap-4 max-w-md">
@@ -234,7 +297,6 @@ export function SettingsPage() {
               </div>
             </div>
 
-            {/* Horizontal Palette Cards */}
             <div>
               <div className="flex justify-between items-center mb-3">
                 <p className="text-xs text-neutral-400 font-bold uppercase tracking-wider">Color Palettes</p>
@@ -260,7 +322,6 @@ export function SettingsPage() {
                         </span>
                       </div>
                       
-                      {/* Swatch Frames */}
                       <div className="flex gap-2 h-10 w-full">
                         <div className="flex-1 rounded-lg bg-neutral-950 border border-neutral-800 flex items-end justify-center pb-1"><span className="text-[8px] text-neutral-600 font-bold uppercase tracking-widest">BG</span></div>
                         <div className={`flex-1 rounded-lg ${p.prm} flex items-end justify-center pb-1`}><span className="text-[8px] text-white/70 font-bold uppercase tracking-widest">Prm</span></div>

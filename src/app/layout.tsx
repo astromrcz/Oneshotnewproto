@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   CheckCircle, Clock, Calendar, UserPlus,
-  Tag, Shield, Palette,
+  Tag,
   Menu, X, Bell, ChevronRight,
-  Circle, LogOut, Settings,
-  Monitor, ShieldCheck, Lock, ShieldAlert, Package, History
+  LogOut, Settings,
+  Monitor, ShieldCheck, Lock, ShieldAlert, Package, History,
+  AlertTriangle, Sparkles
 } from 'lucide-react';
+import { addMinutes, differenceInSeconds } from 'date-fns';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
@@ -36,46 +38,154 @@ const pageTitles: Record<string, string> = {
   '/staff/settings': 'Settings',
 };
 
+// ── SIDEBAR SMART AUTO-SWITCHING LIVE COUNTDOWN TIMER (#1 + #5) ──
+function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: (path: string) => void }) {
+  const [now, setNow] = useState(new Date());
+
+  // 1-second ticker for live countdown
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDuration = (totalSeconds: number) => {
+    const absSecs = Math.abs(totalSeconds);
+    const hrs = Math.floor(absSecs / 3600);
+    const mins = Math.floor((absSecs % 3600) / 60);
+    const secs = absSecs % 60;
+    const parts = [
+      hrs > 0 ? `${hrs}h` : '',
+      `${mins.toString().padStart(2, '0')}m`,
+      `${secs.toString().padStart(2, '0')}s`
+    ].filter(Boolean).join(' ');
+    return totalSeconds < 0 ? `+${parts}` : parts;
+  };
+
+  const occupiedTables = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
+
+  if (occupiedTables.length === 0) {
+    return (
+      <div className="px-4 py-3">
+        <button
+          onClick={() => onNavigate('/staff/tables')}
+          className="w-full bg-neutral-900 border border-neutral-800 hover:border-neutral-700 rounded-xl p-3.5 text-left transition-all group"
+        >
+          <div className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-wider mb-1">
+            <Sparkles size={13} /> ✨ ALL TABLES CLEAR
+          </div>
+          <p className="text-sm font-black text-neutral-100 group-hover:text-emerald-400 transition-colors">
+            Ready for Walk-ins
+          </p>
+          <p className="text-[11px] text-neutral-500 mt-0.5">
+            No tables are currently occupied.
+          </p>
+        </button>
+      </div>
+    );
+  }
+
+  const tableStatuses = occupiedTables.map((t: any) => {
+    const start = new Date(t.session.startTime);
+    const isOpen = t.session.isOpenTime || t.session.durationMinutes === null;
+    if (isOpen) {
+      const elapsedSecs = differenceInSeconds(now, start);
+      return { table: t, type: 'open' as const, secs: elapsedSecs };
+    }
+    const end = addMinutes(start, t.session.durationMinutes);
+    const remainingSecs = differenceInSeconds(end, now);
+    if (remainingSecs <= 0) {
+      return { table: t, type: 'overtime' as const, secs: remainingSecs };
+    }
+    if (remainingSecs <= 900) {
+      return { table: t, type: 'warning' as const, secs: remainingSecs };
+    }
+    return { table: t, type: 'active' as const, secs: remainingSecs };
+  });
+
+  // Urgency sort: 1. Overtime -> 2. Warning (<15m) -> 3. Active -> 4. Open Time
+  tableStatuses.sort((a, b) => {
+    const score = (type: string) => {
+      if (type === 'overtime') return 1;
+      if (type === 'warning') return 2;
+      if (type === 'active') return 3;
+      return 4;
+    };
+    if (score(a.type) !== score(b.type)) return score(a.type) - score(b.type);
+    return a.secs - b.secs;
+  });
+
+  const primary = tableStatuses[0];
+  const isOt = primary.type === 'overtime';
+  const isWarn = primary.type === 'warning';
+  const isOpen = primary.type === 'open';
+
+  const cardStyle = isOt
+    ? 'bg-rose-950/30 border-rose-500/60 text-rose-400'
+    : isWarn
+    ? 'bg-amber-950/30 border-amber-500/60 text-amber-400'
+    : 'bg-neutral-900 border-neutral-800 text-blue-400';
+
+  return (
+    <div className="px-4 py-3">
+      <button
+        onClick={() => onNavigate('/staff/tables')}
+        className={`w-full border rounded-xl p-3.5 text-left transition-all group ${cardStyle}`}
+      >
+        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider mb-1">
+          <span className="flex items-center gap-1.5 truncate">
+            {isOt ? <AlertTriangle size={13} className="animate-bounce" /> : <Clock size={13} />}
+            <span>{isOt ? '⚠️ OVERTIME' : isWarn ? '⏳ ENDS SOON' : '⏱️ NEXT UP'} · {primary.table.name}</span>
+          </span>
+          <span className="text-neutral-500 font-normal">#{occupiedTables.length} active</span>
+        </div>
+        <div className="flex items-baseline gap-1.5">
+          <p className={`text-xl font-black ${isOt ? 'text-rose-400 animate-pulse' : 'text-neutral-100'}`}>
+            {formatDuration(primary.secs)}
+          </p>
+          <span className="text-[10px] text-neutral-400 font-semibold">
+            {isOt ? 'unpaid' : isOpen ? 'elapsed' : 'left'}
+          </span>
+        </div>
+        <p className="text-[11px] text-neutral-400 mt-1 truncate">
+          Player: <span className="font-semibold text-neutral-200">{primary.table.session?.customerName}</span>
+        </p>
+      </button>
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────────
+
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   
-  // 🟢 FIXED: Reads from localStorage so it survives F5 refreshes
-  const [isLocked, setIsLocked] = useState(() => localStorage.getItem('oneshot_is_locked') === 'true');
+  const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
-  const { queue, tables, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext();
+  const { queue, tables, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
-  const [showSetup, setShowSetup] = useState(staffProfile.isFirstLogin === 1);
+  const [showSetup, setShowSetup] = useState(staffProfile?.isFirstLogin === 1);
 
-  // 🟢 FIXED: Unified Lock/Unlock Handlers
   const handleLockTerminal = () => {
-    localStorage.setItem('oneshot_is_locked', 'true');
+    sessionStorage.setItem('oneshot_is_locked', 'true');
     setIsLocked(true);
   };
 
   const handleUnlockTerminal = () => {
-    localStorage.removeItem('oneshot_is_locked');
+    sessionStorage.removeItem('oneshot_is_locked');
     setIsLocked(false);
   };
   
-  // Auth guard
   useEffect(() => {
-    if (!staffLoggedIn) {
-      navigate('/', { replace: true });
-    }
+    if (!staffLoggedIn) navigate('/', { replace: true });
   }, [staffLoggedIn, navigate]);
 
-  // 🛡️ POS Auto-Lock (Idle Timer - 15 Minutes)
   useEffect(() => {
     if (!staffLoggedIn || isLocked) return;
-
     let timeoutId: NodeJS.Timeout;
-
     const resetIdleTimer = () => {
       clearTimeout(timeoutId);
-      // 900,000 milliseconds = 15 minutes
       timeoutId = setTimeout(() => {
         console.log("⏳ System idle detected. Auto-locking terminal.");
         handleLockTerminal();
@@ -86,7 +196,6 @@ export function Layout() {
     window.addEventListener('keydown', resetIdleTimer);
     window.addEventListener('click', resetIdleTimer);
     window.addEventListener('scroll', resetIdleTimer);
-
     resetIdleTimer();
 
     return () => {
@@ -100,9 +209,8 @@ export function Layout() {
 
   if (!staffLoggedIn) return null;
 
-  const waitingCount = queue.filter(q => q.status === 'waiting').length;
-  const occupiedCount = tables.filter(t => t.status === 'occupied').length;
-  const overtimeCount = tables.filter(t => {
+  const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
+  const overtimeCount = tables.filter((t: any) => {
     if (t.status !== 'occupied' || !t.session) return false;
     const end = new Date(t.session.startTime).getTime() + t.session.durationMinutes * 60000;
     return Date.now() > end;
@@ -124,10 +232,8 @@ export function Layout() {
     <>
       {showSetup && <FirstTimeLoginModal onComplete={() => setShowSetup(false)} />}
       
-      {/* 🟢 FIXED: Conditionally render the LockScreen so it actually disappears when unlocked! */}
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
         
-      {/* 🟢 FIXED: Wrapped the main layout in a blur container when locked */}
       <div className={`flex h-screen bg-neutral-900 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {/* Mobile Overlay */}
@@ -155,36 +261,8 @@ export function Layout() {
             </button>
           </div>
 
-          {/* Quick Status */}
-          <div className="px-4 py-3 flex gap-2">
-            <div className="flex-1 bg-neutral-900 rounded-lg p-2.5 text-center border border-neutral-800">
-              <p className="text-lg font-black text-rose-500">{occupiedCount}</p>
-              <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Occupied</p>
-            </div>
-            <div className="flex-1 bg-neutral-900 rounded-lg p-2.5 text-center border border-neutral-800">
-              <p className="text-lg font-black text-amber-500">{waitingCount}</p>
-              <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">In Queue</p>
-            </div>
-            {overtimeCount > 0 && (
-              <div className="flex-1 bg-rose-950/30 rounded-lg p-2.5 text-center border border-rose-800/40">
-                <p className="text-lg font-black text-rose-400">{overtimeCount}</p>
-                <p className="text-[10px] text-rose-500 uppercase tracking-wider font-semibold">Overtime</p>
-              </div>
-            )}
-          </div>
-
-          {/* Live Monitor Button */}
-          <div className="px-4 pb-1">
-            <button
-              onClick={openLiveMonitor}
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 hover:border-emerald-600/40 text-emerald-400 transition-all text-sm font-semibold group"
-            >
-              <Monitor size={15} className="flex-shrink-0" />
-              <span className="flex-1 text-left">Live Table Monitor</span>
-              <span className="text-[9px] uppercase tracking-widest text-emerald-600 group-hover:text-emerald-500 font-black">↗</span>
-            </button>
-            <p className="text-[9px] text-neutral-700 text-center mt-1">Opens customer display in new tab</p>
-          </div>
+          {/* 🟢 REPLACED: Static Occupied / In Queue boxes replaced by Smart Auto-Switching Live Timer (#1 + #5) */}
+          <SidebarSmartTimer tables={tables} onNavigate={navigate} />
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
@@ -224,8 +302,8 @@ export function Layout() {
             <div className="px-4 pb-4">
               <button
                 onClick={() => {
-                  localStorage.setItem('oneshot_admin_auth', 'true');
-                  window.location.href = '/admin'; // Hard redirect to properly mount admin logic
+                  sessionStorage.setItem('oneshot_admin_auth', 'true');
+                   window.location.href = '/admin';
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-all text-xs font-semibold"
               >
@@ -240,26 +318,20 @@ export function Layout() {
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Header */}
-          <header className="relative z-20 h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
+          <header className="relative z-20 h-16 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <button className="lg:hidden text-neutral-400 hover:text-neutral-200 p-1" onClick={() => setSidebarOpen(true)}>
                 <Menu size={20} />
               </button>
               <h1 className="text-base font-semibold text-neutral-200">{pageTitle}</h1>
             </div>
+            
             <div className="flex items-center gap-3">
               
-              <button onClick={openLiveMonitor} className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 px-3 py-1.5 rounded-full transition-all font-semibold">
-                <Monitor size={13} /> Live Monitor
+              <button onClick={openLiveMonitor} className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 px-3 py-2 rounded-lg transition-all font-semibold">
+                <Monitor size={14} /> Live Monitor
               </button>
 
-              {overtimeCount > 0 && (
-                <div className="flex items-center gap-1.5 bg-rose-950/40 border border-rose-800/40 px-3 py-1.5 rounded-full">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                  <span className="text-xs text-rose-400 font-semibold">{overtimeCount} Overtime</span>
-                </div>
-              )}
-              
               {/* Notifications */}
               <div className="relative">
                 <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-neutral-400 hover:text-neutral-200 transition-colors rounded-lg hover:bg-neutral-800">
@@ -267,12 +339,12 @@ export function Layout() {
                   {(waitingCount > 0 || overtimeCount > 0) && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full" />}
                 </button>
                 {showNotifications && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-neutral-800">
+                  <div className="absolute right-0 top-full mt-3 w-80 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-neutral-800 flex justify-between items-center">
                       <p className="text-sm font-semibold text-neutral-200">Recent Activity</p>
                     </div>
                     <div className="max-h-96 overflow-y-auto">
-                      {activities.slice(0, 5).map(activity => (
+                      {activities.slice(0, 5).map((activity: any) => (
                         <div key={activity.id} className="px-4 py-3 border-b border-neutral-800/50 hover:bg-neutral-900/40 transition-colors">
                           <p className="text-xs text-neutral-300">{activity.description}</p>
                           <p className="text-[10px] text-neutral-600 mt-1">{new Date(activity.timestamp).toLocaleTimeString()}</p>
@@ -286,8 +358,7 @@ export function Layout() {
               {/* User Menu */}
               <div className="relative">
                 <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 bg-neutral-800/60 rounded-full pl-1 pr-3 py-1 border border-neutral-700/50 hover:bg-neutral-800 transition-colors">
-                  <div className="w-7 h-7 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
-                    {/* 🟢 FIXED: Renders the profile picture if it exists, otherwise falls back to initial */}
+                  <div className="w-8 h-8 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
                     {staffProfile?.avatarImg ? (
                       <img 
                         src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} 
@@ -298,14 +369,12 @@ export function Layout() {
                       staffProfile?.fullName?.charAt(0) || 'S'
                     )}
                   </div>
-                  <span className="text-xs text-neutral-400 font-medium">{staffProfile?.fullName || 'Staff'}</span>
                 </button>
                 
                 {showUserMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-56 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="absolute right-0 top-full mt-3 w-56 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
                     <div className="px-4 py-3 border-b border-neutral-800 flex items-center gap-3">
                       <div className="w-10 h-10 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-sm font-bold overflow-hidden flex-shrink-0">
-                        {/* 🟢 FIXED: Added profile picture to the expanded dropdown menu as well */}
                         {staffProfile?.avatarImg ? (
                           <img 
                             src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} 

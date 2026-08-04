@@ -96,9 +96,34 @@ export default function AdminPolicyRatesEditor() {
     if (termsForm.weekdayMinPartySize > termsForm.weekdayMaxPartySize) { toast.error('Weekday Min party size cannot exceed Max.'); return; }
     if (termsForm.weekendMinPartySize > termsForm.weekendMaxPartySize) { toast.error('Weekend Min party size cannot exceed Max.'); return; }
     if (!Number.isFinite(downPaymentPercent) || downPaymentPercent > 100) { toast.error('Down payment cannot exceed 100%.'); return; }
+
+    // 🟢 NEW: Unreasonable Rate Warnings (Industry standard check)
+    const maxStandardRate = 1000;
+    if (ratesForm.hourlyRate > maxStandardRate) toast.warning(`Warning: Base hourly rate (₱${ratesForm.hourlyRate}) exceeds standard industry bounds.`);
+    if (ratesForm.overtimeRate > maxStandardRate) toast.warning(`Warning: Overtime rate (₱${ratesForm.overtimeRate}) exceeds standard industry bounds.`);
+    if (ratesForm.isWeekdayHappyHourActive && ratesForm.weekdayHappyHourRate > maxStandardRate) toast.warning(`Warning: Weekday Happy Hour rate exceeds ₱${maxStandardRate}.`);
+    if (ratesForm.isWeekendHappyHourActive && ratesForm.weekendHappyHourRate > maxStandardRate) toast.warning(`Warning: Weekend Happy Hour rate exceeds ₱${maxStandardRate}.`);
+
+    // 🟢 NEW: Advance Booking & Cancellation Limits
+    if (termsForm.advanceBookingHours > 720) { toast.error('Advance booking cut-off cannot exceed 30 days (720 hours).'); return; }
+    if (termsForm.cancellationHours > 168) { toast.error('Cancellation grace period cannot exceed 7 days (168 hours).'); return; }
+    if (termsForm.cancellationHours > termsForm.advanceBookingHours) { toast.error('Cancellation grace period cannot be longer than the advance booking requirement.'); return; }
+
+    // 🟢 NEW: Time Overlap Validation (e.g., Thursday night flowing into Friday morning)
+    const parseMins = (time: string) => { const [h, m] = time.split(':').map(Number); return h * 60 + m; };
+    const weekdayEndMins = parseMins(ratesForm.weekdayEndTime);
+    const weekdayStartMins = parseMins(ratesForm.weekdayStartTime);
+    const weekendStartMins = parseMins(ratesForm.weekendStartTime);
+
+    // If weekday end time flows into Friday morning (e.g., Opens 18:00, Closes 02:00)
+    const flowsIntoNextDay = weekdayEndMins <= weekdayStartMins; 
+    if (flowsIntoNextDay && weekdayEndMins > weekendStartMins && weekendStartMins > 0) {
+        toast.error(`Schedule Conflict: Weekday schedule ends on Friday at ${fmt12(ratesForm.weekdayEndTime)}, but Weekend schedule starts at ${fmt12(ratesForm.weekendStartTime)}. Please adjust times to prevent overlap.`);
+        return;
+    }
+
     setShowSummaryModal(true);
   };
-
   const [isRefreshing, setIsRefreshing] = useState(false);
   
   const refreshFromDB = async () => {
@@ -166,6 +191,16 @@ export default function AdminPolicyRatesEditor() {
           )}
         </div>
       </div>
+    );
+  };
+
+  // 🟢 NEW: Reusable Character Counter
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
     );
   };
 
@@ -325,13 +360,20 @@ export default function AdminPolicyRatesEditor() {
                 <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Cancellation Grace Period (Hours)</label>
                 <input type="text" inputMode="numeric" name="cancellationHours" value={termsForm.cancellationHours} onChange={handleTermsTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
               </div>
+              {/* 🟢 FIXED: Capped Booking Policies & T&C */}
               <div>
-                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Booking Policies (Displayed in Step 2)</label>
-                <textarea name="cancellationPolicy" value={termsForm.cancellationPolicy} onChange={handleTermsChange} rows={4} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none resize-none" placeholder="E.g. No refunds on same-day cancellations..." />
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs text-neutral-400 uppercase tracking-wider">Booking Policies (Displayed in Step 2)</label>
+                  <CharCount current={termsForm.cancellationPolicy} max={400} />
+                </div>
+                <textarea maxLength={400} name="cancellationPolicy" value={termsForm.cancellationPolicy} onChange={handleTermsChange} rows={4} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none resize-none" placeholder="E.g. No refunds on same-day cancellations..." />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">General Terms & Conditions</label>
-                <textarea name="termsAndConditions" value={termsForm.termsAndConditions} onChange={handleTermsChange} rows={3} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none resize-none" placeholder="General establishment rules..." />
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs text-neutral-400 uppercase tracking-wider">General Terms & Conditions</label>
+                  <CharCount current={termsForm.termsAndConditions} max={600} />
+                </div>
+                <textarea maxLength={600} name="termsAndConditions" value={termsForm.termsAndConditions} onChange={handleTermsChange} rows={3} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none resize-none" placeholder="General establishment rules..." />
               </div>
             </div>
           </div>

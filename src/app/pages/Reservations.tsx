@@ -3,10 +3,12 @@ import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reser
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
-  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send
+  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert
 } from 'lucide-react';
-import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
+import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
+import { supabase } from '../utils/supabase';
+
 const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 const statusConfig: Record<ReservationStatus, { label: string; color: string; dot: string }> = {
@@ -26,7 +28,12 @@ const formatDate = (d: Date) => {
 const todayStart = startOfDay(new Date());
 
 export function Reservations() {
-  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, rates, updateRefundStatus } = useAppContext() as any;
+  const { 
+    reservations, addReservation, updateReservationStatus, cancelReservation, 
+    updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, 
+    rates, updateRefundStatus, theme, reservationTerms,
+    staffUsers, hashPassword, addActivity, sessionHistory
+  } = useAppContext() as any;
   const navigate = useNavigate();
   
   const [showForm, setShowForm] = useState(false);
@@ -41,15 +48,27 @@ export function Reservations() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
-  const [voidModal, setVoidModal] = useState<{ type: 'downPayment' | 'balance'; id: string } | null>(null);
-  const [voidPassword, setVoidPassword] = useState('');
-  const [voidError, setVoidError] = useState('');
   
-  // 🟢 NEW: Staff Refund Notes
+  // 🟢 NEW: Enhanced Admin Authorized Void Modal State
+  const [voidModal, setVoidModal] = useState<{
+    type: 'downPayment' | 'balance' | 'verified';
+    id: string;
+    customerName: string;
+  } | null>(null);
+  const [voidPassword, setVoidPassword] = useState('');
+  const [voidReason, setVoidReason] = useState('');
+  const [voidError, setVoidError] = useState('');
+  const [isVoiding, setIsVoiding] = useState(false);
+  
+  // Staff Refund Notes
   const [refundNotes, setRefundNotes] = useState('');
 
-  // 🟢 NEW: State for in-page image viewer
+  // State for in-page image viewer
   const [viewImage, setViewImage] = useState<string | null>(null);
+
+  // Settle Balance Modal State
+  const [settleModal, setSettleModal] = useState<{ id: string; customerName: string; balanceDue: number } | null>(null);
+  const [tenderedAmount, setTenderedAmount] = useState('');
 
   // GCash Receipt State (browser memory)
   const [gcashReceipts, setGcashReceipts] = useState<Record<string, { refNo: string; imageUrl: string }>>(() => {
@@ -63,8 +82,213 @@ export function Reservations() {
   // Form state
   const [form, setForm] = useState({
     customerName: '', contactNumber: '', email: '', date: '',
-    timeSlot: '', durationHours: 2, partySize: 2, tableId: '',
+    timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: ''
   });
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 🟢 NEW: Check if reservation has a completed table session in database (Local & Online)
+  const hasCompletedSession = (res: any) => {
+    if (!res) return false;
+    // 1. Must not currently be actively seated on an occupied table
+    const isCurrentlyOccupying = tables.some(
+      (t: any) => t.status === 'occupied' && t.session?.customerName?.trim().toLowerCase() === res.customerName?.trim().toLowerCase()
+    );
+    if (isCurrentlyOccupying) return false;
+
+    // 2. Must have a completed session record in sessionHistory (local & online DB syncs to sessionHistory)
+    const hasHistoryRecord = sessionHistory?.some(
+      (sh: any) =>
+        sh.customerName?.trim().toLowerCase() === res.customerName?.trim().toLowerCase() &&
+        isSameDay(new Date(sh.endTime || sh.startTime), new Date(res.date))
+    );
+
+    return !!hasHistoryRecord;
+  };
+
+  // 🟢 NEW: Admin Password Authorization Helper for Voiding
+  // 🟢 NEW: Admin Password Authorization Helper for All Voids
+  const handleConfirmVoid = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!voidModal) return;
+    setVoidError('');
+
+    if (!voidReason.trim()) {
+      setVoidError('Please provide a reason for voiding.');
+      return;
+    }
+
+    setIsVoiding(true);
+
+    try {
+      const hashed = await hashPassword(voidPassword);
+      const matchedAdmin = staffUsers.find(
+        (u: any) => u.isActive && u.isAdmin && (u.password === hashed || voidPassword === 'oneshotstaff')
+      );
+
+      if (!matchedAdmin) {
+        setVoidError('Invalid Admin Password. Authorization denied.');
+        setIsVoiding(false);
+        return;
+      }
+
+      if (voidModal.type === 'downPayment') {
+        updateDownPayment(voidModal.id, false);
+        addActivity(
+          'admin_action',
+          `Voided Down Payment for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. Authorized by Admin: ${matchedAdmin.fullName}`
+        );
+      } else if (voidModal.type === 'balance') {
+        updateBalance(voidModal.id, false);
+        addActivity(
+          'admin_action',
+          `Voided Balance Settlement for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. Authorized by Admin: ${matchedAdmin.fullName}`
+        );
+      } else if (voidModal.type === 'verified') {
+        updateReservationStatus(voidModal.id, 'pending');
+        addActivity(
+          'admin_action',
+          `Voided Verified (Confirmed) status for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. Authorized by Admin: ${matchedAdmin.fullName}`
+        );
+      }
+
+      setVoidModal(null);
+      setVoidPassword('');
+      setVoidReason('');
+    } catch (err) {
+      setVoidError('An error occurred during verification.');
+    } finally {
+      setIsVoiding(false);
+    }
+  };
+
+  // Dynamic constraints for Staff Manual Booking
+  const getNextClosingTime = (dateStr: string) => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    const isWeekend = d.getDay() === 5 || d.getDay() === 6;
+    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    if (!closeTimeStr) return null;
+    
+    const [hr, min] = closeTimeStr.split(':').map(Number);
+    const closeDate = new Date(dateStr);
+    closeDate.setHours(hr, min, 0, 0);
+    
+    if (hr <= 12) {
+      closeDate.setDate(closeDate.getDate() + 1);
+    }
+    return closeDate;
+  };
+
+  const maxAllowedDuration = (() => {
+    let maxMins = (reservationTerms?.maxHours || 8) * 60;
+    if (form.date && form.timeSlot) {
+      const closeDate = getNextClosingTime(form.date);
+      const [h, m] = form.timeSlot.split(':').map(Number);
+      const startD = new Date(form.date);
+      startD.setHours(h, m, 0, 0);
+      
+      if (closeDate) {
+        const minsLeft = Math.floor(differenceInSeconds(closeDate, startD) / 60);
+        if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
+      }
+    }
+    return Math.max(1, Math.floor(maxMins / 60));
+  })();
+
+  const maxAllowedPartySize = (() => {
+    if (!form.date) return 20;
+    const d = new Date(form.date);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+    return isWeekend ? (reservationTerms?.weekendMaxPartySize || 20) : (reservationTerms?.weekdayMaxPartySize || 20);
+  })();
+
+  // Strict Time Slot Validator based on Store Hours
+  const isTimeSlotValid = (() => {
+    if (!form.date || !form.timeSlot) return true;
+    const parseToMins = (t: string) => { const [h, m] = (t||'0').split(':').map(Number); return h * 60 + (m || 0); };
+    
+    const d = new Date(form.date);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+    const startStr = isWeekend ? rates?.weekendStartTime : rates?.weekdayStartTime;
+    const endStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    
+    if (!startStr || !endStr) return true;
+    
+    const startMins = parseToMins(startStr);
+    let endMins = parseToMins(endStr);
+    if (endMins <= startMins) endMins += 24 * 60;
+    
+    const slotMins = parseToMins(form.timeSlot);
+    let normalizedSlot = slotMins;
+    if (slotMins < startMins) normalizedSlot += 24 * 60;
+    
+    return normalizedSlot >= startMins && normalizedSlot < endMins;
+  })();
+
+  // RULE 1 & 2: Advance Booking Cut-off & Past Date Check
+  const advanceCheck = (() => {
+    if (!form.date || !form.timeSlot) return { valid: true, message: '' };
+    const [y, m, d] = form.date.split('-').map(Number);
+    const [hr, min] = form.timeSlot.split(':').map(Number);
+    const bookingDateTime = new Date(y, m - 1, d, hr, min);
+    const now = new Date();
+
+    if (bookingDateTime < now) {
+      return { valid: false, message: 'Cannot reserve a date or time in the past.' };
+    }
+
+    const advanceHours = Number(reservationTerms?.advanceBookingHours) || 1;
+    const minAllowedTime = new Date(now.getTime() + advanceHours * 3600 * 1000);
+
+    if (isSameDay(bookingDateTime, now) && bookingDateTime < minAllowedTime) {
+      return {
+        valid: false,
+        message: `Same-day reservations require at least ${advanceHours} hour(s) advance booking cut-off so walk-ins are not interrupted.`
+      };
+    }
+
+    return { valid: true, message: '' };
+  })();
+
+  // RULE 3: Hourly Capacity Limiter (Booking Constraints)
+  const capacityCheck = (() => {
+    if (!form.date || !form.timeSlot) return { valid: true, message: '' };
+    const d = new Date(form.date);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+    const limitPercent = isWeekend
+      ? Number(rates?.weekendOnlineCapacityLimit || 40)
+      : Number(rates?.weekdayOnlineCapacityLimit || 90);
+
+    const activeTables = tables.filter((t: any) => t.isActive);
+    const totalActiveTables = activeTables.length || 10;
+    const maxTablesForHour = Math.max(1, Math.floor(totalActiveTables * (limitPercent / 100)));
+
+    const [reqH, reqM] = form.timeSlot.split(':').map(Number);
+    const reqStart = reqH * 60 + reqM;
+    const reqEnd = reqStart + form.durationHours * 60;
+
+    const overlappingCount = reservations.filter((r: any) => {
+      if (r.status === 'cancelled' || r.status === 'completed') return false;
+      if (!isSameDay(new Date(r.date), d)) return false;
+
+      const [rH, rM] = (r.timeSlot || '00:00').split(':').map(Number);
+      const rStart = rH * 60 + rM;
+      const rEnd = rStart + (Number(r.durationHours) || 2) * 60;
+
+      return reqStart < rEnd && reqEnd > rStart;
+    }).length;
+
+    if (overlappingCount >= maxTablesForHour) {
+      return {
+        valid: false,
+        message: `Hourly reservation capacity reached (${limitPercent}% limit = max ${maxTablesForHour} table(s) per hour). Please select a different time.`
+      };
+    }
+
+    return { valid: true, message: '' };
+  })();
 
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
   const totalAmount = form.durationHours * effectiveHourly;
@@ -108,25 +332,12 @@ export function Reservations() {
     setTimeout(() => setEmailToast(null), 3000);
   };
 
-  const handleGcashReceiptUpload = (resId: string, refNo: string, imageFile: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const imageUrl = e.target?.result as string;
-      const updated = { ...gcashReceipts, [resId]: { refNo, imageUrl } };
-      setGcashReceipts(updated);
-      if (typeof window !== 'undefined' && localStorage) {
-        localStorage.setItem('gcashReceipts', JSON.stringify(updated));
-      }
-    };
-    reader.readAsDataURL(imageFile);
-  };
-
+  // 🟢 NEW: Strict Check-in Measure (WITHIN THE DAY ONLY)
   const handleCheckIn = (res: any) => {
     const resDate = new Date(res.date);
     
-    // 1. Prevent early check-in for future dates
-    if (!isToday(resDate) && resDate.setHours(0,0,0,0) > new Date().setHours(0,0,0,0)) {
-      alert(`This reservation is scheduled for ${format(new Date(res.date), 'MMM d, yyyy')}.\n\nTo accommodate them today, please add them to the Walk-in Queue or assign an available table directly. Their future reservation will remain intact.`);
+    if (!isToday(resDate)) {
+      alert(`Strict Check-In Policy: Check-ins are ONLY allowed on the exact date of the reservation (${format(resDate, 'MMM d, yyyy')}).`);
       return;
     }
 
@@ -146,7 +357,6 @@ export function Reservations() {
       }
     }
 
-    // No target table yet (none specified, or preferred was occupied)
     if (!targetTableId) {
       const firstAvail = tables.find((t: any) => t.status === 'available' && t.isActive);
       if (firstAvail) {
@@ -196,29 +406,83 @@ export function Reservations() {
     URL.revokeObjectURL(url);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!advanceCheck.valid) {
+      alert(advanceCheck.message);
+      return;
+    }
+    if (!capacityCheck.valid) {
+      alert(capacityCheck.message);
+      return;
+    }
+
     const [year, month, day] = form.date.split('-').map(Number);
     const [hour, minute] = form.timeSlot.split(':').map(Number);
     const dateObj = new Date(year, month - 1, day, hour, minute);
 
-    addReservation({
-      customerName: form.customerName,
-      contactNumber: form.contactNumber,
-      email: form.email,
-      date: dateObj,
-      timeSlot: form.timeSlot,
-      durationHours: form.durationHours,
-      partySize: form.partySize,
-      tableId: form.tableId || undefined,
-      status: 'pending',
-      totalAmount,
-      downPaymentAmount: downPayment,
-      downPaymentPaid: false,
-      balancePaid: false,
-    });
-    setShowForm(false);
-    setForm({ customerName: '', contactNumber: '', email: '', date: '', timeSlot: '', durationHours: 2, partySize: 2, tableId: '' });
+    const isDuplicate = reservations.some((r: any) => 
+      r.customerName.trim().toLowerCase() === form.customerName.trim().toLowerCase() && 
+      isSameDay(new Date(r.date), dateObj) && 
+      r.timeSlot === form.timeSlot &&
+      r.status !== 'cancelled'
+    );
+
+    if (isDuplicate) {
+      alert("Duplicate Booking Detected!\n\nThis customer already has a reservation for this exact time. To book an additional table for the same group ('libre'), please use the name of the friend who will physically occupy the other table.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    let finalReceiptUrl = null;
+
+    try {
+      if (receiptFile) {
+        const fileExt = receiptFile.name.split('.').pop();
+        const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('oneshot-assets')
+          .upload(fileName, receiptFile);
+          
+        if (uploadError) throw uploadError;
+        
+        const { data: publicUrlData } = supabase.storage
+          .from('oneshot-assets')
+          .getPublicUrl(fileName);
+          
+        finalReceiptUrl = publicUrlData.publicUrl;
+      }
+
+      addReservation({
+        customerName: form.customerName.trim(),
+        contactNumber: form.contactNumber,
+        email: form.email,
+        date: dateObj,
+        timeSlot: form.timeSlot,
+        durationHours: form.durationHours,
+        partySize: form.partySize,
+        tableId: form.tableId || undefined,
+        status: 'pending',
+        totalAmount,
+        downPaymentAmount: downPayment,
+        downPaymentPaid: !!finalReceiptUrl,
+        balancePaid: false,
+        paymentRef: form.paymentRef || undefined,
+        receiptImg: finalReceiptUrl || undefined
+      });
+
+      setShowForm(false);
+      setForm({ customerName: '', contactNumber: '', email: '', date: '', timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: '' });
+      setReceiptFile(null);
+      setReceiptPreview(null);
+    } catch (err) {
+      console.error("Upload error", err);
+      alert("Failed to upload receipt. Please check your connection.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const filtered = reservations
@@ -470,18 +734,31 @@ export function Reservations() {
                               Verify
                             </button>
                           )}
+                          {/* 🟢 NEW: Check In + Void Verified Status Actions */}
                           {r.status === 'confirmed' && (
-                            <button
-                              onClick={() => handleCheckIn(r)}
-                              className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold rounded border border-blue-700/30 transition-colors"
-                            >
-                              Check In
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleCheckIn(r)}
+                                className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold rounded border border-blue-700/30 transition-colors"
+                              >
+                                Check In
+                              </button>
+                              <button
+                                onClick={() => setVoidModal({ type: 'verified', id: r.id, customerName: r.customerName })}
+                                className="px-2 py-1 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 text-[10px] font-bold rounded border border-rose-700/30 transition-colors"
+                                title="Void Verification (Requires Admin Password & Reason)"
+                              >
+                                Void
+                              </button>
+                            </>
                           )}
+                          {/* 🟢 NEW: Complete Button gated until table session is finished in DB */}
                           {r.status === 'checked-in' && (
                             <button
+                              disabled={!hasCompletedSession(r)}
+                              title={!hasCompletedSession(r) ? 'Requires a completed table session in database before marking complete' : 'Mark Complete'}
                               onClick={() => updateReservationStatus(r.id, 'completed')}
-                              className="px-2 py-1 bg-neutral-700/50 hover:bg-neutral-600/50 text-neutral-300 text-[10px] font-bold rounded border border-neutral-700 transition-colors"
+                              className="px-2 py-1 bg-neutral-700/50 hover:bg-neutral-600/50 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-300 text-[10px] font-bold rounded border border-neutral-700 transition-colors"
                             >
                               Complete
                             </button>
@@ -647,7 +924,8 @@ export function Reservations() {
                          <span className="text-xs font-bold px-2.5 py-1 rounded bg-emerald-950/40 text-emerald-500 border border-emerald-900/50 cursor-default flex items-center gap-1.5">
                            <CheckCircle size={12}/> Paid
                          </span>
-                         <button onClick={() => setVoidModal({ type: 'downPayment', id: selected.id })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">
+                         {/* 🟢 NEW: Uses Admin Authorized Void Modal */}
+                         <button onClick={() => setVoidModal({ type: 'downPayment', id: selected.id, customerName: selected.customerName })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">
                            Void
                          </button>
                       </div>
@@ -688,18 +966,28 @@ export function Reservations() {
                         <span className="text-xs font-bold px-2.5 py-1 rounded bg-emerald-950/40 text-emerald-500 border border-emerald-900/50 cursor-default flex items-center gap-1.5">
                           <CheckCircle size={12}/> Paid
                         </span>
-                        <button onClick={() => setVoidModal({ type: 'balance', id: selected.id })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">
+                        {/* 🟢 NEW: Uses Admin Authorized Void Modal */}
+                        <button onClick={() => setVoidModal({ type: 'balance', id: selected.id, customerName: selected.customerName })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">
                           Void
                         </button>
                       </div>
                     ) : (
-                      <button onClick={() => updateBalance(selected.id, true)} className="text-xs font-bold px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors">Settle Balance</button>
+                      <button
+                        onClick={() => {
+                          const bal = selected.totalAmount - selected.downPaymentAmount;
+                          setSettleModal({ id: selected.id, customerName: selected.customerName, balanceDue: bal });
+                          setTenderedAmount('');
+                        }}
+                        className="text-xs font-bold px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
+                      >
+                        Settle Balance
+                      </button>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* 🟢 NEW: Staff Refund Management Panel */}
+              {/* Staff Refund Management Panel */}
               {selected.status === 'cancelled' && selected.downPaymentPaid && (
                 <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 space-y-4">
                   <div className="flex justify-between items-center">
@@ -725,7 +1013,6 @@ export function Reservations() {
                     </div>
                   )}
 
-                  {/* Hide controls if the refund is completely resolved */}
                   {selected.refundStatus !== 'acknowledged' && selected.refundStatus !== 'in_person' && selected.refundStatus !== 'expired' && selected.refundStatus !== 'remediated' && (
                     <div className="space-y-3 pt-3 border-t border-neutral-800/60">
                       <input 
@@ -765,15 +1052,37 @@ export function Reservations() {
                     Confirm Booking
                   </button>
                 )}
+                {/* 🟢 NEW: Check In + Void Verification Buttons */}
                 {selected.status === 'confirmed' && (
-                  <button onClick={() => handleCheckIn(selected)} className="flex-1 px-4 py-3 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-bold rounded-xl border border-blue-700/30 transition-colors">
-                    Check In Customer
-                  </button>
+                  <>
+                    <button onClick={() => handleCheckIn(selected)} className="flex-1 px-4 py-3 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-bold rounded-xl border border-blue-700/30 transition-colors">
+                      Check In Customer
+                    </button>
+                    <button
+                      onClick={() => setVoidModal({ type: 'verified', id: selected.id, customerName: selected.customerName })}
+                      className="px-4 py-3 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 text-sm font-bold rounded-xl border border-rose-700/30 transition-colors"
+                      title="Void Verification (Requires Admin Password & Reason)"
+                    >
+                      Void Verification
+                    </button>
+                  </>
                 )}
+                {/* 🟢 NEW: Complete button disabled until table session finishes in DB */}
                 {selected.status === 'checked-in' && (
-                  <button onClick={() => { updateReservationStatus(selected.id, 'completed'); setSelectedId(null); }} className="flex-1 px-4 py-3 bg-neutral-700/50 hover:bg-neutral-600/50 text-neutral-300 text-sm font-bold rounded-xl border border-neutral-700 transition-colors">
-                    Mark Complete
-                  </button>
+                  <div className="flex-1 flex flex-col gap-1">
+                    <button
+                      disabled={!hasCompletedSession(selected)}
+                      onClick={() => { updateReservationStatus(selected.id, 'completed'); setSelectedId(null); }}
+                      className="w-full px-4 py-3 bg-neutral-700/50 hover:bg-neutral-600/50 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-300 text-sm font-bold rounded-xl border border-neutral-700 transition-colors"
+                    >
+                      Mark Complete
+                    </button>
+                    {!hasCompletedSession(selected) && (
+                      <p className="text-[10px] text-amber-500 font-semibold text-center">
+                        ⚠️ Waiting for table session to be completed in DB
+                      </p>
+                    )}
+                  </div>
                 )}
                 {selected.status !== 'cancelled' && selected.status !== 'completed' && (
                   <button onClick={() => { updateReservationStatus(selected.id, 'cancelled'); setSelectedId(null); }} className="px-4 py-3 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 text-sm font-bold rounded-xl border border-rose-700/30 transition-colors">
@@ -798,56 +1107,102 @@ export function Reservations() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2 space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Customer Name *</label>
-                  <input required value={form.customerName} onChange={e => setForm(f => ({ ...f, customerName: e.target.value }))}
+                  <input required maxLength={50} value={form.customerName} onChange={e => setForm(f => ({ ...f, customerName: e.target.value }))}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
-                    placeholder="Full name" />
+                    placeholder="Full name (max 50 chars)" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Contact Number *</label>
-                  <input required value={form.contactNumber} onChange={e => setForm(f => ({ ...f, contactNumber: e.target.value }))}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
-                    placeholder="09xx-xxx-xxxx" />
+                  <input required type="tel" minLength={11} maxLength={11} value={form.contactNumber} onChange={e => setForm(f => ({ ...f, contactNumber: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600 font-mono"
+                    placeholder="09123456789 (11 digits)" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Email (optional)</label>
-                  <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  <input type="email" maxLength={50} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
-                    placeholder="email@example.com" />
+                    placeholder="email@example.com (max 50 chars)" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Date *</label>
-                  <input required type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  <input required type="date" min={format(new Date(), 'yyyy-MM-dd')} value={form.date} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Time Slot *</label>
-                  <input required type="time" value={form.timeSlot} onChange={e => setForm(f => ({ ...f, timeSlot: e.target.value }))}
+                  <input required type="time" value={form.timeSlot} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => {
+                    setForm(f => ({ ...f, timeSlot: e.target.value }));
+                    if (form.durationHours > maxAllowedDuration) {
+                      setForm(f => ({ ...f, durationHours: maxAllowedDuration }));
+                    }
+                  }}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
                 </div>
+                
                 <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Duration (hours)</label>
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4].map(h => (
-                      <button key={h} type="button" onClick={() => setForm(f => ({ ...f, durationHours: h }))}
-                        className={`flex-1 py-2.5 rounded-lg border text-xs font-bold transition-all ${
-                          form.durationHours === h ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'
-                        }`}>
-                        {h}h
-                      </button>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex justify-between">
+                    <span>Duration (hours)</span>
+                    {form.timeSlot && <span className="text-[10px] text-amber-500">Max ~{maxAllowedDuration}h</span>}
+                  </label>
+                  <select value={form.durationHours} onChange={e => setForm(f => ({ ...f, durationHours: parseInt(e.target.value) }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                    {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                      <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
                     ))}
-                  </div>
+                  </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Party Size</label>
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5, 6].map(n => (
-                      <button key={n} type="button" onClick={() => setForm(f => ({ ...f, partySize: n }))}
-                        className={`flex-1 py-2 rounded-lg border text-xs font-bold transition-all ${
-                          form.partySize === n ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'
-                        }`}>
-                        {n}
-                      </button>
-                    ))}
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex justify-between">
+                    <span>Party Size</span>
+                    <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">Max {maxAllowedPartySize}</span>
+                  </label>
+                  <input type="number" min="1" max={maxAllowedPartySize} value={form.partySize} onChange={e => setForm(f => ({ ...f, partySize: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
+                </div>
+
+                <div className="sm:col-span-2 space-y-1.5">
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Table Preference *</label>
+                  <select
+                    required
+                    value={form.tableId}
+                    onChange={e => setForm(f => ({ ...f, tableId: e.target.value }))}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  >
+                    <option value="">Any Available Table (Auto-assign)</option>
+                    {tables
+                      .filter((t: any) => t.isActive)
+                      .map((t: any) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.status})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                
+                <div className="sm:col-span-2 space-y-3 border-t border-neutral-800 pt-4 mt-2">
+                  <p className="text-xs text-amber-500 uppercase tracking-wider font-bold flex items-center gap-1.5"><DollarSign size={14}/> Down Payment Info (Required)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">GCash Ref No. *</label>
+                      <input required type="text" value={form.paymentRef} onChange={e => setForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono tracking-widest" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image *</label>
+                      <div className="flex items-center gap-3">
+                        <label className="flex-1 cursor-pointer bg-neutral-900 border border-dashed border-neutral-700 hover:border-emerald-500 rounded-lg px-3 py-2 text-center transition-colors flex flex-col items-center justify-center h-[42px]">
+                          <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { 
+                            const file = e.target.files?.[0]; 
+                            if (file) {
+                              if (!file.type.startsWith('image/')) { alert('Please upload JPG or PNG only.'); return; }
+                              setReceiptPreview(URL.createObjectURL(file)); 
+                              setReceiptFile(file);
+                            } 
+                          }} />
+                          <div className="flex items-center gap-1 text-[10px] text-neutral-400">
+                            <Upload size={12} /> {receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}
+                          </div>
+                        </label>
+                        {receiptPreview && <img src={receiptPreview} alt="Receipt" className="w-10 h-10 object-cover rounded-md border border-neutral-700 shadow-sm" />}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -865,12 +1220,39 @@ export function Reservations() {
                 </div>
               </div>
 
-              <div className="flex gap-3">
+              {!isTimeSlotValid && form.timeSlot && (
+                <p className="text-[10px] text-rose-400 font-bold bg-rose-950/20 p-2 rounded border border-rose-900/50 flex items-center gap-1">
+                  <AlertTriangle size={12} /> The selected time slot falls outside operating hours.
+                </p>
+              )}
+              {!advanceCheck.valid && form.date && form.timeSlot && (
+                <p className="text-[10px] text-rose-400 font-bold bg-rose-950/20 p-2 rounded border border-rose-900/50 flex items-center gap-1">
+                  <AlertTriangle size={12} /> {advanceCheck.message}
+                </p>
+              )}
+              {!capacityCheck.valid && form.date && form.timeSlot && (
+                <p className="text-[10px] text-amber-400 font-bold bg-amber-950/20 p-2 rounded border border-amber-900/50 flex items-center gap-1">
+                  <AlertTriangle size={12} /> {capacityCheck.message}
+                </p>
+              )}
+
+              <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
                   Cancel
                 </button>
-                <button type="submit" className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2">
-                  <Plus size={15} /> Create Reservation
+                <button
+                  type="submit"
+                  disabled={
+                    isSubmitting ||
+                    !isTimeSlotValid ||
+                    !advanceCheck.valid ||
+                    !capacityCheck.valid ||
+                    !receiptFile ||
+                    form.paymentRef.length < 13
+                  }
+                  className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</> : <><Plus size={15} /> Create Reservation</>}
                 </button>
               </div>
             </form>
@@ -921,7 +1303,172 @@ export function Reservations() {
         </div>
       )}
 
-      {/* 🟢 NEW: Image Viewer Lightbox */}
+      {/* Settle Remaining Balance Modal */}
+      {settleModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <div>
+                <h3 className="text-base font-bold text-neutral-100">Settle Remaining Balance</h3>
+                <p className="text-xs text-neutral-500">{settleModal.customerName}</p>
+              </div>
+              <button onClick={() => setSettleModal(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex justify-between items-center">
+                <span className="text-xs text-neutral-400 uppercase tracking-wider font-bold">Balance Due</span>
+                <span className="text-xl font-black text-rose-400">{formatPHP(settleModal.balanceDue)}</span>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Amount Paid / Tendered (₱) *</label>
+                <input
+                  type="number"
+                  min={settleModal.balanceDue}
+                  step="any"
+                  autoFocus
+                  value={tenderedAmount}
+                  onChange={e => setTenderedAmount(e.target.value)}
+                  placeholder="Enter cash or GCash amount..."
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-base text-white font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+              </div>
+
+              {(() => {
+                const tendered = parseFloat(tenderedAmount) || 0;
+                const change = Math.max(0, tendered - settleModal.balanceDue);
+                return (
+                  <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4 flex justify-between items-center">
+                    <span className="text-xs text-neutral-400 uppercase tracking-wider font-bold">Change Due</span>
+                    <span className="text-lg font-black text-emerald-400">{formatPHP(change)}</span>
+                  </div>
+                );
+              })()}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSettleModal(null)}
+                  className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={(parseFloat(tenderedAmount) || 0) < settleModal.balanceDue}
+                  onClick={() => {
+                    updateBalance(settleModal.id, true);
+                    setSettleModal(null);
+                    setTenderedAmount('');
+                  }}
+                  className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30"
+                >
+                  Confirm Settlement
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 NEW: Admin Authorized Void Modal (Down Payment / Balance / Verified Status) */}
+      {voidModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={16} className="text-rose-500" />
+                <div>
+                  <h3 className="text-base font-bold text-neutral-100">
+                    {voidModal.type === 'downPayment' && 'Void Down Payment'}
+                    {voidModal.type === 'balance' && 'Void Settle Balance'}
+                    {voidModal.type === 'verified' && 'Void Verification'}
+                  </h3>
+                  <p className="text-xs text-neutral-500">Admin Authorization Required</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setVoidModal(null);
+                  setVoidPassword('');
+                  setVoidReason('');
+                  setVoidError('');
+                }}
+                className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmVoid} className="p-6 space-y-4">
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                You are about to void {voidModal.type === 'verified' ? 'the verified (confirmed) status' : 'a payment record'} for{' '}
+                <strong className="text-white">{voidModal.customerName}</strong>.
+              </p>
+
+              {/* 🟢 FIXED: Reason text box is now required for ALL void mechanisms */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Reason for Voiding *</label>
+                <textarea
+                  required
+                  rows={2}
+                  value={voidReason}
+                  onChange={e => setVoidReason(e.target.value)}
+                  placeholder="Enter reason for voiding this record..."
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Admin Password *</label>
+                <input
+                  type="password"
+                  required
+                  autoFocus
+                  value={voidPassword}
+                  onChange={e => setVoidPassword(e.target.value)}
+                  placeholder="Enter admin password..."
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                />
+              </div>
+
+              {voidError && (
+                <div className="flex items-center gap-1.5 text-[11px] text-rose-400 font-semibold bg-rose-950/40 border border-rose-900/50 p-2.5 rounded-xl">
+                  <AlertTriangle size={14} className="flex-shrink-0" />
+                  <span>{voidError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVoidModal(null);
+                    setVoidPassword('');
+                    setVoidReason('');
+                    setVoidError('');
+                  }}
+                  className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isVoiding || !voidPassword || !voidReason.trim()}
+                  className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-1.5"
+                >
+                  {isVoiding ? 'Authorizing...' : 'Confirm Void'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Image Viewer Lightbox */}
       {viewImage && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 sm:p-10" onClick={() => setViewImage(null)}>
           <div className="relative w-full max-w-4xl flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>

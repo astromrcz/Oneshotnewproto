@@ -18,6 +18,14 @@ export function Watchlist() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', reason: 'debt', description: '', evidenceLink: '' });
 
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
+  };
   const filtered = watchlist.filter(item => {
     const matchSearch = item.name.toLowerCase().includes(search.toLowerCase()) || item.description.toLowerCase().includes(search.toLowerCase());
     if (filter === 'archived') return matchSearch && item.isArchived;
@@ -70,10 +78,10 @@ export function Watchlist() {
           return (
           <div key={item.id} className={`bg-neutral-950 border rounded-2xl overflow-hidden flex flex-col transition-all ${item.status === 'resolved' || item.isArchived ? 'border-neutral-800 opacity-60' : `border-${cfg.color.split('-')[1]}-900/50`}`}>
             <div className="p-5 flex-1 flex flex-col">
-              <div className="flex justify-between items-start mb-2">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  {item.name} 
-                  {item.isArchived && <span className="text-[10px] bg-neutral-800 text-neutral-500 px-2 py-0.5 rounded uppercase font-black tracking-widest border border-neutral-700">Archived</span>}
+              <div className="flex justify-between items-start mb-2 gap-2">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2 min-w-0">
+                  <span className="truncate" title={item.name}>{item.name}</span>
+                  {item.isArchived && <span className="text-[10px] bg-neutral-800 text-neutral-500 px-2 py-0.5 rounded uppercase font-black tracking-widest border border-neutral-700 flex-shrink-0">Archived</span>}
                 </h3>
                 {!item.isArchived && (
                   item.status === 'resolved' ? (
@@ -83,7 +91,7 @@ export function Watchlist() {
                   )
                 )}
               </div>
-              <p className="text-xs text-neutral-400 leading-relaxed mb-4">{item.description}</p>
+              <p className="text-xs text-neutral-400 leading-relaxed mb-4 line-clamp-4" title={item.description}>{item.description}</p>
               
               {item.evidenceLink && (
                 <a href={item.evidenceLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 bg-blue-950/20 w-fit px-3 py-1.5 rounded-lg border border-blue-900/30 mb-4 transition-colors">
@@ -117,10 +125,15 @@ export function Watchlist() {
           <div className="bg-neutral-950 border border-rose-900/30 rounded-2xl w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-rose-500 flex items-center gap-2 mb-4"><AlertTriangle size={18}/> New Watchlist Entry</h3>
             <form onSubmit={handleSave} className="space-y-4">
+              {/* 🟢 FIXED: Capped Name */}
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5">Individual Name / Alias *</label>
-                <input required type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-rose-500" placeholder="e.g. John Doe" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400">Individual Name / Alias *</label>
+                  <CharCount current={form.name} max={50} />
+                </div>
+                <input required maxLength={50} type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-rose-500" placeholder="e.g. John Doe" />
               </div>
+              
               <div>
                 <label className="block text-xs text-neutral-400 mb-1.5">Reason Category *</label>
                 <select value={form.reason} onChange={e => setForm({...form, reason: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-rose-500">
@@ -130,9 +143,14 @@ export function Watchlist() {
                   <option value="other">Other Concern</option>
                 </select>
               </div>
+
+              {/* 🟢 FIXED: Capped Description */}
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5">Description & Evidence *</label>
-                <textarea required value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-rose-500 resize-none h-24" placeholder="Detail the incident, amount owed, or reason for banning..." />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400">Description & Evidence *</label>
+                  <CharCount current={form.description} max={400} />
+                </div>
+                <textarea required maxLength={400} value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-rose-500 resize-none h-24" placeholder="Detail the incident, amount owed, or reason for banning..." />
               </div>
               <div>
                 <label className="block text-xs text-neutral-400 mb-1.5">Evidence Link (Google Drive, Docs, etc.)</label>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRound, CheckCircle, TerminalSquare } from 'lucide-react';
+import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRound, CheckCircle, TerminalSquare, X } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
@@ -45,6 +45,9 @@ export function OfflineLogin() {
   const [logoClicks, setLogoClicks] = useState(0);
   const [godKeyInput, setGodKeyInput] = useState('');
 
+  // 🟢 Close Confirmation Modal State
+  const [showCloseModal, setShowCloseModal] = useState(false);
+
   const sliderImages = siteConfig?.heroImages && siteConfig.heroImages.length > 0 
     ? siteConfig.heroImages 
     : [
@@ -58,9 +61,9 @@ export function OfflineLogin() {
   }, [sliderImages.length]);
 
   useEffect(() => {
-    if (localStorage.getItem('oneshot_admin_auth') === 'true') {
+    if (sessionStorage.getItem('oneshot_admin_auth') === 'true') {
       navigate('/admin', { replace: true });
-    } else if (localStorage.getItem('oneshot_staff_auth') === 'true') {
+    } else if (sessionStorage.getItem('oneshot_staff_auth') === 'true') {
       navigate('/staff', { replace: true });
     }
   }, [navigate]);
@@ -71,13 +74,12 @@ export function OfflineLogin() {
     setError(''); setSuccessMsg(''); setView(newView);
   };
 
-  // 🟢 7-Click Logo Handler
   const handleLogoClick = () => {
     const newCount = logoClicks + 1;
     setLogoClicks(newCount);
     if (newCount === 7) {
       switchView('god-mode');
-      setLogoClicks(0); // Reset after triggering
+      setLogoClicks(0); 
     }
   };
 
@@ -85,21 +87,27 @@ export function OfflineLogin() {
     e.preventDefault();
     setError(''); setIsProcessing(true);
 
-    const isAdmin = await adminLogin(username, password);
-    const isStaff = !isAdmin && await staffLogin(username, password);
-
-    if (isAdmin || isStaff) {
-      if (password === 'oneshotstaff') {
-        switchView('force-change');
-        setIsProcessing(false);
-        return;
-      }
-      navigate(isAdmin ? '/admin' : '/staff');
+    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+    
+    if (targetUser && password === 'oneshotstaff') {
+      switchView('force-change');
+      setIsProcessing(false);
       return;
     }
 
-    setError('Invalid username or password.');
-    setIsProcessing(false);
+    const res = await (username === 'superadmin' || targetUser?.isAdmin 
+      ? adminLogin(username, password) 
+      : staffLogin(username, password));
+      
+    if (res) {
+      setSuccessMsg('Authentication successful...');
+      setTimeout(() => {
+        navigate(username === 'superadmin' || targetUser?.isAdmin ? '/admin' : '/staff');
+      }, 1000);
+    } else {
+      setError('Invalid username or password.');
+      setIsProcessing(false);
+    }
   };
 
   const handleForceChange = async (e: React.FormEvent) => {
@@ -147,7 +155,6 @@ export function OfflineLogin() {
     setIsProcessing(false);
   };
 
-  // 🟢 Master Key Submission Handler
   const handleGodModeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -156,12 +163,10 @@ export function OfflineLogin() {
     if (godKeyInput === MASTER_RECOVERY_KEY) {
       setSuccessMsg('MASTER OVERRIDE ACCEPTED. Resetting Super Admin...');
       
-      // Reset the main superadmin account so you can log back in
       const superAdmin = staffUsers.find((u: any) => u.username === 'superadmin');
       if (superAdmin) {
         await resetStaffUserPassword(superAdmin.id);
         
-        // Log them in natively as the admin via context override, bypassing the UI flow temporarily
         setTimeout(async () => {
           await adminLogin('superadmin', 'oneshotstaff');
           navigate('/admin');
@@ -179,11 +184,61 @@ export function OfflineLogin() {
 
   return (
     <div className="min-h-screen bg-neutral-950 flex flex-col lg:flex-row font-sans overflow-hidden relative">
+      
+      {/* 🟢 CLOSE CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {showCloseModal && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl"
+            >
+              <div className="flex items-center gap-3 text-rose-500 mb-4">
+                <AlertTriangle size={24} />
+                <h3 className="text-lg font-bold text-white">Exit System?</h3>
+              </div>
+              <p className="text-sm text-neutral-400 mb-6 leading-relaxed">
+                Are you sure you want to close the Application? 
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowCloseModal(false)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-neutral-300 hover:text-white bg-neutral-800 hover:bg-neutral-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => window.close()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-rose-600 hover:bg-rose-500 shadow-lg shadow-rose-900/20 transition-all"
+                >
+                  Yes, Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🟢 X BUTTON - Now triggers the modal instead of closing instantly */}
+      <button 
+        onClick={() => setShowCloseModal(true)} 
+        className="fixed top-6 right-6 p-2.5 text-neutral-300 hover:text-white bg-black/40 hover:bg-rose-600/90 backdrop-blur-md border border-white/10 rounded-full transition-all z-[100] shadow-2xl"
+        title="Close Application"
+      >
+        <X size={20} />
+      </button>
+
       <div className="w-full lg:w-[480px] xl:w-[540px] flex flex-col justify-center px-8 sm:px-12 lg:px-16 py-12 z-20 bg-neutral-950 shadow-[20px_0_50px_rgba(0,0,0,0.5)] relative">
         <div className="w-full max-w-sm mx-auto relative overflow-hidden">
           
           <div className="mb-8 select-none">
-            {/* 🟢 Logo is now clickable to trigger the counter */}
             <img 
               src={logoImg} 
               alt="One Shot Logo" 

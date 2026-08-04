@@ -166,6 +166,8 @@ type AppContextType = {
   updatePrimaryColor: (color: string) => void;
   updateRefundStatus: (id: string, refundStatus: string, method?: string, notes?: string) => void;
   acknowledgeRefund: (id: string) => void;
+  isLoggingOut: boolean;
+  logoutStep: string;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -192,9 +194,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
 
-  const [staffLoggedIn, setStaffLoggedIn] = useState(() => localStorage.getItem('oneshot_staff_auth') === 'true');
-  const [adminLoggedIn, setAdminLoggedIn] = useState(() => localStorage.getItem('oneshot_admin_auth') === 'true');
+  const [staffLoggedIn, setStaffLoggedIn] = useState(() => sessionStorage.getItem('oneshot_staff_auth') === 'true');
+  const [adminLoggedIn, setAdminLoggedIn] = useState(() => sessionStorage.getItem('oneshot_admin_auth') === 'true');
   
+  // 🟢 NEW: Logout loader states
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutStep, setLogoutStep] = useState('');
+
   // 🎨 Global Theme State
   const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('oneshot_theme') as 'dark' | 'light') || 'dark');
   const [primaryColor, setPrimaryColor] = useState(() => localStorage.getItem('oneshot_color') || 'emerald');
@@ -215,8 +221,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('oneshot_color', color);
   };
 
-  const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
-    const saved = localStorage.getItem('oneshot_staff_profile');
+ const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
+    const saved = sessionStorage.getItem('oneshot_staff_profile');
     return saved ? JSON.parse(saved) : { 
       username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
     };
@@ -235,7 +241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (data) {
         const lastSeen = new Date(data.last_seen_at);
         const timeDiffMs = new Date().getTime() - lastSeen.getTime();
-        setIsSystemOffline(timeDiffMs > 300000); // 5 minutes offline threshold
+        setIsSystemOffline(timeDiffMs > 300000); 
       }
     };
     checkHeartbeat();
@@ -311,8 +317,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             supabase.from('tables').select('*'), 
             supabase.from('reservations').select('*'), 
             supabase.from('announcements').select('*'), 
-            supabase.from('cms_content').select('*'), 
-            supabase.from('system_settings').select('*'), // 🟢 FIXED: Actually fetching the rates now
+            supabase.from('cms').select('*'), 
+            supabase.from('system_settings').select('*'),
             supabase.from('closed_dates').select('*'), 
             supabase.from('promo_codes').select('*'), 
             supabase.from('events').select('*')
@@ -322,7 +328,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (resData) setReservations(resData as Reservation[]);
           if (annData) setAnnouncements(annData as Announcement[]);
           
-          // 🟢 FIXED: Safely map snake_case from Supabase into the camelCase the UI expects
           if (promoData) {
             setPromoCodes((promoData as any[]).map(r => ({
               id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description,
@@ -411,7 +416,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchHolidays();
   }, []);
 
-  // Hybrid Sync helper: Silently catches if the local Edge Server (localhost:3001) is unreachable (e.g. running on Vercel)
+  const runCloudBackup = () => {
+    setTimeout(() => {
+      fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+    }, 1500); 
+  };
+
   const syncToDB = async (endpoint: string, method: 'POST' | 'PUT' | 'DELETE', payload: any, successMsg: string) => {
     try {
       const res = await fetch(`http://localhost:3001${endpoint}`, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -422,149 +432,85 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) { throw e; }
   };
 
+  // 🟢 NEW: Sync-on-Login Helper (Fetches online bookings & pushes pending local actions)
+  const performLoginSync = async () => {
+    try {
+      const [resLocal, resCloud] = await Promise.all([
+        fetch('http://localhost:3001/api/reservations').then(r => r.ok ? r.json() : []).catch(() => []),
+        supabase.from('reservations').select('*').then(res => res.data || []).catch(() => [])
+      ]);
+
+      // Merge cloud reservations into local SQLite without overwriting staff edits
+      if (resCloud.length > 0) {
+        setReservations(prev => {
+          const merged = [...prev];
+          resCloud.forEach((cloudRes: any) => {
+            const exists = merged.find(r => r.id === cloudRes.id);
+            if (!exists) {
+              const newRes: Reservation = {
+                id: cloudRes.id, customerName: cloudRes.customerName || cloudRes.customer_name,
+                contactNumber: cloudRes.contactNumber || cloudRes.contact_number,
+                email: cloudRes.email, date: new Date(cloudRes.date), timeSlot: cloudRes.timeSlot || cloudRes.time_slot,
+                durationHours: cloudRes.durationHours || cloudRes.duration_hours, partySize: cloudRes.partySize || cloudRes.party_size,
+                tableId: cloudRes.tableId || cloudRes.table_id, status: cloudRes.status,
+                totalAmount: cloudRes.totalAmount || cloudRes.total_amount,
+                downPaymentAmount: cloudRes.downPaymentAmount || cloudRes.down_payment_amount,
+                downPaymentPaid: !!cloudRes.downPaymentPaid || !!cloudRes.down_payment_paid,
+                balancePaid: !!cloudRes.balancePaid || !!cloudRes.balance_paid,
+                createdAt: new Date(cloudRes.createdAt || cloudRes.created_at),
+                cancellationReason: cloudRes.cancellationReason || cloudRes.cancellation_reason,
+                refundStatus: cloudRes.refundStatus || cloudRes.refund_status,
+                refundMethod: cloudRes.refundMethod || cloudRes.refund_method,
+                refundNotes: cloudRes.refundNotes || cloudRes.refund_notes
+              };
+              merged.push(newRes);
+              syncToDB('/api/reservations', 'POST', newRes, 'Synced online booking').catch(() => {});
+            }
+          });
+          return merged;
+        });
+      }
+
+      // Push any locally made POS/refunds up to online database
+      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+    } catch (e) {
+      console.log('Login sync fallback: local state preserved.');
+    }
+  };
+
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
     const actor = staffProfile?.fullName || 'System / Customer';
     const detailedDescription = `${description} (Action by: ${actor})`;
     const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description: detailedDescription, timestamp: new Date(), metadata };
     setActivities(prev => [newActivity, ...prev]);
-    syncToDB('/api/activities', 'POST', newActivity, "Activity logged").catch(()=>{});
+    syncToDB('/api/activities', 'POST', newActivity, "Activity logged").then(runCloudBackup).catch(()=>{});
   };
 
-  const addLostItem = (i: Omit<LostItem, 'id'>) => {
-    const newItem = { ...i, id: `lf${Date.now()}` };
-    setLostItems(prev => [newItem, ...prev]);
-    syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`).catch(()=>{});
-    addActivity('admin_action', `Added lost item: ${i.itemName}`);
-  };
-  const updateLostItem = (id: string, u: Partial<LostItem>) => {
-    setLostItems(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`).catch(()=>{});
-  };
-  const deleteLostItem = (id: string) => {
-    setLostItems(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`).catch(()=>{});
-  };
+  // 🟢 =========================================================================
+  // 🟢 DIRECT CLOUD SYNC MUTATORS (Dual-writes to SQLite & Supabase for TV sync)
+  // 🟢 =========================================================================
 
-  const addWatchlistItem = (i: Omit<WatchlistItem, 'id'>) => {
-    const newItem = { ...i, id: `wl${Date.now()}` };
-    setWatchlist(prev => [newItem, ...prev]);
-    syncToDB('/api/watchlist', 'POST', newItem, `Added to watchlist`).catch(()=>{});
-    addActivity('admin_action', `Added ${i.name} to Watchlist`);
-  };
-  const updateWatchlistItem = (id: string, u: Partial<WatchlistItem>) => {
-    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`).catch(()=>{});
-  };
-  const deleteWatchlistItem = (id: string) => {
-    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
-    syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`).catch(()=>{});
-  };
-
-  const addSessionHistory = (i: Omit<SessionHistoryItem, 'id'>) => {
-    const newItem = { ...i, id: `sh${Date.now()}` };
-    setSessionHistory(prev => [newItem, ...prev]);
-    syncToDB('/api/session-history', 'POST', newItem, `Logged session history`).catch(()=>{});
-  };
-
-  const hashPassword = async (password: string) => {
-    const msgBuffer = new TextEncoder().encode(password);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  };
-
-  const staffLogin = async (u: string, p: string) => { 
-    const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive); 
-    if (valid) { 
-      setStaffLoggedIn(true); 
-      localStorage.setItem('oneshot_staff_auth', 'true');
-      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
-      localStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
-      localStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      return true; 
-    }
-    return false; 
-  };
-
-  const adminLogin = async (u: string, p: string) => { 
-    const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive && su.isAdmin);
-    if (valid) {
-      setAdminLoggedIn(true);
-      localStorage.setItem('oneshot_admin_auth', 'true');
-      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
-      localStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
-      localStorage.removeItem('oneshot_is_locked');
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      return true;
-    }
-    return false; 
-  };
-
-  const staffLogout = () => {
-    setStaffLoggedIn(false);
-    localStorage.removeItem('oneshot_staff_auth');
-    localStorage.removeItem('oneshot_auth_expiry');
-    localStorage.removeItem('oneshot_is_locked'); 
-  };
-
-  const adminLogout = () => {
-    setAdminLoggedIn(false);
-    localStorage.removeItem('oneshot_admin_auth');
-    localStorage.removeItem('oneshot_auth_expiry');
-    localStorage.removeItem('oneshot_is_locked'); 
-  };
-
- const resetStaffUserPassword = async (id: string) => {
-    try {
-      const targetUser = staffUsers.find(user => user.id === id);
-      const displayName = targetUser ? targetUser.fullName : id;
-      const hashedPw = await hashPassword('oneshotstaff'); 
-      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: hashedPw } : u));
-      syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`).catch(()=>{});
-      addActivity('admin_action', `Reset password to default for: ${displayName}`);
-    } catch (error) { toast.error("Failed to reset password."); }
-  };
-
-  const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
-    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
-    if (!targetUser) return { success: false, message: 'User not found or inactive.' };
-    if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
-    const hashedNew = await hashPassword(newPassword); 
-    updateStaffUser(targetUser.id, { password: hashedNew });
-    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
-    return { success: true, message: 'Password reset successfully!' };
-  };
-
-  const updateStaffProfile = (p: Partial<StaffProfile>) => {
-    setStaffProfile(prev => {
-      const updated = { ...prev, ...p };
-      localStorage.setItem('oneshot_staff_profile', JSON.stringify(updated));
-      syncToDB(`/api/staff/${updated.username}`, 'PUT', p, `Update profile`).catch(()=>{});
-      return updated;
-    });
-  };
-  
   const assignTable = (tableId: string, session: Session) => {
     const updatedSession = { ...session, orders: [] };
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: updatedSession } : t));
     addActivity('table_assigned', `Assigned ${tables.find(t=>t.id===tableId)?.name} to ${session.customerName}`);
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`).catch(()=>{});
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`).then(runCloudBackup).catch(()=>{});
+    supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
   };
 
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
     addActivity('table_freed', `Freed ${tables.find(t=>t.id===tableId)?.name}`);
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`).catch(()=>{});
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`).then(runCloudBackup).catch(()=>{});
+    supabase.from('tables').update({ status: 'available', sessionData: null, maintenanceReason: null, isActive: 1 }).eq('id', tableId).then();
   };
 
   const extendSession = (tableId: string, mins: number, pay: number) => {
     setTables(prev => prev.map(t => {
       if (t.id === tableId && t.session) {
         const updatedSession = { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay };
-        syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`).catch(()=>{});
+        syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`).then(runCloudBackup).catch(()=>{});
+        supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
         return { ...t, session: updatedSession };
       }
       return t;
@@ -575,74 +521,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const reserveTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'reserved' } : t));
     addActivity('table_reserved', `Reserved ${tables.find(t=>t.id===tableId)?.name}`);
+    supabase.from('tables').update({ status: 'reserved', isActive: 1 }).eq('id', tableId).then();
   };
   
   const setTableMaintenance = (tableId: string, reason: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`).catch(()=>{});
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Set ${tables.find(t=>t.id===tableId)?.name} to maintenance: ${reason}`);
+    supabase.from('tables').update({ status: 'maintenance', maintenanceReason: reason, isActive: 1 }).eq('id', tableId).then();
   };
 
   const setTableEvent = (tableId: string, eventName: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'event', maintenanceReason: eventName } : t));
-    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`).catch(()=>{});
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Reserved ${tables.find(t=>t.id===tableId)?.name} for event: ${eventName}`);
+    supabase.from('tables').update({ status: 'event', maintenanceReason: eventName, isActive: 1 }).eq('id', tableId).then();
   };
 
-  const addTable = (name: string) => {
-    const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
-    setTables(prev => [...prev, newTable]);
-    addActivity('admin_action', `Added new table: ${name}`);
-    syncToDB('/api/tables', 'POST', newTable, `New table added`).catch(()=>{});
-  };
-
-  const updateTable = (id: string, name: string) => {
-    setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
-    addActivity('admin_action', `Renamed table ID: ${id} to ${name}`);
-    syncToDB(`/api/tables/${id}`, 'PUT', { name }, `Table updated`).catch(()=>{});
-  };
-
-  const toggleTableActive = (id: string) => {
-    setTables(prev => {
-      const target = prev.find(t => t.id === id);
-      if (target) syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`).catch(()=>{});
-      return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
-    });
-    addActivity('admin_action', `Toggled active status for table ID: ${id}`);
-  };
-
-  const deleteTable = (id: string) => {
-    setTables(prev => prev.filter(t => t.id !== id));
-    syncToDB(`/api/tables/${id}`, 'DELETE', {}, `Table deleted`).catch(()=>{});
-    addActivity('admin_action', `Deleted table ID: ${id}`);
-  };
-
-  const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
-    const newItem = { ...i, id: `inv${Date.now()}` };
-    setInventory(prev => [...prev, newItem]);
-    syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`).catch(()=>{});
-    addActivity('admin_action', `Added new menu item: ${i.name}`); 
-  };
-
-  const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => {
-    setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`).catch(()=>{});
-    addActivity('admin_action', `Updated details for menu item ID: ${id}`);
-  };
-
-  const deleteInventoryItem = (id: string) => {
-    setInventory(prev => prev.filter(i => i.id !== id));
-    syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`).catch(()=>{});
-    addActivity('admin_action', `Deleted menu item ID: ${id}`);
-  };
-  
   const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
     let updatedTableSession: Session | undefined;
     setInventory(prev => prev.map(inv => {
       const cartItem = cart.find(c => c.id === inv.id);
       if (cartItem) {
         const newStock = inv.stock - cartItem.qty;
-        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated`).catch(()=>{});
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated`).then(runCloudBackup).catch(()=>{});
+        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
         return { ...inv, stock: newStock };
       }
       return inv;
@@ -660,7 +563,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return t;
     }));
-    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Orders updated`).catch(()=>{});
+    if (updatedTableSession) {
+      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Orders updated`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
+    }
     addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
@@ -669,7 +575,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setInventory(prev => prev.map(inv => {
       if (inv.id === order.id) {
         const newStock = inv.stock + order.qty;
-        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored`).catch(()=>{});
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored`).then(runCloudBackup).catch(()=>{});
+        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
         return { ...inv, stock: newStock };
       }
       return inv;
@@ -683,7 +590,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return t;
     }));
-    if (updatedTableSession) syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Order voided`).catch(()=>{});
+    if (updatedTableSession) {
+      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Order voided`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
+    }
     addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
   };
 
@@ -692,24 +602,239 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextNum = Math.max(0, ...prev.map(q => q.queueNumber ?? 0)) + 1;
       const newItem = { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting' as const, queueNumber: nextNum };
       addActivity('queue_added', `Added ${i.customerName} to queue position #${nextNum}`);
-      syncToDB('/api/queue', 'POST', newItem, `Queue item added`).catch(()=>{});
+      syncToDB('/api/queue', 'POST', newItem, `Queue item added`).then(runCloudBackup).catch(()=>{});
+      supabase.from('queue').insert([{ ...newItem, arrivalTime: newItem.arrivalTime.toISOString() }]).then();
       return [...prev, newItem];
     });
   };
 
   const removeFromQueue = (id: string) => {
     setQueue(prev => prev.filter(q => q.id !== id));
-    syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`).catch(()=>{});
+    syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`).then(runCloudBackup).catch(()=>{});
     addActivity('queue_removed', `Removed ID: ${id} from queue`);
+    supabase.from('queue').delete().eq('id', id).then();
   };
 
   const callQueueItem = (id: string) => {
     setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
     addActivity('queue_called', `Called customer ID: ${id} from queue to available table`);
-    syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`).catch(()=>{});
+    syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`).then(runCloudBackup).catch(()=>{});
+    supabase.from('queue').update({ status: 'called' }).eq('id', id).then();
   };
 
-  // 🟢 HYBRID SYNC: Saves locally (Electron) AND pushes to Supabase (Vercel/Cloud)
+  // 🟢 =========================================================================
+  // 🟢 STANDARD MUTATORS
+  // 🟢 =========================================================================
+
+  const addLostItem = (i: Omit<LostItem, 'id'>) => {
+    const newItem = { ...i, id: `lf${Date.now()}` };
+    setLostItems(prev => [newItem, ...prev]);
+    syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Added lost item: ${i.itemName}`);
+  };
+  const updateLostItem = (id: string, u: Partial<LostItem>) => {
+    setLostItems(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`).then(runCloudBackup).catch(()=>{});
+  };
+  const deleteLostItem = (id: string) => {
+    setLostItems(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
+    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const addWatchlistItem = (i: Omit<WatchlistItem, 'id'>) => {
+    const newItem = { ...i, id: `wl${Date.now()}` };
+    setWatchlist(prev => [newItem, ...prev]);
+    syncToDB('/api/watchlist', 'POST', newItem, `Added to watchlist`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Added ${i.name} to Watchlist`);
+  };
+  const updateWatchlistItem = (id: string, u: Partial<WatchlistItem>) => {
+    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`).then(runCloudBackup).catch(()=>{});
+  };
+  const deleteWatchlistItem = (id: string) => {
+    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
+    syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const addSessionHistory = (i: Omit<SessionHistoryItem, 'id'>) => {
+    const newItem = { ...i, id: `sh${Date.now()}` };
+    setSessionHistory(prev => [newItem, ...prev]);
+    syncToDB('/api/session-history', 'POST', newItem, `Logged session history`).then(runCloudBackup).catch(()=>{});
+    
+    supabase.from('session_history').insert([{
+      ...newItem, 
+      startTime: newItem.startTime.toISOString(), 
+      endTime: newItem.endTime.toISOString(),
+      orders: JSON.stringify(newItem.orders)
+    }]).then();
+  };
+
+  const hashPassword = async (password: string) => {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const staffLogin = async (u: string, p: string) => { 
+    const hashedP = await hashPassword(p); 
+    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive); 
+    if (valid) { 
+      setStaffLoggedIn(true); 
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
+      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
+      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
+      sessionStorage.removeItem('oneshot_is_locked'); 
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
+      
+      // 🟢 Automatically sync online customer bookings & push offline POS data on Login
+      await performLoginSync();
+      return true; 
+    }
+    return false; 
+  };
+
+  const adminLogin = async (u: string, p: string) => { 
+    const hashedP = await hashPassword(p); 
+    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive && su.isAdmin);
+    if (valid) {
+      setAdminLoggedIn(true);
+      sessionStorage.setItem('oneshot_admin_auth', 'true');
+      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
+      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
+      sessionStorage.removeItem('oneshot_is_locked');
+      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
+      
+      // 🟢 Automatically sync online customer bookings & push offline POS data on Login
+      await performLoginSync();
+      return true;
+    }
+    return false; 
+  };
+
+  // 🟢 NEW: Safe Logout with Loading Screen & Dual Database Backup
+  const staffLogout = async () => {
+    setIsLoggingOut(true);
+    setLogoutStep('Saving local SQLite records...');
+    await new Promise(r => setTimeout(r, 600));
+
+    setLogoutStep('Backing up to online cloud database...');
+    try {
+      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+    } catch (e) {
+      setLogoutStep('Local data saved securely. Closing app...');
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    setStaffLoggedIn(false);
+    setAdminLoggedIn(false);
+    sessionStorage.removeItem('oneshot_staff_auth');
+    sessionStorage.removeItem('oneshot_admin_auth');
+    sessionStorage.removeItem('oneshot_auth_expiry');
+    sessionStorage.removeItem('oneshot_is_locked');
+    sessionStorage.removeItem('oneshot_staff_profile'); 
+    window.location.reload(); 
+  };
+
+  const adminLogout = async () => {
+    setIsLoggingOut(true);
+    setLogoutStep('Saving local SQLite records...');
+    await new Promise(r => setTimeout(r, 600));
+
+    setLogoutStep('Backing up to online cloud database...');
+    try {
+      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+    } catch (e) {
+      setLogoutStep('Local data saved securely. Closing app...');
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    setAdminLoggedIn(false);
+    setStaffLoggedIn(false);
+    sessionStorage.removeItem('oneshot_admin_auth');
+    sessionStorage.removeItem('oneshot_staff_auth');
+    sessionStorage.removeItem('oneshot_auth_expiry');
+    sessionStorage.removeItem('oneshot_is_locked'); 
+    sessionStorage.removeItem('oneshot_staff_profile'); 
+    window.location.reload(); 
+  };
+
+ const resetStaffUserPassword = async (id: string) => {
+    try {
+      const targetUser = staffUsers.find(user => user.id === id);
+      const displayName = targetUser ? targetUser.fullName : id;
+      const hashedPw = await hashPassword('oneshotstaff'); 
+      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: hashedPw } : u));
+      syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`).then(runCloudBackup).catch(()=>{});
+      addActivity('admin_action', `Reset password to default for: ${displayName}`);
+    } catch (error) { toast.error("Failed to reset password."); }
+  };
+
+  const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
+    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
+    if (!targetUser) return { success: false, message: 'User not found or inactive.' };
+    if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
+    const hashedNew = await hashPassword(newPassword); 
+    updateStaffUser(targetUser.id, { password: hashedNew });
+    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
+    return { success: true, message: 'Password reset successfully!' };
+  };
+
+  const updateStaffProfile = (p: Partial<StaffProfile>) => {
+    setStaffProfile(prev => {
+      const updated = { ...prev, ...p };
+      sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const addTable = (name: string) => {
+    const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
+    setTables(prev => [...prev, newTable]);
+    addActivity('admin_action', `Added new table: ${name}`);
+    syncToDB('/api/tables', 'POST', newTable, `New table added`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const updateTable = (id: string, name: string) => {
+    setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
+    addActivity('admin_action', `Renamed table ID: ${id} to ${name}`);
+    syncToDB(`/api/tables/${id}`, 'PUT', { name }, `Table updated`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const toggleTableActive = (id: string) => {
+    setTables(prev => {
+      const target = prev.find(t => t.id === id);
+      if (target) syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`).then(runCloudBackup).catch(()=>{});
+      return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
+    });
+    addActivity('admin_action', `Toggled active status for table ID: ${id}`);
+  };
+
+  const deleteTable = (id: string) => {
+    setTables(prev => prev.filter(t => t.id !== id));
+    syncToDB(`/api/tables/${id}`, 'DELETE', {}, `Table deleted`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Deleted table ID: ${id}`);
+  };
+
+  const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
+    const newItem = { ...i, id: `inv${Date.now()}` };
+    setInventory(prev => [...prev, newItem]);
+    syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Added new menu item: ${i.name}`); 
+  };
+
+  const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => {
+    setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Updated details for menu item ID: ${id}`);
+  };
+
+  const deleteInventoryItem = (id: string) => {
+    setInventory(prev => prev.filter(i => i.id !== id));
+    syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Deleted menu item ID: ${id}`);
+  };
+
   const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
@@ -717,10 +842,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setReservations(prev => [...prev, newRes as Reservation]);
     addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`); 
     
-    // 1. Local Edge Save
-    syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`).catch(() => {});
+    syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`).then(runCloudBackup).catch(() => {});
     
-    // 2. Cloud Supabase Save
     const supabasePayload = {
       ...newRes,
       date: newRes.date.toISOString(), 
@@ -729,38 +852,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       balancePaid: newRes.balancePaid ? 1 : 0,
       receiptImg: null 
     };
-    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.error("Error inserting reservation to Supabase:", error);
-    });
-    
+    supabase.from('reservations').insert([supabasePayload]).then();
     return id;
   };
   
-  // 🟢 FIXED RESTORED RESERVATION MUTATORS WITH HYBRID SYNC
   const updateReservationStatus = (id: string, status: ReservationStatus) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`).catch(()=>{});
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`).then(runCloudBackup).catch(()=>{});
     supabase.from('reservations').update({ status }).eq('id', id).then();
     addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); 
   };
 
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).catch(()=>{});
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).then(runCloudBackup).catch(()=>{});
     supabase.from('reservations').update({ status: 'cancelled', cancellationReason: reason }).eq('id', id).then();
     addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
   };
 
   const updateDownPayment = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`).catch(()=>{});
+    syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`).then(runCloudBackup).catch(()=>{});
     supabase.from('reservations').update({ downPaymentPaid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
   };
 
   const updateBalance = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`).catch(()=>{});
+    syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`).then(runCloudBackup).catch(()=>{});
     supabase.from('reservations').update({ balancePaid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
   };
@@ -768,64 +887,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } as Reservation : r));
     const payload = { refundStatus, refundMethod: method, refundNotes: notes };
-    syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`).catch(()=>{});
+    syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`).then(runCloudBackup).catch(()=>{});
     supabase.from('reservations').update(payload).eq('id', id).then();
     addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
   };
 
   const acknowledgeRefund = (id: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', { refundStatus: 'acknowledged' }, `Refund acknowledged`).catch(()=>{});
+    syncToDB(`/api/reservations/${id}`, 'PUT', { refundStatus: 'acknowledged' }, `Refund acknowledged`).then(runCloudBackup).catch(()=>{});
     supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then();
   };
 
   const updateReservation = (id: string, u: Partial<Reservation>) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
-    syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).catch(()=>{});
+    syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).then(runCloudBackup).catch(()=>{});
     supabase.from('reservations').update(u).eq('id', id).then();
     addActivity('reservation_updated', `Reservation ${id} details were updated`);
   };
 
-  // 🟢 HYBRID SYNC: Add Feedback
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
-    
-    // 1. Local Edge Save
-    syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback").catch(()=>{});
-    
-    // 2. Cloud Supabase Save (Strips 'rating' column that doesn't exist)
+    syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback").then(runCloudBackup).catch(()=>{});
     const { rating, ...supabasePayload } = newFeedback;
-    supabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.error("Error inserting feedback to Supabase:", error);
-    });
+    supabase.from('feedback').insert([supabasePayload]).then();
   };
 
   const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
     const id = `p${Date.now()}`;
     const newPromo = { ...i, id, createdAt: new Date(), usageCount: 0 };
     setPromoCodes(prev => [...prev, newPromo]);
-    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`).catch(()=>{});
+    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Generated promo code: ${i.code}`);
     return id;
   };
   
   const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => {
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
-    syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`).catch(()=>{});
+    syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Updated promo code ID: ${id}`);
   };
   
   const togglePromoCode = (id: string) => {
     const target = promoCodes.find(p => p.id === id);
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
-    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo').catch(()=>{});
+    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo').then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Toggled visibility for promo ID: ${id}`);
   };
   
   const deletePromoCode = (id: string) => {
     setPromoCodes(prev => prev.filter(p => p.id !== id));
-    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo').catch(()=>{});
+    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo').then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Deleted promo code ID: ${id}`);
   };
   
@@ -844,7 +956,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const id = `su${Date.now()}`;
     const newUser = { ...u, id, createdAt: new Date() };
     setStaffUsers(prev => [...prev, newUser]);
-    syncToDB('/api/staff', 'POST', newUser, `Added staff user`).catch(()=>{});
+    syncToDB('/api/staff', 'POST', newUser, `Added staff user`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Created new staff user: ${u.username}`);
   };
   
@@ -852,7 +964,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const targetUser = staffUsers.find(user => user.id === id);
     const displayName = targetUser ? targetUser.fullName : id;
     setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
-    syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`).catch(()=>{});
+    syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Updated details for: ${displayName}`);
   };
   
@@ -860,7 +972,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const target = staffUsers.find(u => u.id === id);
     if (target) {
       setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
-      syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`).catch(()=>{});
+      syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`).then(runCloudBackup).catch(()=>{});
       addActivity('admin_action', `Toggled active status for staff user: ${target.username}`);
     }
   };
@@ -881,7 +993,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
       addActivity('admin_action', 'System rates updated');
-      fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+      runCloudBackup(); 
       return res;
     } catch (e) { throw e; }
   };
@@ -891,6 +1003,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`); 
       addActivity('admin_action', 'Reservation terms updated');
+      runCloudBackup(); 
       return res;
     } catch (e) { throw e; }
   };
@@ -898,19 +1011,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
  const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {
     const newAnn = { ...a, id: `a${Date.now()}`, createdAt: new Date() };
     setAnnouncements(prev => [newAnn, ...prev]);
-    syncToDB('/api/announcements', 'POST', newAnn, `Created announcement: ${a.title}`).catch(()=>{});
+    syncToDB('/api/announcements', 'POST', newAnn, `Created announcement: ${a.title}`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Created public announcement: ${a.title}`);
   };
 
   const updateAnnouncement = (id: string, u: Partial<Announcement>) => {
     setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, ...u } : a));
-    syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`).catch(()=>{});
+    syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Updated announcement ID: ${id}`);
   };
   
   const deleteAnnouncement = (id: string) => {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
-    syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`).catch(()=>{});
+    syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Deleted announcement ID: ${id}`);
   };
 
@@ -918,7 +1031,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const target = announcements.find(a => a.id === id);
     if (target) {
       setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a));
-      syncToDB(`/api/announcements/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled announcement visibility`).catch(()=>{});
+      syncToDB(`/api/announcements/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled announcement visibility`).then(runCloudBackup).catch(()=>{});
       addActivity('admin_action', `Toggled visibility for announcement ID: ${id}`);
     }
   };
@@ -926,45 +1039,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addClosedDate = (c: Omit<ClosedDate, 'id'>) => {
     const newCd = { ...c, id: `cd${Date.now()}` };
     setClosedDates(prev => [...prev, newCd]);
-    syncToDB('/api/closed-dates', 'POST', newCd, `Created closed date for ${c.date}`).catch(()=>{});
+    syncToDB('/api/closed-dates', 'POST', newCd, `Created closed date for ${c.date}`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Added closure date: ${c.date}`);
   };
   
   const removeClosedDate = (id: string) => {
     setClosedDates(prev => prev.filter(c => c.id !== id));
-    syncToDB(`/api/closed-dates/${id}`, 'DELETE', {}, `Deleted closed date`).catch(()=>{});
+    syncToDB(`/api/closed-dates/${id}`, 'DELETE', {}, `Deleted closed date`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Removed closure date ID: ${id}`);
   };
   
   const updateClosedDate = (id: string, u: Partial<ClosedDate>) => {
     setClosedDates(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
-    syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`).catch(()=>{});
-  };
-
- const updateSiteConfig = (newConfig: any) => {
-    setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
-    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).catch(()=>{});
-    addActivity('admin_action', `Updated public website CMS content`);
-    fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+    syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`).then(runCloudBackup).catch(()=>{});
   };
 
   const addEvent = (e: Omit<Event, 'id'>) => {
     const newEvent = { ...e, id: Date.now().toString() };
     setEvents(prev => [...prev, newEvent]);
-    syncToDB('/api/events', 'POST', newEvent, `Created new event`).catch(()=>{});
+    syncToDB('/api/events', 'POST', newEvent, `Created new event`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Created special event: ${e.title}`);
   };
   
   const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => {
     setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`).catch(()=>{});
+    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Updated event ID: ${id}`);
   };
   
   const deleteEvent = (id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
-    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`).catch(()=>{});
+    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Deleted event ID: ${id}`);
+  };
+
+ const updateSiteConfig = (newConfig: any) => {
+    setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
+    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Updated public website CMS content`);
   };
 
   if (isInitializing) {
@@ -998,8 +1110,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
       hashPassword,
       theme, primaryColor, updateTheme, updatePrimaryColor,
-      updateRefundStatus, acknowledgeRefund
+      updateRefundStatus, acknowledgeRefund,
+      isLoggingOut, logoutStep
     }}>
+      {/* 🟢 NEW: Global Fullscreen Logout Overlay with Thread Loader */}
+      {isLoggingOut && (
+        <div className="fixed inset-0 z-[99999] bg-neutral-950/90 backdrop-blur-md flex flex-col items-center justify-center animate-fade-in">
+          <div className="relative w-16 h-16 mb-5">
+            <div className="absolute inset-0 border-4 border-neutral-800 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
+          </div>
+          <h2 className="text-lg font-black text-white uppercase tracking-widest mb-1">
+            Safeguarding Venue Records
+          </h2>
+          <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider animate-pulse">
+            {logoutStep}
+          </p>
+        </div>
+      )}
+
       {children}
     </AppContext.Provider>
   );

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { toast } from 'sonner';
 import { 
   Users, Table2, Tag, Megaphone, CalendarX2, DollarSign, 
   TrendingUp, Bell, CloudRain, Sun, Cloud, MapPin, 
-  Database, RefreshCw, CalendarDays, ArrowRight, ShieldCheck 
+  Database, RefreshCw, CalendarDays, ArrowRight, ShieldCheck,
+  Wifi, WifiOff, Download, CheckCircle2
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { format, isToday, isTomorrow } from 'date-fns';
@@ -13,8 +14,9 @@ export function AdminDashboard() {
   const { 
     staffUsers, tables, promoCodes, announcements, closedDates, 
     rates, reservations, feedback, weather, updateWeatherLocation, 
-    activities, sessionHistory, refreshLiveMonitor 
-  } = useAppContext();
+    activities, sessionHistory, refreshLiveMonitor, isSystemOffline,
+    queue, watchlist
+  } = useAppContext() as any;
   
   const navigate = useNavigate();
 
@@ -23,18 +25,91 @@ export function AdminDashboard() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date>(new Date());
 
-  const activeUsers     = staffUsers.filter(u => u.isActive).length;
-  const activePromos    = promoCodes.filter(p => p.isActive).length;
-  const activeAnn       = announcements.filter(a => a.isActive).length;
-  const upcomingClosed  = closedDates.filter(c => new Date(c.date) >= new Date()).length;
+  // ── Connectivity & Local Backup State ─────────────────────────
+  const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [backupSuccess, setBackupSuccess] = useState(false);
+  const [offlineSince, setOfflineSince] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsBrowserOffline(false);
+      setOfflineSince(null);
+    };
+    const handleOffline = () => {
+      setIsBrowserOffline(true);
+      setOfflineSince(new Date());
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const isFullyOffline = isBrowserOffline || isSystemOffline;
+
+  useEffect(() => {
+    if (isFullyOffline && !offlineSince) {
+      setOfflineSince(new Date());
+    } else if (!isFullyOffline && offlineSince) {
+      setOfflineSince(null);
+    }
+  }, [isFullyOffline, offlineSince]);
+
+  const handleRunLocalBackup = () => {
+    setIsBackingUp(true);
+    setBackupSuccess(false);
+
+    try {
+      const backupPayload = {
+        timestamp: new Date().toISOString(),
+        tables,
+        queue,
+        reservations,
+        watchlist,
+        staffUsers,
+        promoCodes,
+        announcements,
+        closedDates,
+        rates,
+      };
+
+      const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `oneshot-admin-backup-${format(new Date(), 'yyyy-MM-dd_HHmm')}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setBackupSuccess(true);
+      setTimeout(() => setBackupSuccess(false), 3000);
+    } catch (err) {
+      console.error('Backup failed:', err);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  // ── Dashboard Calculations ────────────────────────────────────
+  const activeUsers     = staffUsers.filter((u: any) => u.isActive).length;
+  const activePromos    = promoCodes.filter((p: any) => p.isActive).length;
+  const activeAnn       = announcements.filter((a: any) => a.isActive).length;
+  const upcomingClosed  = closedDates.filter((c: any) => new Date(c.date) >= new Date()).length;
   
   const totalRevenue = 
-    reservations.filter(r => r.status === 'completed').reduce((s, r) => s + r.totalAmount, 0) +
-    (sessionHistory || []).reduce((s, sh) => s + (sh.totalAmount || 0), 0);
+    reservations.filter((r: any) => r.status === 'completed').reduce((s: number, r: any) => s + r.totalAmount, 0) +
+    (sessionHistory || []).reduce((s: number, sh: any) => s + (sh.totalAmount || 0), 0);
 
   const pendingReservations = reservations
-    .filter(r => r.status === 'pending' || r.status === 'confirmed')
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    .filter((r: any) => r.status === 'pending' || r.status === 'confirmed')
+    .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   const handleWeatherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +135,6 @@ export function AdminDashboard() {
   };
 
   const handleManualSync = async () => {
-    // 🟢 FIXED: Prevent Mixed Content Crash. Vercel cannot pull from Localhost.
     if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
       toast.error("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", { duration: 6000 });
       return;
@@ -101,7 +175,7 @@ export function AdminDashboard() {
        });
     }
 
-    const todayRes = pendingReservations.filter(r => isToday(new Date(r.date)));
+    const todayRes = pendingReservations.filter((r: any) => isToday(new Date(r.date)));
     if (tables.length > 0 && todayRes.length > (tables.length * 2)) {
       alerts.push({
          id: 'alert_res', title: 'High Booking Volume',
@@ -111,7 +185,7 @@ export function AdminDashboard() {
        });
     }
 
-    const recentVoids = activities.filter(a => a.type === 'admin_action' && a.description.includes('Voided') && new Date(a.timestamp).getTime() > Date.now() - 86400000);
+    const recentVoids = activities.filter((a: any) => a.type === 'admin_action' && a.description.includes('Voided') && new Date(a.timestamp).getTime() > Date.now() - 86400000);
     if (recentVoids.length > 5) {
        alerts.push({
          id: 'alert_voids', title: 'Unusual POS Activity',
@@ -134,11 +208,83 @@ export function AdminDashboard() {
   const dynamicAlerts = getDynamicAlerts();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      
+      {/* ── MERGED: System Connectivity & Database Backup Operator Banner ── */}
+      <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3">
+          <div className={`p-2.5 rounded-xl flex-shrink-0 ${
+            isFullyOffline ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'
+          }`}>
+            {isFullyOffline ? <WifiOff size={22} /> : <Wifi size={22} />}
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-300">
+                System Status
+              </span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                isFullyOffline 
+                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' 
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              }`}>
+                {isFullyOffline ? 'OFFLINE MODE' : 'ONLINE & SYNCED'}
+              </span>
+              <span className="text-neutral-700 hidden sm:inline">|</span>
+              <span className="text-[11px] text-neutral-400 font-medium flex items-center gap-1">
+                <Database size={11} className="text-emerald-500" /> Local Database Active
+              </span>
+            </div>
+            <p className="text-xs text-neutral-500 mt-1">
+              {isFullyOffline
+                ? `Cloud disconnected${offlineSince ? ` since ${format(offlineSince, 'hh:mm a')}` : ''}. Local server is processing all venue transactions safely.`
+                : `Connected to Cloud Server. Last cloud sync completed at ${format(lastSync, 'hh:mm a')}.`}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 self-end lg:self-auto">
+          {backupSuccess && (
+            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 mr-1 animate-fade-in">
+              <CheckCircle2 size={14} /> Local JSON Saved
+            </span>
+          )}
+          
+          {/* Cloud Sync Button */}
+          <button
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all border ${
+              isSyncing 
+                ? 'bg-neutral-900 text-neutral-500 border-neutral-800 cursor-wait' 
+                : 'bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border-emerald-600/20'
+            }`}
+          >
+            <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+            <span>{isSyncing ? 'Syncing to Cloud...' : 'Run Cloud Backup'}</span>
+          </button>
+
+          {/* Local JSON Backup Button */}
+          <button
+            onClick={handleRunLocalBackup}
+            disabled={isBackingUp}
+            className="flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700/60 text-neutral-200 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+          >
+            {isBackingUp ? (
+              <RefreshCw size={14} className="animate-spin text-amber-400" />
+            ) : (
+              <Download size={14} className="text-amber-400" />
+            )}
+            <span>Run Local Backup</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Dashboard Welcome & Weather Grid ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6 items-stretch">
         
-        {/* Main Welcome - Clean, Theme-Responsive SaaS Design */}
-        <div className={`flex flex-col justify-between h-full bg-neutral-950 border border-neutral-800 rounded-2xl p-6 md:col-span-2 ${weather ? 'lg:col-span-7' : 'lg:col-span-8'}`}>
+        {/* Main Welcome */}
+        <div className={`flex flex-col justify-between h-full bg-neutral-950 border border-neutral-800 rounded-2xl p-6 md:col-span-2 ${weather ? 'lg:col-span-8' : 'lg:col-span-12'}`}>
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-xl font-black text-neutral-100 mb-1">Admin Dashboard</h1>
@@ -167,49 +313,31 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        {/* Database Sync Card */}
-        <div className={`flex flex-col justify-between h-full bg-neutral-950 border border-neutral-800 rounded-2xl p-5 relative overflow-hidden md:col-span-1 ${weather ? 'lg:col-span-3' : 'lg:col-span-4'}`}>
-          <div className="absolute -right-4 -top-4 text-neutral-800 opacity-20 pointer-events-none"><Database size={100} /></div>
-          <div>
-            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest mb-1 flex items-center gap-1.5"><Database size={12} /> Local Database</h3>
-            <p className="text-[10px] text-neutral-500 leading-relaxed mb-4">Running efficiently on local Database.</p>
-          </div>
-          <div className="space-y-3 mt-auto pt-4">
-             <div className="flex justify-between items-center text-[10px] border-b border-neutral-800/60 pb-2">
-                <span className="text-neutral-500">Last Cloud Sync:</span>
-                <span className="text-neutral-300 font-semibold">{format(lastSync, 'MMM d, h:mm a')}</span>
-             </div>
-             <button onClick={handleManualSync} disabled={isSyncing} className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${isSyncing ? 'bg-neutral-800 text-neutral-500 cursor-wait' : 'bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-600/20'}`}>
-               <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> {isSyncing ? 'Syncing to Supabase...' : 'Run Cloud Backup'}
-             </button>
-          </div>
-        </div>
-
         {/* Weather API Display */}
         {weather && (
-          <div className={`flex flex-col justify-center h-full border rounded-2xl p-5 relative overflow-hidden md:col-span-1 lg:col-span-2 ${weather.isRaining ? 'bg-blue-950/20 border-blue-900/30' : 'bg-neutral-950 border-neutral-800'}`}>
+          <div className={`flex flex-col justify-center h-full border rounded-2xl p-5 relative overflow-hidden md:col-span-2 lg:col-span-4 ${weather.isRaining ? 'bg-blue-950/20 border-blue-900/30' : 'bg-neutral-950 border-neutral-800'}`}>
             {weather.isRaining && <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />}
             <div className="flex items-center justify-between mb-3 relative z-10">
               <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Live Weather</p>
               <div className="flex items-center gap-2">
                 {isEditingWeather ? (
                   <form onSubmit={handleWeatherSubmit} className="flex items-center gap-1">
-                    <input type="text" value={locationQuery} onChange={e => setLocationQuery(e.target.value)} className="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-[10px] text-neutral-100 outline-none focus:border-emerald-500 w-16" placeholder={weather.locationName} autoFocus />
+                    <input type="text" value={locationQuery} onChange={e => setLocationQuery(e.target.value)} className="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-[10px] text-neutral-100 outline-none focus:border-emerald-500 w-24" placeholder={weather.locationName} autoFocus />
                   </form>
                 ) : (
-                  <button onClick={() => setIsEditingWeather(true)} className="flex items-center gap-1 text-[9px] text-neutral-400 hover:text-neutral-100 transition-colors bg-neutral-900 px-1.5 py-1 rounded border border-neutral-800 truncate max-w-[80px]">
-                    <MapPin size={8} className="flex-shrink-0" /> <span className="truncate">{weather.locationName}</span>
+                  <button onClick={() => setIsEditingWeather(true)} className="flex items-center gap-1 text-[9px] text-neutral-400 hover:text-neutral-100 transition-colors bg-neutral-900 px-2 py-1 rounded border border-neutral-800 truncate max-w-[120px]">
+                    <MapPin size={10} className="flex-shrink-0" /> <span className="truncate">{weather.locationName}</span>
                   </button>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-3 relative z-10">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${weather.isRaining ? 'bg-blue-500/20 text-blue-400' : weather.condition === 'Clear' ? 'bg-amber-500/20 text-amber-400' : 'bg-neutral-800 text-neutral-400'}`}>
-                {weather.isRaining ? <CloudRain size={20} /> : weather.condition === 'Clear' ? <Sun size={20} /> : <Cloud size={20} />}
+            <div className="flex items-center gap-4 relative z-10">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${weather.isRaining ? 'bg-blue-500/20 text-blue-400' : weather.condition === 'Clear' ? 'bg-amber-500/20 text-amber-400' : 'bg-neutral-800 text-neutral-400'}`}>
+                {weather.isRaining ? <CloudRain size={24} /> : weather.condition === 'Clear' ? <Sun size={24} /> : <Cloud size={24} />}
               </div>
               <div className="min-w-0">
-                <p className="text-2xl font-black text-neutral-100 truncate">{Math.round(weather.temp)}°C</p>
-                <p className="text-[11px] font-semibold text-neutral-400 truncate">{weather.condition}</p>
+                <p className="text-3xl font-black text-neutral-100 truncate">{Math.round(weather.temp)}°C</p>
+                <p className="text-xs font-semibold text-neutral-400 truncate">{weather.condition}</p>
               </div>
             </div>
           </div>
@@ -219,7 +347,7 @@ export function AdminDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
           { label: 'Staff Users',       value: activeUsers,       total: staffUsers.length,       color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    icon: Users,        link: '/admin/users' },
-          { label: 'Tables',            value: tables.filter(t=>t.status==='available').length, total: tables.length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables' },
+          { label: 'Tables',            value: tables.filter((t: any)=>t.status==='available').length, total: tables.length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables' },
           { label: 'Active Promos',     value: activePromos,      total: promoCodes.length,       color: 'text-violet-400',  bg: 'bg-violet-500/10',  border: 'border-violet-500/20',  icon: Tag,          link: '/admin/events' },
           { label: 'Live Announcements',value: activeAnn,         total: announcements.length,    color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Megaphone,    link: '/admin/announcements' },
           { label: 'Upcoming Closures', value: upcomingClosed,    total: closedDates.length,      color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    icon: CalendarX2,   link: '/admin/events' },
@@ -268,7 +396,7 @@ export function AdminDashboard() {
           </div>
           <div className="space-y-2 overflow-y-auto pr-2 flex-1">
             {pendingReservations.length === 0 ? <p className="text-xs text-neutral-500 italic text-center py-6">No upcoming reservations</p> : (
-              pendingReservations.slice(0, 10).map(r => {
+              pendingReservations.slice(0, 10).map((r: any) => {
                 const isTodayRes = isToday(new Date(r.date));
                 const isTomorrowRes = isTomorrow(new Date(r.date));
                 const dateLabel = isTodayRes ? 'Today' : isTomorrowRes ? 'Tomorrow' : format(new Date(r.date), 'MMM d');
@@ -297,7 +425,7 @@ export function AdminDashboard() {
             <button onClick={() => navigate('/admin/feedback')} className="text-[10px] text-neutral-500 hover:text-emerald-400 transition-colors font-medium">View All</button>
           </div>
           <div className="space-y-2 overflow-y-auto pr-2 flex-1">
-            {feedback.length === 0 ? <p className="text-xs text-neutral-500 italic text-center py-6">No recent feedback</p> : feedback.slice(0, 6).map(f => (
+            {feedback.length === 0 ? <p className="text-xs text-neutral-500 italic text-center py-6">No recent feedback</p> : feedback.slice(0, 6).map((f: any) => (
               <div key={f.id} className="flex items-start gap-3 py-3 border-b border-neutral-800/50 last:border-0">
                 <div className="w-8 h-8 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-xs font-bold text-neutral-400 flex-shrink-0">{f.customerName.charAt(0)}</div>
                 <div className="flex-1 min-w-0">
@@ -316,8 +444,37 @@ export function AdminDashboard() {
             ))}
           </div>
         </div>
-
       </div>
+
+      {/* ── Floating Offline Alert Toast (Bottom Right) ── */}
+      {isFullyOffline && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-neutral-900/95 border border-rose-800/80 rounded-xl p-4 shadow-2xl backdrop-blur-md animate-slide-up">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-rose-500/10 text-rose-400 rounded-lg flex-none mt-0.5">
+              <WifiOff size={18} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wider">
+                System Offline
+              </h4>
+              <p className="text-xs text-neutral-300 mt-1 leading-relaxed">
+                Cloud sync is unavailable. Save a local database snapshot to protect recent venue transactions.
+              </p>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  onClick={handleRunLocalBackup}
+                  disabled={isBackingUp}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <Download size={13} />
+                  <span>Run Local Backup</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

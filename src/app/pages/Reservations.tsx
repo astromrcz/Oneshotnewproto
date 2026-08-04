@@ -3,10 +3,11 @@ import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reser
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
-  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send
+  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload
 } from 'lucide-react';
-import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
+import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
+import { supabase } from '../utils/supabase';
 const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 const statusConfig: Record<ReservationStatus, { label: string; color: string; dot: string }> = {
@@ -26,7 +27,7 @@ const formatDate = (d: Date) => {
 const todayStart = startOfDay(new Date());
 
 export function Reservations() {
-  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, rates, updateRefundStatus } = useAppContext() as any;
+  const { reservations, addReservation, updateReservationStatus, cancelReservation, updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, rates, updateRefundStatus, theme, reservationTerms } = useAppContext() as any;
   const navigate = useNavigate();
   
   const [showForm, setShowForm] = useState(false);
@@ -60,11 +61,78 @@ export function Reservations() {
     return {};
   });
 
-  // Form state
+ // Form state
   const [form, setForm] = useState({
     customerName: '', contactNumber: '', email: '', date: '',
-    timeSlot: '', durationHours: 2, partySize: 2, tableId: '',
+    timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: ''
   });
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 🟢 NEW: Dynamic constraints for Staff Manual Booking
+  const getNextClosingTime = (dateStr: string) => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    const isWeekend = d.getDay() === 5 || d.getDay() === 6;
+    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    if (!closeTimeStr) return null;
+    
+    const [hr, min] = closeTimeStr.split(':').map(Number);
+    const closeDate = new Date(dateStr);
+    closeDate.setHours(hr, min, 0, 0);
+    
+    if (hr <= 12) {
+      closeDate.setDate(closeDate.getDate() + 1);
+    }
+    return closeDate;
+  };
+
+  const maxAllowedDuration = (() => {
+    let maxMins = (reservationTerms?.maxHours || 8) * 60;
+    if (form.date && form.timeSlot) {
+      const closeDate = getNextClosingTime(form.date);
+      const [h, m] = form.timeSlot.split(':').map(Number);
+      const startD = new Date(form.date);
+      startD.setHours(h, m, 0, 0);
+      
+      if (closeDate) {
+        const minsLeft = Math.floor(differenceInSeconds(closeDate, startD) / 60);
+        if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
+      }
+    }
+    return Math.max(1, Math.floor(maxMins / 60));
+  })();
+
+  const maxAllowedPartySize = (() => {
+    if (!form.date) return 20;
+    const d = new Date(form.date);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+    return isWeekend ? (reservationTerms?.weekendMaxPartySize || 20) : (reservationTerms?.weekdayMaxPartySize || 20);
+  })();
+
+  // 🟢 NEW: Strict Time Slot Validator based on Store Hours
+  const isTimeSlotValid = (() => {
+    if (!form.date || !form.timeSlot) return true;
+    const parseToMins = (t: string) => { const [h, m] = (t||'0').split(':').map(Number); return h * 60 + (m || 0); };
+    
+    const d = new Date(form.date);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+    const startStr = isWeekend ? rates?.weekendStartTime : rates?.weekdayStartTime;
+    const endStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    
+    if (!startStr || !endStr) return true;
+    
+    const startMins = parseToMins(startStr);
+    let endMins = parseToMins(endStr);
+    if (endMins <= startMins) endMins += 24 * 60;
+    
+    const slotMins = parseToMins(form.timeSlot);
+    let normalizedSlot = slotMins;
+    if (slotMins < startMins) normalizedSlot += 24 * 60; // Shift to next day if it's past midnight
+    
+    return normalizedSlot >= startMins && normalizedSlot < endMins;
+  })();
 
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
   const totalAmount = form.durationHours * effectiveHourly;
@@ -196,29 +264,74 @@ export function Reservations() {
     URL.revokeObjectURL(url);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const [year, month, day] = form.date.split('-').map(Number);
     const [hour, minute] = form.timeSlot.split(':').map(Number);
     const dateObj = new Date(year, month - 1, day, hour, minute);
 
-    addReservation({
-      customerName: form.customerName,
-      contactNumber: form.contactNumber,
-      email: form.email,
-      date: dateObj,
-      timeSlot: form.timeSlot,
-      durationHours: form.durationHours,
-      partySize: form.partySize,
-      tableId: form.tableId || undefined,
-      status: 'pending',
-      totalAmount,
-      downPaymentAmount: downPayment,
-      downPaymentPaid: false,
-      balancePaid: false,
-    });
-    setShowForm(false);
-    setForm({ customerName: '', contactNumber: '', email: '', date: '', timeSlot: '', durationHours: 2, partySize: 2, tableId: '' });
+    // 🟢 FIXED: Duplicate Booking Check (Same Name + Same Date + Same Hour)
+    const isDuplicate = reservations.some((r: any) => 
+      r.customerName.trim().toLowerCase() === form.customerName.trim().toLowerCase() && 
+      isSameDay(new Date(r.date), dateObj) && 
+      r.timeSlot === form.timeSlot &&
+      r.status !== 'cancelled'
+    );
+
+    if (isDuplicate) {
+      alert("Duplicate Booking Detected!\n\nThis customer already has a reservation for this exact time. To book an additional table for the same group ('libre'), please use the name of the friend who will physically occupy the other table.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    let finalReceiptUrl = null;
+
+    try {
+      if (receiptFile) {
+        const fileExt = receiptFile.name.split('.').pop();
+        const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('oneshot-assets')
+          .upload(fileName, receiptFile);
+          
+        if (uploadError) throw uploadError;
+        
+        const { data: publicUrlData } = supabase.storage
+          .from('oneshot-assets')
+          .getPublicUrl(fileName);
+          
+        finalReceiptUrl = publicUrlData.publicUrl;
+      }
+
+      addReservation({
+        customerName: form.customerName.trim(),
+        contactNumber: form.contactNumber,
+        email: form.email,
+        date: dateObj,
+        timeSlot: form.timeSlot,
+        durationHours: form.durationHours,
+        partySize: form.partySize,
+        tableId: form.tableId || undefined,
+        status: 'pending',
+        totalAmount,
+        downPaymentAmount: downPayment,
+        downPaymentPaid: !!finalReceiptUrl,
+        balancePaid: false,
+        paymentRef: form.paymentRef || undefined,
+        receiptImg: finalReceiptUrl || undefined
+      });
+
+      setShowForm(false);
+      setForm({ customerName: '', contactNumber: '', email: '', date: '', timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: '' });
+      setReceiptFile(null);
+      setReceiptPreview(null);
+    } catch (err) {
+      console.error("Upload error", err);
+      alert("Failed to upload receipt. Please check your connection.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const filtered = reservations
@@ -814,40 +927,71 @@ export function Reservations() {
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
                     placeholder="email@example.com" />
                 </div>
+                {/* 🟢 FIXED: Date and Time with Dark Mode formatting */}
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Date *</label>
-                  <input required type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  <input required type="date" value={form.date} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Time Slot *</label>
-                  <input required type="time" value={form.timeSlot} onChange={e => setForm(f => ({ ...f, timeSlot: e.target.value }))}
+                  <input required type="time" value={form.timeSlot} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => {
+                    setForm(f => ({ ...f, timeSlot: e.target.value }));
+                    // Ensure duration doesn't exceed newly calculated limits when time changes
+                    if (form.durationHours > maxAllowedDuration) {
+                      setForm(f => ({ ...f, durationHours: maxAllowedDuration }));
+                    }
+                  }}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
                 </div>
+                
+                {/* 🟢 FIXED: Dynamic Dropdowns for Duration and Party Size */}
                 <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Duration (hours)</label>
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4].map(h => (
-                      <button key={h} type="button" onClick={() => setForm(f => ({ ...f, durationHours: h }))}
-                        className={`flex-1 py-2.5 rounded-lg border text-xs font-bold transition-all ${
-                          form.durationHours === h ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'
-                        }`}>
-                        {h}h
-                      </button>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex justify-between">
+                    <span>Duration (hours)</span>
+                    {form.timeSlot && <span className="text-[10px] text-amber-500">Max ~{maxAllowedDuration}h</span>}
+                  </label>
+                  <select value={form.durationHours} onChange={e => setForm(f => ({ ...f, durationHours: parseInt(e.target.value) }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                    {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                      <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
                     ))}
-                  </div>
+                  </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Party Size</label>
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5, 6].map(n => (
-                      <button key={n} type="button" onClick={() => setForm(f => ({ ...f, partySize: n }))}
-                        className={`flex-1 py-2 rounded-lg border text-xs font-bold transition-all ${
-                          form.partySize === n ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'
-                        }`}>
-                        {n}
-                      </button>
-                    ))}
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex justify-between">
+                    <span>Party Size</span>
+                    <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">Max {maxAllowedPartySize}</span>
+                  </label>
+                  <input type="number" min="1" max={maxAllowedPartySize} value={form.partySize} onChange={e => setForm(f => ({ ...f, partySize: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
+                </div>
+                
+                {/* 🟢 FIXED: GCash Downpayment is now strictly required */}
+                <div className="sm:col-span-2 space-y-3 border-t border-neutral-800 pt-4 mt-2">
+                  <p className="text-xs text-amber-500 uppercase tracking-wider font-bold flex items-center gap-1.5"><DollarSign size={14}/> Down Payment Info (Required)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">GCash Ref No. *</label>
+                      <input required type="text" value={form.paymentRef} onChange={e => setForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono tracking-widest" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image *</label>
+                      <div className="flex items-center gap-3">
+                        <label className="flex-1 cursor-pointer bg-neutral-900 border border-dashed border-neutral-700 hover:border-emerald-500 rounded-lg px-3 py-2 text-center transition-colors flex flex-col items-center justify-center h-[42px]">
+                          <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { 
+                            const file = e.target.files?.[0]; 
+                            if (file) {
+                              if (!file.type.startsWith('image/')) { alert('Please upload JPG or PNG only.'); return; }
+                              setReceiptPreview(URL.createObjectURL(file)); 
+                              setReceiptFile(file);
+                            } 
+                          }} />
+                          <div className="flex items-center gap-1 text-[10px] text-neutral-400">
+                            <Upload size={12} /> {receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}
+                          </div>
+                        </label>
+                        {receiptPreview && <img src={receiptPreview} alt="Receipt" className="w-10 h-10 object-cover rounded-md border border-neutral-700 shadow-sm" />}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -865,12 +1009,18 @@ export function Reservations() {
                 </div>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
                   Cancel
                 </button>
-                <button type="submit" className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2">
-                  <Plus size={15} /> Create Reservation
+                {/* 🟢 FIXED: Block submission if Time, Receipt, or Ref No are missing */}
+                {!isTimeSlotValid && form.timeSlot && (
+                  <p className="text-[10px] text-rose-400 font-bold col-span-full bg-rose-950/20 p-2 rounded border border-rose-900/50 flex items-center gap-1">
+                    <AlertTriangle size={12} /> The selected time slot falls outside operating hours.
+                  </p>
+                )}
+                <button type="submit" disabled={isSubmitting || !isTimeSlotValid || !receiptFile || form.paymentRef.length < 13} className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2">
+                  {isSubmitting ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</> : <><Plus size={15} /> Create Reservation</>}
                 </button>
               </div>
             </form>

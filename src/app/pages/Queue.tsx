@@ -8,8 +8,14 @@ import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, 
 import { useNavigate } from 'react-router';
 
 export function Queue() {
-  const { queue, addToQueue, removeFromQueue, callQueueItem, tables, reservations, cancelReservation } = useAppContext() as any;
+  // 🟢 FIXED: Extracted reservationTerms to enforce Admin constraints
+  const { queue, addToQueue, removeFromQueue, callQueueItem, tables, reservations, cancelReservation, reservationTerms } = useAppContext() as any;
   const navigate = useNavigate();
+  
+  // 🟢 NEW: Calculate the dynamic max party size based on the current day
+  const currentDay = new Date().getDay();
+  const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
+  const maxAllowedPartySize = isWeekend ? (reservationTerms?.weekendMaxPartySize || 20) : (reservationTerms?.weekdayMaxPartySize || 20);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [name, setName] = useState('');
@@ -64,9 +70,25 @@ export function Queue() {
     .sort((a: any, b: any) => a.date.getTime() - b.date.getTime())
     .slice(0, 10);
 
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
+  };
+
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name) return;
+    
+    // 🟢 FIXED: Hard stop if party size violates admin policy
+    if (partySize > maxAllowedPartySize) {
+      alert(`The maximum walk-in party size allowed today is ${maxAllowedPartySize} based on store policy.`);
+      return;
+    }
+    
     addToQueue({ customerName: name, contactNumber: contact, partySize, notes });
     setName('');
     setContact('');
@@ -124,48 +146,42 @@ export function Queue() {
             <UserPlus size={15} className="text-emerald-500" /> Register Walk-in Customer (FCFS)
           </h3>
           <form onSubmit={handleAdd} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* 🟢 FIXED: Capped Customer Name with Char Counter */}
             <div className="space-y-1.5">
-              <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Full Name *</label>
-              <input
-                type="text"
-                value={name}
-                maxLength={20}
-                onChange={e => setName(e.target.value)}
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
-                placeholder="Customer name"
-                required
-                autoFocus
-              />
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Full Name *</label>
+                <CharCount current={name} max={50} />
+              </div>
+              <input type="text" value={name} maxLength={50} onChange={e => setName(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600" placeholder="Customer name" required autoFocus />
             </div>
+            
             <div className="space-y-1.5">
-              <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Contact Number</label>
-              <input
-                type="tel"
-                value={contact}
-                maxLength={20}
-                onChange={e => setContact(e.target.value)}
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
-                placeholder="09xx-xxx-xxxx"
-              />
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Contact Number</label>
+              </div>
+              <input type="tel" value={contact} maxLength={15} onChange={e => setContact(e.target.value.replace(/\D/g, ''))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600" placeholder="09xx-xxx-xxxx" />
             </div>
+
+            {/* 🟢 FIXED: Capped UI counter and displayed the dynamic Admin limit */}
             <div className="space-y-1.5">
-              <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Party Size</label>
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Party Size</label>
+                <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">Max {maxAllowedPartySize}</span>
+              </div>
               <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-lg p-1.5">
                 <button type="button" onClick={() => setPartySize(p => Math.max(1, p - 1))} className="flex-1 h-8 flex items-center justify-center bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-md transition-colors"><Minus size={14}/></button>
-                <span className="w-12 text-center text-sm font-bold text-neutral-200">{partySize}</span>
-                <button type="button" onClick={() => setPartySize(p => p + 1)} className="flex-1 h-8 flex items-center justify-center bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-md transition-colors"><Plus size={14}/></button>
+                <span className="w-12 text-center text-sm font-bold text-neutral-200">{partySize > maxAllowedPartySize ? maxAllowedPartySize : partySize}</span>
+                <button type="button" disabled={partySize >= maxAllowedPartySize} onClick={() => setPartySize(p => Math.min(maxAllowedPartySize, p + 1))} className="flex-1 h-8 flex items-center justify-center bg-emerald-600/20 hover:bg-emerald-600/30 disabled:bg-neutral-800 disabled:text-neutral-700 text-emerald-400 rounded-md transition-colors"><Plus size={14}/></button>
               </div>
             </div>
+
+            {/* 🟢 FIXED: Capped Notes with Char Counter */}
             <div className="space-y-1.5">
-              <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Notes (optional)</label>
-              <input
-                type="text"
-                value={notes}
-                maxLength={100}
-                onChange={e => setNotes(e.target.value)}
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600"
-                placeholder="Special requests..."
-              />
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Notes (optional)</label>
+                <CharCount current={notes} max={100} />
+              </div>
+              <input type="text" value={notes} maxLength={100} onChange={e => setNotes(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600" placeholder="Special requests..." />
             </div>
             <div className="sm:col-span-2 flex gap-3">
               <button
@@ -211,8 +227,8 @@ export function Queue() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-neutral-200">{r.customerName}</p>
-                      <span className="px-1.5 py-0.5 bg-sky-600/20 text-sky-400 text-[10px] font-bold rounded uppercase tracking-wider">Priority</span>
+                      <p className="text-sm font-semibold text-neutral-200 truncate">{r.customerName}</p>
+                      <span className="px-1.5 py-0.5 bg-sky-600/20 text-sky-400 text-[10px] font-bold rounded uppercase tracking-wider flex-shrink-0">Priority</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 mt-0.5">
                       <span className="text-xs text-neutral-500 flex items-center gap-1">
@@ -235,7 +251,8 @@ export function Queue() {
 
           <div className="flex items-center justify-between mb-2 mt-4">
             <h2 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-400" /> Walk-in Queue ({waiting.length})
+              <span className="w-2 h-2 rounded-full bg-amber-400" /> 
+              <span>Walk-in Queue ({waiting.length})</span>
             </h2>
           </div>
 
@@ -273,15 +290,15 @@ export function Queue() {
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-neutral-200">{item.customerName}</p>
+                      <p className="text-sm font-semibold text-neutral-200 truncate">{item.customerName}</p>
                       {/* Queue number badge */}
                       {item.queueNumber && (
-                        <span className="px-1.5 py-0.5 bg-neutral-800 text-neutral-500 text-[10px] font-mono font-bold rounded border border-neutral-700">
+                        <span className="px-1.5 py-0.5 bg-neutral-800 text-neutral-500 text-[10px] font-mono font-bold rounded border border-neutral-700 flex-shrink-0">
                           #{String(item.queueNumber).padStart(3, '0')}
                         </span>
                       )}
                       {index === 0 && (
-                        <span className="px-1.5 py-0.5 bg-emerald-600/20 text-emerald-400 text-[10px] font-bold rounded uppercase tracking-wider">Next</span>
+                        <span className="px-1.5 py-0.5 bg-emerald-600/20 text-emerald-400 text-[10px] font-bold rounded uppercase tracking-wider flex-shrink-0">Next</span>
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 mt-0.5">
@@ -296,7 +313,7 @@ export function Queue() {
                       )}
                     </div>
                     {item.notes && (
-                      <p className="text-[11px] text-neutral-600 mt-1 italic">"{item.notes}"</p>
+                      <p className="text-[11px] text-neutral-600 mt-1 italic line-clamp-2" title={item.notes}>"{item.notes}"</p>
                     )}
                   </div>
 

@@ -32,6 +32,16 @@ export function AdminAnnouncements() {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title || !form.content) return;
+    
+    // 🟢 NEW: Expiry Date Validation
+    if (form.hasExpiry && form.expiresAt) {
+      const expiryDate = new Date(form.expiresAt);
+      if (expiryDate <= new Date()) {
+        alert("Expiry date cannot be in the past. Please select a future date.");
+        return;
+      }
+    }
+
     const payload = { title: form.title, content: form.content, type: form.type, isActive: form.isActive, expiresAt: form.hasExpiry && form.expiresAt ? new Date(form.expiresAt) : undefined };
     if (editingId) { updateAnnouncement(editingId, payload); flash('Announcement updated!'); }
     else { addAnnouncement(payload); flash('Announcement posted!'); }
@@ -39,6 +49,16 @@ export function AdminAnnouncements() {
   };
 
   const active = announcements.filter(a => a.isActive).length;
+
+  // 🟢 NEW: Reusable Character Counter
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -135,14 +155,21 @@ export function AdminAnnouncements() {
               <button onClick={() => setShowForm(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg"><X size={16} /></button>
             </div>
             <form onSubmit={handleSave} className="overflow-y-auto flex-1 p-6 space-y-4">
+              {/* 🟢 FIXED: Added char counts and limits */}
               <div>
-                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Title *</label>
-                <input type="text" value={form.title} onChange={e => setForm(f=>({...f, title: e.target.value}))} required autoFocus
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Title *</label>
+                  <CharCount current={form.title} max={50} />
+                </div>
+                <input type="text" maxLength={50} value={form.title} onChange={e => setForm(f=>({...f, title: e.target.value}))} required autoFocus
                   className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors placeholder-neutral-600" placeholder="Announcement title" />
               </div>
               <div>
-                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Content *</label>
-                <textarea value={form.content} onChange={e => setForm(f=>({...f, content: e.target.value}))} required rows={4}
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Content *</label>
+                  <CharCount current={form.content} max={300} />
+                </div>
+                <textarea value={form.content} maxLength={300} onChange={e => setForm(f=>({...f, content: e.target.value}))} required rows={4}
                   className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors placeholder-neutral-600 resize-none"
                   placeholder="Announcement details..." />
               </div>

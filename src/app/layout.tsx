@@ -5,7 +5,7 @@ import {
   Tag, Shield, Palette,
   Menu, X, Bell, ChevronRight,
   Circle, LogOut, Settings,
-  Monitor, ShieldCheck, Lock, ShieldAlert, Package, History
+  Monitor, ShieldCheck, Lock, ShieldAlert, Package, History, Music
 } from 'lucide-react';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
@@ -41,41 +41,37 @@ export function Layout() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   
-  // 🟢 FIXED: Reads from localStorage so it survives F5 refreshes
-  const [isLocked, setIsLocked] = useState(() => localStorage.getItem('oneshot_is_locked') === 'true');
+  // 🟢 Spotify State
+  const [showSpotify, setShowSpotify] = useState(false);
+  const [playlistLink, setPlaylistLink] = useState('');
+  const [embedUrl, setEmbedUrl] = useState('https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M?utm_source=generator&theme=0');
   
-  const { queue, tables, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext();
+  const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
+  
+  const { queue, tables, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
-  const [showSetup, setShowSetup] = useState(staffProfile.isFirstLogin === 1);
+  const [showSetup, setShowSetup] = useState(staffProfile?.isFirstLogin === 1);
 
-  // 🟢 FIXED: Unified Lock/Unlock Handlers
   const handleLockTerminal = () => {
-    localStorage.setItem('oneshot_is_locked', 'true');
+    sessionStorage.setItem('oneshot_is_locked', 'true');
     setIsLocked(true);
   };
 
   const handleUnlockTerminal = () => {
-    localStorage.removeItem('oneshot_is_locked');
+    sessionStorage.removeItem('oneshot_is_locked');
     setIsLocked(false);
   };
   
-  // Auth guard
   useEffect(() => {
-    if (!staffLoggedIn) {
-      navigate('/', { replace: true });
-    }
+    if (!staffLoggedIn) navigate('/', { replace: true });
   }, [staffLoggedIn, navigate]);
 
-  // 🛡️ POS Auto-Lock (Idle Timer - 15 Minutes)
   useEffect(() => {
     if (!staffLoggedIn || isLocked) return;
-
     let timeoutId: NodeJS.Timeout;
-
     const resetIdleTimer = () => {
       clearTimeout(timeoutId);
-      // 900,000 milliseconds = 15 minutes
       timeoutId = setTimeout(() => {
         console.log("⏳ System idle detected. Auto-locking terminal.");
         handleLockTerminal();
@@ -86,7 +82,6 @@ export function Layout() {
     window.addEventListener('keydown', resetIdleTimer);
     window.addEventListener('click', resetIdleTimer);
     window.addEventListener('scroll', resetIdleTimer);
-
     resetIdleTimer();
 
     return () => {
@@ -98,11 +93,28 @@ export function Layout() {
     };
   }, [staffLoggedIn, isLocked]);
 
+  // 🟢 Spotify Link Parser
+  const handleSpotifyLink = (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (!playlistLink.includes('spotify.com')) return;
+      const urlObj = new URL(playlistLink);
+      const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+      
+      if (pathSegments.length >= 2) {
+        const type = pathSegments[0]; 
+        const id = pathSegments[1];
+        setEmbedUrl(`https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`);
+        setPlaylistLink('');
+      }
+    } catch (err) {}
+  };
+
   if (!staffLoggedIn) return null;
 
-  const waitingCount = queue.filter(q => q.status === 'waiting').length;
-  const occupiedCount = tables.filter(t => t.status === 'occupied').length;
-  const overtimeCount = tables.filter(t => {
+  const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
+  const occupiedCount = tables.filter((t: any) => t.status === 'occupied').length;
+  const overtimeCount = tables.filter((t: any) => {
     if (t.status !== 'occupied' || !t.session) return false;
     const end = new Date(t.session.startTime).getTime() + t.session.durationMinutes * 60000;
     return Date.now() > end;
@@ -124,10 +136,8 @@ export function Layout() {
     <>
       {showSetup && <FirstTimeLoginModal onComplete={() => setShowSetup(false)} />}
       
-      {/* 🟢 FIXED: Conditionally render the LockScreen so it actually disappears when unlocked! */}
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
         
-      {/* 🟢 FIXED: Wrapped the main layout in a blur container when locked */}
       <div className={`flex h-screen bg-neutral-900 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {/* Mobile Overlay */}
@@ -173,19 +183,6 @@ export function Layout() {
             )}
           </div>
 
-          {/* Live Monitor Button */}
-          <div className="px-4 pb-1">
-            <button
-              onClick={openLiveMonitor}
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 hover:border-emerald-600/40 text-emerald-400 transition-all text-sm font-semibold group"
-            >
-              <Monitor size={15} className="flex-shrink-0" />
-              <span className="flex-1 text-left">Live Table Monitor</span>
-              <span className="text-[9px] uppercase tracking-widest text-emerald-600 group-hover:text-emerald-500 font-black">↗</span>
-            </button>
-            <p className="text-[9px] text-neutral-700 text-center mt-1">Opens customer display in new tab</p>
-          </div>
-
           {/* Navigation */}
           <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
             <p className="text-[10px] text-neutral-600 uppercase tracking-widest font-semibold px-3 py-2">Navigation</p>
@@ -224,8 +221,8 @@ export function Layout() {
             <div className="px-4 pb-4">
               <button
                 onClick={() => {
-                  localStorage.setItem('oneshot_admin_auth', 'true');
-                  window.location.href = '/admin'; // Hard redirect to properly mount admin logic
+                  sessionStorage.setItem('oneshot_admin_auth', 'true');
+                   window.location.href = '/admin';
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-all text-xs font-semibold"
               >
@@ -240,26 +237,68 @@ export function Layout() {
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Header */}
-          <header className="relative z-20 h-14 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
+          <header className="relative z-20 h-16 flex-none bg-neutral-950/80 border-b border-neutral-800 flex items-center justify-between px-5 backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <button className="lg:hidden text-neutral-400 hover:text-neutral-200 p-1" onClick={() => setSidebarOpen(true)}>
                 <Menu size={20} />
               </button>
               <h1 className="text-base font-semibold text-neutral-200">{pageTitle}</h1>
             </div>
+            
             <div className="flex items-center gap-3">
               
-              <button onClick={openLiveMonitor} className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 px-3 py-1.5 rounded-full transition-all font-semibold">
-                <Monitor size={13} /> Live Monitor
+              <button onClick={openLiveMonitor} className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 px-3 py-2 rounded-lg transition-all font-semibold">
+                <Monitor size={14} /> Live Monitor
               </button>
 
-              {overtimeCount > 0 && (
-                <div className="flex items-center gap-1.5 bg-rose-950/40 border border-rose-800/40 px-3 py-1.5 rounded-full">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                  <span className="text-xs text-rose-400 font-semibold">{overtimeCount} Overtime</span>
+              {/* 🟢 NEW: Integrated Spotify Mini-Player Dropdown */}
+              <div className="relative">
+                <button 
+                  onClick={() => setShowSpotify(!showSpotify)} 
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${showSpotify ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
+                >
+                  <Music size={16} />
+                  <span className="text-xs font-semibold hidden sm:block">Music Player</span>
+                </button>
+                
+                {/* Notice we use opacity and scale to hide it, NOT unmounting it. The iframe stays alive! */}
+                <div className={`absolute right-0 top-full mt-3 w-80 sm:w-96 bg-neutral-950 border border-neutral-800 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] z-50 overflow-hidden transition-all duration-200 origin-top-right ${showSpotify ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-95 pointer-events-none'}`}>
+                  
+                  {/* Playlist Input Form */}
+                  <div className="p-3 bg-neutral-900 border-b border-neutral-800 flex gap-2">
+                    <input 
+                      type="text" 
+                      value={playlistLink} 
+                      onChange={(e) => setPlaylistLink(e.target.value)} 
+                      placeholder="Paste Spotify playlist link..." 
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 placeholder-neutral-600 transition-colors"
+                    />
+                    <button 
+                      onClick={handleSpotifyLink}
+                      disabled={!playlistLink} 
+                      className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors"
+                    >
+                      Load
+                    </button>
+                  </div>
+
+                  {/* Standard height="152" embeds include Prev/Next controls */}
+                  <div className="w-full bg-black h-[152px]">
+                    <iframe 
+                      title="Spotify Audio"
+                      src={embedUrl} 
+                      width="100%" 
+                      height="152" 
+                      frameBorder="0" 
+                      allowFullScreen 
+                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
+                      loading="lazy"
+                      className="block m-0 p-0"
+                    ></iframe>
+                  </div>
                 </div>
-              )}
-              
+              </div>
+
               {/* Notifications */}
               <div className="relative">
                 <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-neutral-400 hover:text-neutral-200 transition-colors rounded-lg hover:bg-neutral-800">
@@ -267,12 +306,12 @@ export function Layout() {
                   {(waitingCount > 0 || overtimeCount > 0) && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full" />}
                 </button>
                 {showNotifications && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-neutral-800">
+                  <div className="absolute right-0 top-full mt-3 w-80 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-neutral-800 flex justify-between items-center">
                       <p className="text-sm font-semibold text-neutral-200">Recent Activity</p>
                     </div>
                     <div className="max-h-96 overflow-y-auto">
-                      {activities.slice(0, 5).map(activity => (
+                      {activities.slice(0, 5).map((activity: any) => (
                         <div key={activity.id} className="px-4 py-3 border-b border-neutral-800/50 hover:bg-neutral-900/40 transition-colors">
                           <p className="text-xs text-neutral-300">{activity.description}</p>
                           <p className="text-[10px] text-neutral-600 mt-1">{new Date(activity.timestamp).toLocaleTimeString()}</p>
@@ -286,8 +325,7 @@ export function Layout() {
               {/* User Menu */}
               <div className="relative">
                 <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 bg-neutral-800/60 rounded-full pl-1 pr-3 py-1 border border-neutral-700/50 hover:bg-neutral-800 transition-colors">
-                  <div className="w-7 h-7 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
-                    {/* 🟢 FIXED: Renders the profile picture if it exists, otherwise falls back to initial */}
+                  <div className="w-8 h-8 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
                     {staffProfile?.avatarImg ? (
                       <img 
                         src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} 
@@ -298,14 +336,12 @@ export function Layout() {
                       staffProfile?.fullName?.charAt(0) || 'S'
                     )}
                   </div>
-                  <span className="text-xs text-neutral-400 font-medium">{staffProfile?.fullName || 'Staff'}</span>
                 </button>
                 
                 {showUserMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-56 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="absolute right-0 top-full mt-3 w-56 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
                     <div className="px-4 py-3 border-b border-neutral-800 flex items-center gap-3">
                       <div className="w-10 h-10 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-sm font-bold overflow-hidden flex-shrink-0">
-                        {/* 🟢 FIXED: Added profile picture to the expanded dropdown menu as well */}
                         {staffProfile?.avatarImg ? (
                           <img 
                             src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} 

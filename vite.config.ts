@@ -17,7 +17,7 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
-  base: './', // 🟢 ADDED THIS LINE FOR ELECTRON
+  base: '/', // 🟢 ADDED THIS LINE FOR ELECTRON
 
   plugins: [
     figmaAssetResolver(),

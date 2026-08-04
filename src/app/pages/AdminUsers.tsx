@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
 import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw } from 'lucide-react';
+import { PageLoader } from '../components/PageLoader';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
   { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
@@ -26,6 +27,10 @@ export function AdminUsers() {
   const [viewTab, setViewTab]       = useState<'active' | 'archived'>('active');
   const [filterRole, setFilterRole] = useState<'all' | StaffUser['role']>('all');
 
+  // 🟢 NEW: Loading state for eFootball 8-ball loader
+  const [isLoading, setIsLoading]   = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('PROCESSING...');
+
   const openAdd = () => { setForm(blankForm); setShowPw(false); setShowForm(true); };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -36,7 +41,6 @@ export function AdminUsers() {
     
     if (isUsernameTaken) { alert("Error: That username is already taken. Please choose another."); return; }
     
-    // 🟢 FIXED: Email validation removed
     if (!form.username || !form.fullName) {
       alert("Please fill all required fields.");
       return;
@@ -50,10 +54,16 @@ export function AdminUsers() {
       isFirstLogin: 1, 
     };
     
+    // 🟢 Trigger Loader instead of window.location.reload()
+    setLoadingMsg('SAVING NEW USER...');
+    setIsLoading(true);
     addStaffUser(payload as any);
     setShowForm(false);
     setForm(blankForm);
-    setTimeout(() => window.location.reload(), 500);
+
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 800);
   };
 
   const handleResetPassword = (id: string, name: string) => {
@@ -80,14 +90,26 @@ export function AdminUsers() {
          }
       }
 
+      // 🟢 Trigger Loader instead of window.location.reload()
+      setLoadingMsg('ARCHIVING USER...');
+      setIsLoading(true);
       updateStaffUser(id, { isActive: false });
-      setTimeout(() => window.location.reload(), 500);
+
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 800);
     }
   };
 
   const handleRestore = (id: string) => {
+    // 🟢 Trigger Loader instead of window.location.reload()
+    setLoadingMsg('REACTIVATING USER...');
+    setIsLoading(true);
     updateStaffUser(id, { isActive: true });
-    setTimeout(() => window.location.reload(), 500);
+
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 800);
   };
 
   const toggleAdmin = (id: string, currentStatus: boolean, role: string, username: string) => {
@@ -106,8 +128,14 @@ export function AdminUsers() {
       }
     }
 
+    // 🟢 Trigger Loader instead of window.location.reload()
+    setLoadingMsg('UPDATING PERMISSIONS...');
+    setIsLoading(true);
     updateStaffUser(id, { isAdmin: !currentStatus });
-    setTimeout(() => window.location.reload(), 500);
+
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 800);
   };
 
   const displayUsers = staffUsers.filter(u => {
@@ -119,7 +147,10 @@ export function AdminUsers() {
   const roleConfig = (role: StaffUser['role']) => ROLES.find(r => r.value === role) ?? ROLES[0];
 
   return (
-    <div className="space-y-5">
+    <div className="relative space-y-5">
+      {/* 🟢 NEW: PageLoader Component */}
+      <PageLoader isLoading={isLoading} message={loadingMsg} />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: 'Active Staff',    value: staffUsers.filter(u => u.isActive).length,  color: 'text-white' },
@@ -199,7 +230,6 @@ export function AdminUsers() {
                     {viewTab === 'archived' && <span className="text-[10px] bg-rose-900/30 text-rose-400 border border-rose-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Archived</span>}
                   </div>
                   
-                  {/* 🟢 FIXED: Email removed from display */}
                   <div className="flex items-center gap-4 text-xs text-neutral-500 flex-wrap mb-3">
                     <span className="flex items-center gap-1"><User size={10} /> @{u.username}</span>
                     {u.phone && <span className="flex items-center gap-1"><Phone size={10} /> {u.phone}</span>}
@@ -280,8 +310,6 @@ export function AdminUsers() {
                   </button>
                 </div>
               </div>
-
-              {/* 🟢 FIXED: Email Input completely removed here */}
 
               <div>
                 <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Phone</label>

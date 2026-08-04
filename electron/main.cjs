@@ -1,50 +1,101 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, globalShortcut, dialog } = require('electron');
 const path = require('path');
+const { fork } = require('child_process'); // 🟢 FIXED: Using standard child_process for native SQLite compatibility
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    kiosk: true, // 🛡️ Forces true fullscreen, disables OS toolbars, and blocks exit commands
-    fullscreen: true,
-    alwaysOnTop: true,
-    autoHideMenuBar: true,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      devTools: false // 🛡️ Disables inspect element
+let mainWindow;
+let serverProcess;
+
+function startServer() {
+  const serverPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'server.cjs')
+    : path.join(__dirname, '../server.cjs');
+
+  const userDataPath = app.getPath('userData'); 
+  const isDev = !app.isPackaged;
+
+  let serverStderr = ''; 
+
+  serverProcess = fork(serverPath, [], {
+    stdio: 'pipe', 
+    env: { 
+      ...process.env, 
+      PORT: '3001', 
+      USER_DATA_PATH: userDataPath,
+      NODE_ENV: isDev ? 'development' : 'production'
     }
   });
 
-  win.loadURL('http://localhost:5173');
-
-  // 🛡️ BLOCK HARD OS SHORTCUTS AT THE SYSTEM LEVEL
-  win.on('focus', () => {
-    globalShortcut.register('CommandOrControl+R', () => { /* Ignore Refresh */ });
-    globalShortcut.register('CommandOrControl+Shift+R', () => { /* Ignore Hard Refresh */ });
-    globalShortcut.register('F5', () => { /* Ignore F5 */ });
-    globalShortcut.register('Alt+F4', () => { /* Ignore Quit */ });
+  serverProcess.stdout.on('data', (data) => console.log(`[Backend]: ${data.toString()}`));
+  
+  serverProcess.stderr.on('data', (data) => {
+    const err = data.toString();
+    serverStderr += err;
+    console.error(`[Backend Error]: ${err}`);
   });
 
-  win.on('blur', () => {
+  serverProcess.on('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      dialog.showErrorBox(
+        'Backend Server Crash Output',
+        `server.cjs exited with code ${code}.\n\nCrash Details:\n${serverStderr || 'No error log recorded. Process died during initialization.'}`
+      );
+    }
+  });
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    kiosk: true,
+    fullscreen: true,
+    alwaysOnTop: true,
+    autoHideMenuBar: true,
+    icon: path.join(__dirname, 'icon.ico'),
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      devTools: false
+    }
+  });
+
+  if (!app.isPackaged) {
+    mainWindow.loadURL('http://localhost:5173');
+  } else {
+    let attempts = 0;
+    const loadExpress = () => {
+      mainWindow.loadURL('http://localhost:3001').catch(() => {
+        attempts++;
+        if (attempts <= 20) {
+          setTimeout(loadExpress, 1000);
+        }
+      });
+    };
+    loadExpress();
+  }
+
+  mainWindow.on('focus', () => {
+    globalShortcut.register('CommandOrControl+R', () => {});
+    globalShortcut.register('CommandOrControl+Shift+R', () => {});
+    globalShortcut.register('F5', () => {});
+  });
+
+  mainWindow.on('blur', () => {
     globalShortcut.unregisterAll();
   });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
-
-  // In development, load the local Vite server
-  if (process.env.NODE_ENV === 'development') {
-    win.loadURL('http://localhost:5173');
-  } else {
-    // In production, load the compiled HTML file
-    win.loadFile(path.join(__dirname, '../dist/index.html'));
-  }
-}
-
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  startServer();
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (serverProcess) serverProcess.kill();
+  globalShortcut.unregisterAll();
+  if (process.platform !== 'darwin') app.quit();
 });

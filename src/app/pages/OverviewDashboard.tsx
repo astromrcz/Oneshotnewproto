@@ -1,8 +1,8 @@
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router';
 import {
-  TableProperties, Users, Calendar, TrendingUp,
-  AlertTriangle, Clock, ChevronRight, CheckCircle2, CloudRain, Sun, Cloud, ShieldAlert
+  TableProperties, Users, Calendar, 
+  AlertTriangle, Clock, ChevronRight, CheckCircle2, ShieldAlert
 } from 'lucide-react';
 import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isFuture } from 'date-fns';
 
@@ -31,26 +31,25 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
 }
 
 export function OverviewDashboard() {
-  const { tables, queue, reservations, weather, watchlist } = useAppContext() as any;
+  const { tables, queue, reservations, watchlist } = useAppContext() as any;
   const navigate = useNavigate();
 
   const activeWatchlist = watchlist?.filter((w: any) => w.status === 'active' && !w.isArchived) || [];
 
   const available = tables.filter((t: any) => t.isActive && t.status === 'available').length;
-  const occupied = tables.filter(t => t.isActive && t.status === 'occupied').length;
-  const reserved = tables.filter(t => t.isActive && t.status === 'reserved').length;
-  const waiting = queue.filter(q => q.status === 'waiting').length;
+  const occupied = tables.filter((t: any) => t.isActive && t.status === 'occupied').length;
+  const reserved = tables.filter((t: any) => t.isActive && t.status === 'reserved').length;
+  const waiting = queue.filter((q: any) => q.status === 'waiting').length;
 
   // ── Wait time estimation ──────────────────────────────────────
-  const waitingQueue = queue.filter(q => q.status === 'waiting');
-  const occupiedWithSession = tables.filter(t => t.isActive && t.status === 'occupied' && t.session);
+  const waitingQueue = queue.filter((q: any) => q.status === 'waiting');
+  const occupiedWithSession = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
 
-  // Sort occupied tables by soonest end time
   const sortedEndTimes = occupiedWithSession
-    .map(t => addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes))
-    .sort((a, b) => a.getTime() - b.getTime());
+    .map((t: any) => addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes))
+    .sort((a: any, b: any) => a.getTime() - b.getTime());
 
-  const estimateWaitForPosition = (position: number /* 1-based */): string => {
+  const estimateWaitForPosition = (position: number): string => {
     const slotsNeeded = position - available;
     if (slotsNeeded <= 0) return 'Now';
     if (slotsNeeded > sortedEndTimes.length) return 'TBD';
@@ -61,20 +60,15 @@ export function OverviewDashboard() {
     return `~${mins} min`;
   };
 
-  // Overall queue est. wait (for the last person in line)
   const overallWait = waitingQueue.length > 0 ? estimateWaitForPosition(waitingQueue.length) : null;
 
-  const todayRevenue = reservations
-    .filter(r => isToday(r.date) && (r.status === 'completed' || r.status === 'checked-in'))
-    .reduce((sum, r) => sum + (r.balancePaid ? r.totalAmount : r.downPaymentAmount), 0);
-
-  const overtimeTables = tables.filter(t => {
+  const overtimeTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
     const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     return new Date() > end;
   });
 
-  const alertTables = tables.filter(t => {
+  const alertTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
     const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     const secsLeft = differenceInSeconds(end, new Date());
@@ -82,8 +76,8 @@ export function OverviewDashboard() {
   });
 
   const upcomingReservations = reservations
-    .filter(r => (r.status === 'pending' || r.status === 'confirmed') && isFuture(r.date))
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .filter((r: any) => (r.status === 'pending' || r.status === 'confirmed') && isFuture(new Date(r.date)))
+    .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 4);
 
   const getReservationStatusColor = (status: string) => {
@@ -100,37 +94,10 @@ export function OverviewDashboard() {
   return (
     <div className="space-y-6">
       
-      {/* Live Weather Widget for Staff */}
-      {weather && (
-        <div className={`border rounded-xl px-5 py-4 flex items-center justify-between transition-colors ${
-          weather.isRaining ? 'bg-blue-950/20 border-blue-900/40' : 'bg-neutral-950 border-neutral-800'
-        }`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${weather.isRaining ? 'bg-blue-500/20 text-blue-400' : weather.condition === 'Clear' ? 'bg-amber-500/20 text-amber-400' : 'bg-neutral-800 text-neutral-400'}`}>
-              {weather.isRaining ? <CloudRain size={20} /> : weather.condition === 'Clear' ? <Sun size={20} /> : <Cloud size={20} />}
-            </div>
-            <div>
-              <p className="text-sm font-bold text-white flex items-center gap-2">
-                {Math.round(weather.temp)}°C · {weather.condition}
-              </p>
-              <p className="text-[10px] text-neutral-400 uppercase tracking-widest font-semibold mt-0.5">Live Local Weather</p>
-            </div>
-          </div>
-          {weather.isRaining && (
-            <div className="text-right">
-              <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
-                <AlertTriangle size={12} /> High Traffic Alert
-              </p>
-              <p className="text-[10px] text-neutral-500 mt-0.5">Expect increased walk-ins due to rain.</p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Alerts */}
       {(overtimeTables.length > 0 || alertTables.length > 0) && (
         <div className="space-y-2">
-          {overtimeTables.map(t => (
+          {overtimeTables.map((t: any) => (
             <div key={t.id} className="flex items-center gap-3 bg-rose-950/30 border border-rose-800/40 rounded-xl px-4 py-3">
               <AlertTriangle size={16} className="text-rose-400 flex-none" />
               <span className="text-sm text-rose-300">
@@ -141,7 +108,7 @@ export function OverviewDashboard() {
               </button>
             </div>
           ))}
-          {alertTables.map(t => (
+          {alertTables.map((t: any) => (
             <div key={t.id} className="flex items-center gap-3 bg-amber-950/30 border border-amber-800/40 rounded-xl px-4 py-3">
               <Clock size={16} className="text-amber-400 flex-none" />
               <span className="text-sm text-amber-300">
@@ -160,7 +127,6 @@ export function OverviewDashboard() {
         <StatCard label="Available Tables" value={available} sub={`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
         <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-amber-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
         <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-purple-400" icon={Users} onClick={() => navigate('/staff/queue')} />
-        {/* 🟢 NEW: Swapped Revenue for Overtime tracker */}
         <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables')} />
       </div>
 
@@ -173,7 +139,7 @@ export function OverviewDashboard() {
           </button>
         </div>
         <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
-          {tables.filter(t => t.isActive).map(t => {
+          {tables.filter((t: any) => t.isActive).map((t: any) => {
             const isOpenTime = t.status === 'occupied' && t.session && (t.session.isOpenTime || t.session.durationMinutes === null);
             const isOvertime = !isOpenTime && t.status === 'occupied' && t.session && (() => {
               const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
@@ -206,7 +172,6 @@ export function OverviewDashboard() {
           })}
         </div>
         
-        {/* 🟢 NEW: Comprehensive Legend mapping to the updated colors */}
         <div className="flex flex-wrap items-center gap-4 mt-4">
           {[
             { color: 'bg-emerald-500', label: 'Open' },
@@ -242,12 +207,12 @@ export function OverviewDashboard() {
             </div>
           ) : (
             <div className="space-y-2.5">
-              {upcomingReservations.map(r => (
+              {upcomingReservations.map((r: any) => (
                 <div key={r.id} className="flex items-center gap-3 bg-neutral-900 rounded-lg px-3 py-2.5 border border-neutral-800/60">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-neutral-200 truncate">{r.customerName}</p>
                     <p className="text-xs text-neutral-500">
-                      {format(r.date, 'MMM d')} · {r.timeSlot} · {r.durationHours}h · {r.partySize} pax
+                      {format(new Date(r.date), 'MMM d')} · {r.timeSlot} · {r.durationHours}h · {r.partySize} pax
                     </p>
                   </div>
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${getReservationStatusColor(r.status)}`}>
@@ -277,7 +242,7 @@ export function OverviewDashboard() {
             </div>
           ) : (
             <div className="space-y-2">
-              {waitingQueue.slice(0, 3).map((q, i) => {
+              {waitingQueue.slice(0, 3).map((q: any, i: number) => {
                 const est = estimateWaitForPosition(i + 1);
                 const isNow = est === 'Now';
                 return (

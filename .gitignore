@@ -1,4 +1,7 @@
-node_modules
+node_modules/
 .env.local
 .env
-server.js
+server.cjs
+release/
+dist/
+supabase.ts

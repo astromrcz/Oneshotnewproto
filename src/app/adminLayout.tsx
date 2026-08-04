@@ -41,8 +41,8 @@ const pageTitles: Record<string, string> = {
 export function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [isLocked, setIsLocked] = useState(() => localStorage.getItem('oneshot_is_locked') === 'true');  
-  
+  const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
+
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
 
@@ -99,12 +99,12 @@ export function AdminLayout() {
   const pageTitle = pageTitles[location.pathname] || 'Admin';
 
   const handleLockTerminal = () => {
-    localStorage.setItem('oneshot_is_locked', 'true');
+    sessionStorage.setItem('oneshot_is_locked', 'true');
     setIsLocked(true);
   };
 
   const handleUnlockTerminal = () => {
-    localStorage.removeItem('oneshot_is_locked');
+    sessionStorage.removeItem('oneshot_is_locked');
     setIsLocked(false);
   };
 
@@ -122,7 +122,7 @@ export function AdminLayout() {
       setPendingNav('STAFF_PORTAL');
       return;
     }
-    localStorage.setItem('oneshot_staff_auth', 'true');
+    sessionStorage.setItem('oneshot_staff_auth', 'true');
     window.location.href = '/staff';
   };
 
@@ -132,7 +132,7 @@ export function AdminLayout() {
       adminLogout();
       navigate('/');
     } else if (pendingNav === 'STAFF_PORTAL') {
-      localStorage.setItem('oneshot_staff_auth', 'true');
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
       window.location.href = '/staff';
     } else if (pendingNav) {
       navigate(pendingNav);

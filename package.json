@@ -2,22 +2,40 @@
   "name": "oneshot-bar-billiards-app",
   "private": true,
   "version": "0.0.1",
+  "description": "Point of Sale and Reservation Management System for One Shot Bar & Billiards",
+  "author": "Mark Joseph Morcozo",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"node server.cjs\" \"vite\"",
     "build": "vite build",
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild": "electron-rebuild -f -w sqlite3",
     "electron:dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "npm run rebuild && vite build && electron-builder"
   },
   "build": {
     "appId": "com.oneshot.pos",
     "productName": "One Shot POS",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/**/*",
+      "dist/**/*",
+      "server.cjs"
+    ],
     "directories": {
       "output": "release/"
     },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server.cjs",
+      "package.json",
+      "node_modules/**/*"
+    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "electron/icon.ico"
     }
   },
   "dependencies": {
@@ -59,6 +77,7 @@
     "cmdk": "1.1.1",
     "cors": "^2.8.6",
     "date-fns": "3.6.0",
+    "dotenv": "^17.4.2",
     "embla-carousel-react": "8.6.0",
     "express": "^5.2.1",
     "input-otp": "1.4.2",
@@ -83,6 +102,7 @@
     "vaul": "1.1.2"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.1",
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",
     "concurrently": "^10.0.3",

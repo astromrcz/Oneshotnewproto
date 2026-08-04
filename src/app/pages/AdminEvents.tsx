@@ -219,6 +219,14 @@ export function AdminEvents() {
       return;
     }
 
+    // 🟢 NEW: Event Time Validation
+    if (!eventForm.isWholeDay) {
+      if (eventForm.startTime === eventForm.endTime) {
+        alert("Start time and End time cannot be exactly the same.");
+        return;
+      }
+    }
+
     if ((eventForm.type === 'Tournament' || eventForm.type === 'League') && !eventForm.maxParticipants) {
       alert("Max Participants is required for Tournaments and Leagues.");
       return;
@@ -273,6 +281,13 @@ export function AdminEvents() {
 
   const saveClosure = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 🟢 NEW: Closure Time Validation
+    if (!closureForm.isFullDay && closureForm.openTime === closureForm.closeTime) {
+      alert("Open time and Close time cannot be the same for partial closures.");
+      return;
+    }
+
     const payload = {
       ...closureForm,
       date: closureForm.type === 'weekly' ? '' : closureDateStr
@@ -286,6 +301,14 @@ export function AdminEvents() {
     e.preventDefault();
     if (!promoForm.code || !promoForm.description) return;
     
+    // 🟢 NEW: General Date Validation
+    if (promoForm.hasExpiry && promoForm.expiresAt) {
+       if (new Date(promoForm.expiresAt) <= new Date()) {
+         alert("Expiry date must be set in the future.");
+         return;
+       }
+    }
+
     if (promoForm.hasStart && promoForm.hasExpiry && promoForm.startDate && promoForm.expiresAt) {
       if (new Date(promoForm.expiresAt) <= new Date(promoForm.startDate)) {
         alert("Expiry date must be after the start date.");
@@ -343,11 +366,21 @@ export function AdminEvents() {
       reader.readAsDataURL(file);
     });
     
-    if (fileInputRef.current) fileInputRef.current.value = '';
+   if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const removeAttachment = (index: number) => {
     setEventForm(prev => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }));
+  };
+
+  // 🟢 NEW: Reusable Character Counter
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
   };
 
   // ── Render Helpers ───────────────────────────────────────────────
@@ -1056,9 +1089,13 @@ export function AdminEvents() {
 
                 {/* Right Column: Event Details */}
                 <div className="space-y-4">
+                  {/* 🟢 FIXED: Capped Event Title */}
                   <div>
-                    <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Event Title *</label>
-                    <Input value={eventForm.title} onChange={e => setEventForm({...eventForm, title: e.target.value})} placeholder="e.g. 8-Ball Championship" className="bg-neutral-950 border-neutral-800" />
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-semibold text-neutral-400">Event Title *</label>
+                      <CharCount current={eventForm.title} max={50} />
+                    </div>
+                    <Input maxLength={50} value={eventForm.title} onChange={e => setEventForm({...eventForm, title: e.target.value})} placeholder="e.g. 8-Ball Championship" className="bg-neutral-950 border-neutral-800" />
                   </div>
                   
                   <div>
@@ -1068,9 +1105,13 @@ export function AdminEvents() {
                     </select>
                   </div>
 
+                  {/* 🟢 FIXED: Capped Event Description */}
                   <div>
-                    <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Description</label>
-                    <textarea value={eventForm.description} onChange={e => setEventForm({...eventForm, description: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-md p-3 text-sm text-neutral-200 h-24 resize-none focus:outline-none focus:border-amber-500" placeholder="Event details..." />
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-semibold text-neutral-400">Description</label>
+                      <CharCount current={eventForm.description} max={400} />
+                    </div>
+                    <textarea maxLength={400} value={eventForm.description} onChange={e => setEventForm({...eventForm, description: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-md p-3 text-sm text-neutral-200 h-24 resize-none focus:outline-none focus:border-amber-500" placeholder="Event details..." />
                   </div>
 
                   {eventForm.type === 'Tournament' && (
@@ -1190,9 +1231,13 @@ export function AdminEvents() {
                       </div>
                     )}
 
+                    {/* 🟢 FIXED: Capped Closure Reason */}
                     <div>
-                      <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Reason *</label>
-                      <input type="text" value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder={isActionToday ? "e.g. Bad Weather, Power Outage" : "e.g. Holiday, Private Event"} />
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-xs text-neutral-400 font-medium">Reason *</label>
+                        <CharCount current={closureForm.reason} max={50} />
+                      </div>
+                      <input type="text" maxLength={50} value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder={isActionToday ? "e.g. Bad Weather, Power Outage" : "e.g. Holiday, Private Event"} />
                     </div>
                     
                     {!isActionToday && (
@@ -1253,9 +1298,16 @@ export function AdminEvents() {
             </div>
             <form onSubmit={preparePromoSave} className="p-6 space-y-5">
               
-              <div className="flex gap-2">
-                <input required value={promoForm.code} onChange={e => setPromoForm(f=>({...f, code: e.target.value.toUpperCase()}))} placeholder="CODE (e.g. SUMMER20)" className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 font-mono tracking-wider focus:outline-none focus:border-violet-500" />
-                <button type="button" onClick={() => setPromoForm(f=>({...f, code: generateRandomPromoCode()}))} className="px-3 bg-violet-600/20 text-violet-400 rounded-lg hover:bg-violet-600/30"><Wand2 size={15} /></button>
+              {/* 🟢 FIXED: Capped Promo Code */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Promo Code *</label>
+                  <CharCount current={promoForm.code} max={15} />
+                </div>
+                <div className="flex gap-2">
+                  <input required maxLength={15} value={promoForm.code} onChange={e => setPromoForm(f=>({...f, code: e.target.value.toUpperCase().replace(/\s/g, '')}))} placeholder="CODE (e.g. SUMMER20)" className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 font-mono tracking-wider focus:outline-none focus:border-violet-500" />
+                  <button type="button" onClick={() => setPromoForm(f=>({...f, code: generateRandomPromoCode()}))} className="px-3 bg-violet-600/20 text-violet-400 rounded-lg hover:bg-violet-600/30"><Wand2 size={15} /></button>
+                </div>
               </div>
 
               <div>
@@ -1270,9 +1322,13 @@ export function AdminEvents() {
                 </div>
               </div>
 
+              {/* 🟢 FIXED: Capped Promo Description */}
               <div>
-                <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Description *</label>
-                <input required value={promoForm.description} onChange={e => setPromoForm(f=>({...f, description: e.target.value}))} placeholder="e.g. 20% off weekend nights" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 font-medium">Description *</label>
+                  <CharCount current={promoForm.description} max={60} />
+                </div>
+                <input required maxLength={60} value={promoForm.description} onChange={e => setPromoForm(f=>({...f, description: e.target.value}))} placeholder="e.g. 20% off weekend nights" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
               </div>
 
               <div className="p-4 rounded-xl border border-violet-900/30 bg-violet-950/10 space-y-4">

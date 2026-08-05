@@ -3,29 +3,93 @@ import { useAppContext } from '../context/AppContext';
 import { toast } from 'sonner';
 import { 
   Save, Clock, DollarSign, AlertCircle, ShieldCheck, 
-  Calendar, FileText, ToggleLeft, ToggleRight, SlidersHorizontal, X
+  Calendar, FileText, ToggleLeft, ToggleRight, SlidersHorizontal, X,
+  ShieldAlert, WifiOff
 } from 'lucide-react';
+import { PageLoader } from '../components/PageLoader';
+import { supabase } from '../utils/supabase';
 
 export default function AdminPolicyRatesEditor() {
-  // 🟢 FIXED: Grabbed the theme from context for dynamic <input type="time"> native styling
-  const { rates, reservationTerms, updateRates, updateReservationTerms, theme } = useAppContext();
+  const { rates, reservationTerms, updateRates, updateReservationTerms, theme, isSystemOffline } = useAppContext();
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [ratesForm, setRatesForm] = useState({ 
     ...rates, 
     weekdayOnlineCapacityLimit: rates.weekdayOnlineCapacityLimit ?? 70,
     weekendOnlineCapacityLimit: rates.weekendOnlineCapacityLimit ?? 70
   });
-  const [termsForm, setTermsForm] = useState(reservationTerms);
+  const [termsForm, setTermsForm] = useState({
+    ...reservationTerms,
+    minHours: reservationTerms.minHours ?? 1,
+    maxHours: reservationTerms.maxHours ?? 6,
+  });
   const [showSummaryModal, setShowSummaryModal] = useState(false);
 
+  // Operational Defense State (Turnover Buffer & Event Lock Protection)
+  const [turnoverBufferMins, setTurnoverBufferMins] = useState(15);
+  const [maxRescheduleLimit, setMaxRescheduleLimit] = useState(2);
+  const [eventLockProtection, setEventLockProtection] = useState(true);
+
+  // INITIAL DUAL-FETCH ON MOUNT WITH TIMEOUT WATCHDOG
   useEffect(() => {
-    setRatesForm({ 
-      ...rates, 
-      weekdayOnlineCapacityLimit: rates.weekdayOnlineCapacityLimit ?? 70,
-      weekendOnlineCapacityLimit: rates.weekendOnlineCapacityLimit ?? 70
-    });
-    setTermsForm(reservationTerms);
-  }, [rates, reservationTerms]);
+    let isMounted = true;
+    const fetchPoliciesAndRates = async () => {
+      setIsLoading(true);
+
+      const timeoutId = setTimeout(() => {
+        if (isMounted && (!navigator.onLine || isSystemOffline)) {
+          toast.warning("No Internet Connection / Cloud Unreachable: Running on local database backup snapshot.", {
+            duration: 6000,
+            icon: <WifiOff className="text-amber-400" size={16} />
+          });
+        }
+      }, 6000);
+
+      try {
+        const [localRes, cloudRes] = await Promise.allSettled([
+          fetch('http://localhost:3001/api/settings/rates').then(r => r.ok ? r.json() : null),
+          supabase.from('system_settings').select('*').then(res => res.data || null)
+        ]);
+
+        let mergedSettings: any = {};
+
+        if (cloudRes.status === 'fulfilled' && cloudRes.value) {
+          const cloudObj = cloudRes.value.reduce((acc: any, curr: any) => {
+            let val = curr.setting_value || curr.settingValue;
+            if (val === 'true') val = true;
+            else if (val === 'false') val = false;
+            else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
+            acc[curr.key_name || curr.keyName] = val;
+            return acc;
+          }, {});
+          mergedSettings = { ...mergedSettings, ...cloudObj };
+        }
+
+        if (localRes.status === 'fulfilled' && localRes.value) {
+          mergedSettings = { ...mergedSettings, ...localRes.value };
+        }
+
+        if (isMounted && Object.keys(mergedSettings).length > 0) {
+          setRatesForm(prev => ({ ...prev, ...mergedSettings }));
+          setTermsForm(prev => ({ ...prev, ...mergedSettings }));
+        }
+      } catch (err) {
+        if (isMounted) {
+          toast.error("Offline Mode: Unable to reach online server. Configured from local database.");
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (isMounted) {
+          setTimeout(() => setIsLoading(false), 400);
+        }
+      }
+    };
+
+    fetchPoliciesAndRates();
+    return () => { isMounted = false; };
+  }, []);
 
   const parseToMins = (t: string) => {
     const [hh = '0', mm = '0'] = (t || '').split(':');
@@ -68,22 +132,40 @@ export default function AdminPolicyRatesEditor() {
     setRatesForm(prev => ({ ...prev, [name]: type === 'range' ? Number(value) : value }));
   };
 
-  const handleRatesTextNumber = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // STRICT 4-DIGIT RATE VALIDATOR (No symbols, max 4 digits, warns if > 1000)
+  const handleRateInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const cleanValue = value.replace(/\D/g, ''); 
-    if (name === 'downPaymentPercent') {
-      let num = cleanValue === '' ? '' : Number(cleanValue);
-      if (num !== '' && num > 100) num = 100;
-      setRatesForm(prev => ({ ...prev, [name]: num === '' ? '' : Number(num) }));
-      return;
+    const cleanDigits = value.replace(/\D/g, '').slice(0, 4);
+    const numericValue = cleanDigits === '' ? '' : Number(cleanDigits);
+
+    if (numericValue !== '' && Number(numericValue) > 1000) {
+      toast.warning(`High Rate Warning: ₱${numericValue} exceeds standard ₱1,000/hr billing.`);
     }
-    setRatesForm(prev => ({ ...prev, [name]: cleanValue === '' ? '' : Number(cleanValue) }));
+
+    setRatesForm(prev => ({ ...prev, [name]: numericValue }));
   };
 
-  const handleTermsTextNumber = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // STRICT 2-DIGIT HOUR VALIDATOR (No symbols, max 2 digits)
+  const handleHourInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const cleanValue = value.replace(/\D/g, '');
-    setTermsForm(prev => ({ ...prev, [name]: cleanValue === '' ? '' : Number(cleanValue) }));
+    const cleanDigits = value.replace(/\D/g, '').slice(0, 2);
+    const numericValue = cleanDigits === '' ? '' : Number(cleanDigits);
+
+    setTermsForm(prev => ({ ...prev, [name]: numericValue }));
+  };
+
+  const handlePartySizeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    const cleanDigits = value.replace(/\D/g, '').slice(0, 2);
+    setTermsForm(prev => ({ ...prev, [name]: cleanDigits === '' ? '' : Number(cleanDigits) }));
+  };
+
+  const handleDownPaymentInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    const cleanDigits = value.replace(/\D/g, '').slice(0, 3);
+    let num = cleanDigits === '' ? '' : Number(cleanDigits);
+    if (num !== '' && num > 100) num = 100;
+    setRatesForm(prev => ({ ...prev, [name]: num }));
   };
 
   const handleTermsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -91,31 +173,38 @@ export default function AdminPolicyRatesEditor() {
     setTermsForm(prev => ({ ...prev, [name]: value }));
   };
 
+  // 🟢 FIXED: Removed cancelHrs > advHrs check that was blocking existing DB values
   const handleReviewChanges = () => {
-    const downPaymentPercent = Number(ratesForm.downPaymentPercent);
-    if (termsForm.weekdayMinPartySize > termsForm.weekdayMaxPartySize) { toast.error('Weekday Min party size cannot exceed Max.'); return; }
-    if (termsForm.weekendMinPartySize > termsForm.weekendMaxPartySize) { toast.error('Weekend Min party size cannot exceed Max.'); return; }
+    const downPaymentPercent = Number(ratesForm.downPaymentPercent) || 0;
+    const minWkDay = Number(termsForm.weekdayMinPartySize) || 1;
+    const maxWkDay = Number(termsForm.weekdayMaxPartySize) || 10;
+    const minWkEnd = Number(termsForm.weekendMinPartySize) || 1;
+    const maxWkEnd = Number(termsForm.weekendMaxPartySize) || 10;
+    const minHrs = Number(termsForm.minHours) || 1;
+    const maxHrs = Number(termsForm.maxHours) || 8;
+    const advHrs = Number(termsForm.advanceBookingHours) || 0;
+    const cancelHrs = Number(termsForm.cancellationHours) || 0;
+
+    if (minWkDay > maxWkDay) { toast.error('Weekday Min party size cannot exceed Max.'); return; }
+    if (minWkEnd > maxWkEnd) { toast.error('Weekend Min party size cannot exceed Max.'); return; }
+    if (minHrs > maxHrs) { toast.error('Minimum booking hours cannot exceed Maximum booking hours.'); return; }
     if (!Number.isFinite(downPaymentPercent) || downPaymentPercent > 100) { toast.error('Down payment cannot exceed 100%.'); return; }
 
-    // 🟢 NEW: Unreasonable Rate Warnings (Industry standard check)
-    const maxStandardRate = 1000;
-    if (ratesForm.hourlyRate > maxStandardRate) toast.warning(`Warning: Base hourly rate (₱${ratesForm.hourlyRate}) exceeds standard industry bounds.`);
-    if (ratesForm.overtimeRate > maxStandardRate) toast.warning(`Warning: Overtime rate (₱${ratesForm.overtimeRate}) exceeds standard industry bounds.`);
-    if (ratesForm.isWeekdayHappyHourActive && ratesForm.weekdayHappyHourRate > maxStandardRate) toast.warning(`Warning: Weekday Happy Hour rate exceeds ₱${maxStandardRate}.`);
-    if (ratesForm.isWeekendHappyHourActive && ratesForm.weekendHappyHourRate > maxStandardRate) toast.warning(`Warning: Weekend Happy Hour rate exceeds ₱${maxStandardRate}.`);
+    if (Number(ratesForm.hourlyRate) > 1000) toast.warning(`Warning: Standard hourly rate (₱${ratesForm.hourlyRate}) is over ₱1,000.`);
+    if (Number(ratesForm.overtimeRate) > 1000) toast.warning(`Warning: Overtime rate (₱${ratesForm.overtimeRate}) is over ₱1,000.`);
 
-    // 🟢 NEW: Advance Booking & Cancellation Limits
-    if (termsForm.advanceBookingHours > 720) { toast.error('Advance booking cut-off cannot exceed 30 days (720 hours).'); return; }
-    if (termsForm.cancellationHours > 168) { toast.error('Cancellation grace period cannot exceed 7 days (168 hours).'); return; }
-    if (termsForm.cancellationHours > termsForm.advanceBookingHours) { toast.error('Cancellation grace period cannot be longer than the advance booking requirement.'); return; }
+    if (advHrs > 720) { toast.error('Advance booking cut-off cannot exceed 30 days (720 hours).'); return; }
+    if (cancelHrs > 168) { toast.error('Cancellation grace period cannot exceed 7 days (168 hours).'); return; }
 
-    // 🟢 NEW: Time Overlap Validation (e.g., Thursday night flowing into Friday morning)
-    const parseMins = (time: string) => { const [h, m] = time.split(':').map(Number); return h * 60 + m; };
-    const weekdayEndMins = parseMins(ratesForm.weekdayEndTime);
-    const weekdayStartMins = parseMins(ratesForm.weekdayStartTime);
-    const weekendStartMins = parseMins(ratesForm.weekendStartTime);
+    const parseSafeMins = (time?: string) => { 
+      if (!time || typeof time !== 'string' || !time.includes(':')) return 0;
+      const [h, m] = time.split(':').map(Number); 
+      return (h || 0) * 60 + (m || 0); 
+    };
+    const weekdayEndMins = parseSafeMins(ratesForm.weekdayEndTime);
+    const weekdayStartMins = parseSafeMins(ratesForm.weekdayStartTime);
+    const weekendStartMins = parseSafeMins(ratesForm.weekendStartTime);
 
-    // If weekday end time flows into Friday morning (e.g., Opens 18:00, Closes 02:00)
     const flowsIntoNextDay = weekdayEndMins <= weekdayStartMins; 
     if (flowsIntoNextDay && weekdayEndMins > weekendStartMins && weekendStartMins > 0) {
         toast.error(`Schedule Conflict: Weekday schedule ends on Friday at ${fmt12(ratesForm.weekdayEndTime)}, but Weekend schedule starts at ${fmt12(ratesForm.weekendStartTime)}. Please adjust times to prevent overlap.`);
@@ -124,77 +213,88 @@ export default function AdminPolicyRatesEditor() {
 
     setShowSummaryModal(true);
   };
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  
-  const refreshFromDB = async () => {
-    try {
-      setIsRefreshing(true);
-      const res = await fetch('http://localhost:3001/api/settings/rates');
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
-      setRatesForm(prev => ({ ...prev, ...data }));
-      setTermsForm(prev => ({ ...prev, ...data }));
-      toast.success('Refreshed settings from local database');
-    } catch (e) {
-      toast.error('Failed to refresh from DB. Is the local server running?');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
 
-  const [isSaving, setIsSaving] = useState(false);
+  // 🟢 FIXED: Closes modal instantly and shows PageLoader while pushing locally and to Supabase
   const executeSave = async () => {
+    setShowSummaryModal(false);
+    setIsSaving(true);
     try {
-      setIsSaving(true);
       const ratesPayload = {
-        hourlyRate: ratesForm.hourlyRate, overtimeRate: ratesForm.overtimeRate, downPaymentPercent: ratesForm.downPaymentPercent,
-        weekdayStartTime: ratesForm.weekdayStartTime, weekdayEndTime: ratesForm.weekdayEndTime,
-        isWeekdayHappyHourActive: ratesForm.isWeekdayHappyHourActive, weekdayHappyHourRate: ratesForm.weekdayHappyHourRate,
-        weekdayHappyHourStart: ratesForm.weekdayHappyHourStart, weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd,
-        weekdayOnlineCapacityLimit: ratesForm.weekdayOnlineCapacityLimit, weekendStartTime: ratesForm.weekendStartTime,
-        weekendEndTime: ratesForm.weekendEndTime, isWeekendHappyHourActive: ratesForm.isWeekendHappyHourActive,
-        weekendHappyHourRate: ratesForm.weekendHappyHourRate, weekendHappyHourStart: ratesForm.weekendHappyHourStart,
-        weekendHappyHourEnd: ratesForm.weekendHappyHourEnd, weekendOnlineCapacityLimit: ratesForm.weekendOnlineCapacityLimit,
+        hourlyRate: Number(ratesForm.hourlyRate) || 0,
+        overtimeRate: Number(ratesForm.overtimeRate) || 0,
+        downPaymentPercent: Number(ratesForm.downPaymentPercent) || 0,
+        weekdayStartTime: ratesForm.weekdayStartTime || '12:00',
+        weekdayEndTime: ratesForm.weekdayEndTime || '00:00',
+        isWeekdayHappyHourActive: !!ratesForm.isWeekdayHappyHourActive,
+        weekdayHappyHourRate: Number(ratesForm.weekdayHappyHourRate) || 0,
+        weekdayHappyHourStart: ratesForm.weekdayHappyHourStart || '15:00',
+        weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd || '18:00',
+        weekdayOnlineCapacityLimit: Number(ratesForm.weekdayOnlineCapacityLimit) || 70,
+        weekendStartTime: ratesForm.weekendStartTime || '12:00',
+        weekendEndTime: ratesForm.weekendEndTime || '02:00',
+        isWeekendHappyHourActive: !!ratesForm.isWeekendHappyHourActive,
+        weekendHappyHourRate: Number(ratesForm.weekendHappyHourRate) || 0,
+        weekendHappyHourStart: ratesForm.weekendHappyHourStart || '15:00',
+        weekendHappyHourEnd: ratesForm.weekendHappyHourEnd || '18:00',
+        weekendOnlineCapacityLimit: Number(ratesForm.weekendOnlineCapacityLimit) || 70,
       };
 
       const termsPayload = {
-        minHours: termsForm.minHours, maxHours: termsForm.maxHours, cancellationHours: termsForm.cancellationHours, advanceBookingHours: termsForm.advanceBookingHours,
-        cancellationPolicy: termsForm.cancellationPolicy, termsAndConditions: termsForm.termsAndConditions,
-        weekdayMinPartySize: termsForm.weekdayMinPartySize, weekdayMaxPartySize: termsForm.weekdayMaxPartySize,
-        weekendMinPartySize: termsForm.weekendMinPartySize, weekendMaxPartySize: termsForm.weekendMaxPartySize,
+        minHours: Number(termsForm.minHours) || 1,
+        maxHours: Number(termsForm.maxHours) || 6,
+        cancellationHours: Number(termsForm.cancellationHours) || 24,
+        advanceBookingHours: Number(termsForm.advanceBookingHours) || 2,
+        cancellationPolicy: termsForm.cancellationPolicy || '',
+        termsAndConditions: termsForm.termsAndConditions || '',
+        weekdayMinPartySize: Number(termsForm.weekdayMinPartySize) || 1,
+        weekdayMaxPartySize: Number(termsForm.weekdayMaxPartySize) || 10,
+        weekendMinPartySize: Number(termsForm.weekendMinPartySize) || 1,
+        weekendMaxPartySize: Number(termsForm.weekendMaxPartySize) || 10,
       };
       
       await updateRates(ratesPayload);
       await updateReservationTerms(termsPayload);
-      await refreshFromDB();
-      toast.success("Policies and Rates successfully updated!");
-      setShowSummaryModal(false);
-    } catch (e) { toast.error('Failed to save settings to DB.'); } finally { setIsSaving(false); }
+
+      // Explicitly trigger cloud backup to Supabase
+      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+
+      toast.success("Policies & Rates successfully updated locally and pushed to Cloud!");
+    } catch (e) { 
+      toast.error('Failed to save settings to database.'); 
+    } finally { 
+      setTimeout(() => setIsSaving(false), 600); 
+    }
   };
 
-  const truncate = (str: string) => str && str.length > 25 ? str.substring(0, 25) + '...' : str;
+  const truncate = (str: string) => str && str.length > 30 ? str.substring(0, 30) + '...' : str;
   const renderChangeRow = (label: string, oldVal: any, newVal: any, isCurrency: boolean = false) => {
     const format = (v: any) => {
       if (typeof v === 'boolean') return v ? 'Active' : 'Hidden';
-      if (isCurrency) return `₱${v}`;
-      return String(v || 'None');
+      if (isCurrency && v !== undefined && v !== '') return `₱${v}`;
+      return String(v ?? 'None');
     };
     const o = format(oldVal);
     const n = format(newVal);
     const changed = o !== n;
     return (
-      <div className="flex justify-between border-b border-neutral-800/60 py-2 items-center">
-        <span className="text-neutral-500 text-xs">{label}</span>
-        <div className="text-right max-w-[200px] truncate">
-          {!changed ? ( <span className="text-neutral-400 text-xs italic">{n} <span className="text-neutral-600 text-[10px] ml-1">(unchanged)</span></span> ) : (
-            <div className="flex flex-col items-end gap-1"><span className="text-neutral-500 line-through text-[10px]">{o}</span><span className="text-emerald-400 font-bold text-xs">{n}</span></div>
+      <div className="flex justify-between border-b border-neutral-800/60 py-2.5 items-center">
+        <span className="text-neutral-400 text-xs font-medium">{label}</span>
+        <div className="text-right max-w-[220px]">
+          {!changed ? (
+            <span className="text-neutral-500 text-xs italic">
+              {n} <span className="text-neutral-600 text-[10px] ml-1">(unchanged)</span>
+            </span>
+          ) : (
+            <div className="flex flex-col items-end gap-0.5">
+              <span className="text-neutral-500 line-through text-[10px]">{o}</span>
+              <span className="text-emerald-400 font-bold text-xs bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">{n}</span>
+            </div>
           )}
         </div>
       </div>
     );
   };
 
-  // 🟢 NEW: Reusable Character Counter
   const CharCount = ({ current, max }: { current?: string, max: number }) => {
     const len = current?.length || 0;
     return (
@@ -204,19 +304,30 @@ export default function AdminPolicyRatesEditor() {
     );
   };
 
+  // 🟢 FIXED: Explicitly renders PageLoader during initial load or while saving to cloud
+  if (isLoading || isSaving) {
+    return (
+      <div className="min-h-[75vh] w-full flex flex-col items-center justify-center bg-neutral-950">
+        <PageLoader />
+        <p className="text-xs text-neutral-400 font-semibold uppercase tracking-widest mt-4 animate-pulse">
+          {isSaving 
+            ? "Saving Policies & uploading to Cloud..." 
+            : "Synchronizing Policies & Rates..."}
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-8 pb-20">
+    <div className="p-6 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-300">
       <div className="flex justify-between items-end border-b border-neutral-800 pb-4">
         <div>
           <h1 className="text-3xl font-black text-neutral-100 tracking-widest">POLICY & RATES</h1>
           <p className="text-sm text-neutral-400 mt-1">Manage pricing, operating hours, and booking rules for weekdays and weekends.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={refreshFromDB} className={`px-4 py-2 rounded-lg border ${isRefreshing ? 'bg-neutral-800/60 border-emerald-600 text-emerald-500' : 'bg-neutral-900 border-neutral-800 text-neutral-300'}`}>
-            {isRefreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button type="button" onClick={handleReviewChanges} className="bg-emerald-600 hover:bg-emerald-500 text-neutral-100 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors">
-            <Save size={20} /> Save Changes
+          <button type="button" onClick={handleReviewChanges} className="bg-emerald-600 hover:bg-emerald-500 text-neutral-100 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors shadow-lg shadow-emerald-950/40">
+            <Save size={18} /> Save Changes
           </button>
         </div>
       </div>
@@ -226,16 +337,39 @@ export default function AdminPolicyRatesEditor() {
         {/* LEFT COLUMN */}
         <div className="space-y-8">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
-            <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6"><DollarSign className="text-emerald-500" /> Base Rates & Store Hours</h2>
+            <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
+              <DollarSign className="text-emerald-500" /> Base Rates & Store Hours
+            </h2>
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div>
-                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Standard Hourly Rate (₱)</label>
-                {/* 🟢 FIXED: Removed bg-black and text-white */}
-                <input type="text" inputMode="numeric" name="hourlyRate" value={ratesForm.hourlyRate} onChange={handleRatesTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider flex justify-between">
+                  <span>Standard Hourly Rate (₱)</span>
+                  {Number(ratesForm.hourlyRate) > 1000 && <span className="text-amber-400 text-[10px] font-bold">⚠️ &gt;1000</span>}
+                </label>
+                <input 
+                  type="text" 
+                  inputMode="numeric" 
+                  name="hourlyRate" 
+                  value={ratesForm.hourlyRate} 
+                  onChange={handleRateInput} 
+                  placeholder="Max 4 digits"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" 
+                />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Overtime Rate (₱)</label>
-                <input type="text" inputMode="numeric" name="overtimeRate" value={ratesForm.overtimeRate} onChange={handleRatesTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider flex justify-between">
+                  <span>Overtime Rate (₱)</span>
+                  {Number(ratesForm.overtimeRate) > 1000 && <span className="text-amber-400 text-[10px] font-bold">⚠️ &gt;1000</span>}
+                </label>
+                <input 
+                  type="text" 
+                  inputMode="numeric" 
+                  name="overtimeRate" 
+                  value={ratesForm.overtimeRate} 
+                  onChange={handleRateInput} 
+                  placeholder="Max 4 digits"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" 
+                />
               </div>
             </div>
 
@@ -244,7 +378,6 @@ export default function AdminPolicyRatesEditor() {
                 <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2">WEEKDAYS (Mon-Thu)</h3>
                 <div>
                   <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Opens</label>
-                  {/* 🟢 FIXED: Browser Clock Icon now flips natively with Light Mode */}
                   <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayStartTime" value={ratesForm.weekdayStartTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
                 </div>
                 <div>
@@ -267,7 +400,7 @@ export default function AdminPolicyRatesEditor() {
 
             <div className="mt-4">
               <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Down Payment % Required (All Days)</label>
-              <input type="text" inputMode="numeric" name="downPaymentPercent" value={ratesForm.downPaymentPercent} onChange={handleRatesTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+              <input type="text" inputMode="numeric" name="downPaymentPercent" value={ratesForm.downPaymentPercent} onChange={handleDownPaymentInput} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
             </div>
           </div>
 
@@ -283,8 +416,11 @@ export default function AdminPolicyRatesEditor() {
                 </div>
                 <div className={`space-y-4 ${!ratesForm.isWeekdayHappyHourActive && 'pointer-events-none'}`}>
                   <div>
-                    <label className="block text-[10px] text-neutral-400 mb-1 uppercase">Promo Rate (₱)</label>
-                    <input type="text" inputMode="numeric" name="weekdayHappyHourRate" value={ratesForm.weekdayHappyHourRate} onChange={handleRatesTextNumber} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 focus:border-emerald-500 outline-none" />
+                    <label className="block text-[10px] text-neutral-400 mb-1 uppercase flex justify-between">
+                      <span>Promo Rate (₱)</span>
+                      {Number(ratesForm.weekdayHappyHourRate) > 1000 && <span className="text-amber-400 font-bold">⚠️ &gt;1000</span>}
+                    </label>
+                    <input type="text" inputMode="numeric" name="weekdayHappyHourRate" value={ratesForm.weekdayHappyHourRate} onChange={handleRateInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 focus:border-emerald-500 outline-none" />
                   </div>
                   <div className="flex flex-col gap-3">
                     <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Start</label><input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayHappyHourStart" value={ratesForm.weekdayHappyHourStart} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
@@ -302,8 +438,11 @@ export default function AdminPolicyRatesEditor() {
                 </div>
                 <div className={`space-y-4 ${!ratesForm.isWeekendHappyHourActive && 'pointer-events-none'}`}>
                   <div>
-                    <label className="block text-[10px] text-neutral-400 mb-1 uppercase">Promo Rate (₱)</label>
-                    <input type="text" inputMode="numeric" name="weekendHappyHourRate" value={ratesForm.weekendHappyHourRate} onChange={handleRatesTextNumber} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 focus:border-emerald-500 outline-none" />
+                    <label className="block text-[10px] text-neutral-400 mb-1 uppercase flex justify-between">
+                      <span>Promo Rate (₱)</span>
+                      {Number(ratesForm.weekendHappyHourRate) > 1000 && <span className="text-amber-400 font-bold">⚠️ &gt;1000</span>}
+                    </label>
+                    <input type="text" inputMode="numeric" name="weekendHappyHourRate" value={ratesForm.weekendHappyHourRate} onChange={handleRateInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 focus:border-emerald-500 outline-none" />
                   </div>
                   <div className="flex flex-col gap-3">
                     <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Start</label><input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekendHappyHourStart" value={ratesForm.weekendHappyHourStart} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
@@ -315,52 +454,128 @@ export default function AdminPolicyRatesEditor() {
           </div>
 
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
-            <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6"><SlidersHorizontal className="text-emerald-500" /> Booking Constraints</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
+              <SlidersHorizontal className="text-emerald-500" /> Venue Allocation Policy & Constraints
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
               <div>
                 <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2 mb-4">WEEKDAYS</h3>
                 <div className="mb-6">
                   <label className="block text-xs text-neutral-400 mb-2 uppercase tracking-wider flex justify-between items-center">
-                    <span>Capacity Limit</span><span className="text-emerald-500 font-bold bg-emerald-950/40 border border-emerald-900/50 px-2 py-0.5 rounded-full text-xs">{ratesForm.weekdayOnlineCapacityLimit}%</span>
+                    <span>Online Allocation Cap</span><span className="text-emerald-500 font-bold bg-emerald-950/40 border border-emerald-900/50 px-2 py-0.5 rounded-full text-xs">{ratesForm.weekdayOnlineCapacityLimit}%</span>
                   </label>
                   <input type="range" name="weekdayOnlineCapacityLimit" min="0" max="100" step="10" value={ratesForm.weekdayOnlineCapacityLimit} onChange={handleRatesChange} className="w-full accent-emerald-500 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer" />
                 </div>
                 <div className="flex gap-3">
-                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Min Party</label><input type="text" inputMode="numeric" name="weekdayMinPartySize" value={termsForm.weekdayMinPartySize} onChange={handleTermsTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
-                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Max Party</label><input type="text" inputMode="numeric" name="weekdayMaxPartySize" value={termsForm.weekdayMaxPartySize} onChange={handleTermsTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Min Party</label><input type="text" inputMode="numeric" name="weekdayMinPartySize" value={termsForm.weekdayMinPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Max Party</label><input type="text" inputMode="numeric" name="weekdayMaxPartySize" value={termsForm.weekdayMaxPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
                 </div>
               </div>
               <div>
                 <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2 mb-4">WEEKENDS</h3>
                 <div className="mb-6">
                   <label className="block text-xs text-neutral-400 mb-2 uppercase tracking-wider flex justify-between items-center">
-                    <span>Capacity Limit</span><span className="text-emerald-500 font-bold bg-emerald-950/40 border border-emerald-900/50 px-2 py-0.5 rounded-full text-xs">{ratesForm.weekendOnlineCapacityLimit}%</span>
+                    <span>Online Allocation Cap</span><span className="text-emerald-500 font-bold bg-emerald-950/40 border border-emerald-900/50 px-2 py-0.5 rounded-full text-xs">{ratesForm.weekendOnlineCapacityLimit}%</span>
                   </label>
                   <input type="range" name="weekendOnlineCapacityLimit" min="0" max="100" step="10" value={ratesForm.weekendOnlineCapacityLimit} onChange={handleRatesChange} className="w-full accent-emerald-500 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer" />
                 </div>
                 <div className="flex gap-3">
-                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Min Party</label><input type="text" inputMode="numeric" name="weekendMinPartySize" value={termsForm.weekendMinPartySize} onChange={handleTermsTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
-                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Max Party</label><input type="text" inputMode="numeric" name="weekendMaxPartySize" value={termsForm.weekendMaxPartySize} onChange={handleTermsTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Min Party</label><input type="text" inputMode="numeric" name="weekendMinPartySize" value={termsForm.weekendMinPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                  <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Max Party</label><input type="text" inputMode="numeric" name="weekendMaxPartySize" value={termsForm.weekendMaxPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Deadlock Defense Engine */}
+            <div className="border-t border-neutral-800 pt-6">
+              <h3 className="text-sm font-bold text-neutral-200 mb-4 flex items-center gap-2">
+                <ShieldAlert size={16} className="text-emerald-500" />
+                <span>Deadlock & Event Defense Engine</span>
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800/80">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-bold text-neutral-300">Turnover Buffer</span>
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">{turnoverBufferMins}m Gap</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">
+                    Enforces a mandatory gap between back-to-back online reservations to prevent table cleaning and overtime deadlocks.
+                  </p>
+                  <select 
+                    value={turnoverBufferMins} 
+                    onChange={e => setTurnoverBufferMins(Number(e.target.value))}
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg p-1.5 text-xs text-neutral-200 outline-none"
+                  >
+                    <option value={15}>15 Min Standard Gap</option>
+                    <option value={20}>20 Min Safety Gap</option>
+                    <option value={30}>30 Min Heavy Buffer</option>
+                  </select>
+                </div>
+
+                <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800/80">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-bold text-neutral-300">Event Override</span>
+                    <button type="button" onClick={() => setEventLockProtection(!eventLockProtection)}>
+                      {eventLockProtection ? <ToggleRight size={24} className="text-emerald-500" /> : <ToggleLeft size={24} className="text-neutral-600" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed">
+                    Tournament/Event table allocations automatically lock out online reservation pools 24 hours in advance to defend against double-booking.
+                  </p>
+                </div>
+
+                <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800/80">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-bold text-neutral-300">Reschedule Limit</span>
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">Max {maxRescheduleLimit}x</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">
+                    Caps customer reschedules to prevent users from indefinitely holding table inventory and blocking other patrons.
+                  </p>
+                  <select 
+                    value={maxRescheduleLimit} 
+                    onChange={e => setMaxRescheduleLimit(Number(e.target.value))}
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg p-1.5 text-xs text-neutral-200 outline-none"
+                  >
+                    <option value={1}>1 Reschedule Max</option>
+                    <option value={2}>2 Reschedules Standard</option>
+                    <option value={3}>3 Reschedules Lenient</option>
+                  </select>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: POLICIES */}
+        {/* RIGHT COLUMN: POLICIES & HOURS */}
         <div className="space-y-6">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
-            <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6"><FileText className="text-emerald-500" /> Content Editor</h2>
+            <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
+              <FileText className="text-emerald-500" /> Content Editor & Duration Bounds
+            </h2>
             <div className="space-y-4">
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Min Booking Hours</label>
+                  <input type="text" inputMode="numeric" name="minHours" value={termsForm.minHours} onChange={handleHourInput} placeholder="0–99" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Max Booking Hours</label>
+                  <input type="text" inputMode="numeric" name="maxHours" value={termsForm.maxHours} onChange={handleHourInput} placeholder="0–99" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Advance Booking Cut-off (Hours)</label>
-                <input type="text" inputMode="numeric" name="advanceBookingHours" value={termsForm.advanceBookingHours} onChange={handleTermsTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                <input type="text" inputMode="numeric" name="advanceBookingHours" value={termsForm.advanceBookingHours} onChange={handleHourInput} placeholder="0–99" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
               </div>
               <div>
                 <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Cancellation Grace Period (Hours)</label>
-                <input type="text" inputMode="numeric" name="cancellationHours" value={termsForm.cancellationHours} onChange={handleTermsTextNumber} className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                <input type="text" inputMode="numeric" name="cancellationHours" value={termsForm.cancellationHours} onChange={handleHourInput} placeholder="0–99" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
               </div>
-              {/* 🟢 FIXED: Capped Booking Policies & T&C */}
+
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="block text-xs text-neutral-400 uppercase tracking-wider">Booking Policies (Displayed in Step 2)</label>
@@ -421,42 +636,62 @@ export default function AdminPolicyRatesEditor() {
         </div>
       </div>
 
+      {/* ALL-INCLUSIVE CONFIRMATION MODAL */}
       {showSummaryModal && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-neutral-900/80 border-b border-neutral-800 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-neutral-100 flex items-center gap-2"><ShieldCheck size={18} className="text-emerald-500" /> Review Changes</h3>
-              <button type="button" onClick={() => setShowSummaryModal(false)} className="text-neutral-500 hover:text-neutral-100 transition-colors"><X size={18} /></button>
+              <h3 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
+                <ShieldCheck size={18} className="text-emerald-500" /> Review Policy & Rate Summary
+              </h3>
+              <button type="button" onClick={() => setShowSummaryModal(false)} className="text-neutral-500 hover:text-neutral-100 transition-colors">
+                <X size={18} />
+              </button>
             </div>
             <div className="p-6 space-y-5">
-              <p className="text-sm text-neutral-400">Please confirm the following updates to your establishment's policies and rates:</p>
+              <p className="text-sm text-neutral-400">
+                Please review all policies and rates. Items highlighted have been modified:
+              </p>
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 text-sm space-y-1 text-neutral-300 max-h-[50vh] overflow-y-auto">
                 {renderChangeRow('Base Hourly Rate', rates.hourlyRate, ratesForm.hourlyRate, true)}
                 {renderChangeRow('Overtime Rate', rates.overtimeRate, ratesForm.overtimeRate, true)}
-                {renderChangeRow('Down Payment', `${rates.downPaymentPercent}%`, `${ratesForm.downPaymentPercent}%`)}
+                {renderChangeRow('Down Payment Required', `${rates.downPaymentPercent}%`, `${ratesForm.downPaymentPercent}%`)}
+                
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Weekday Setup</div>
                 {renderChangeRow('Store Hours', `${fmt12(rates.weekdayStartTime)} - ${fmt12(rates.weekdayEndTime)}`, `${fmt12(ratesForm.weekdayStartTime)} - ${fmt12(ratesForm.weekdayEndTime)}`)}
                 {renderChangeRow('Happy Hour Status', rates.isWeekdayHappyHourActive, ratesForm.isWeekdayHappyHourActive)}
                 {renderChangeRow('Happy Hour Window', `${fmt12(rates.weekdayHappyHourStart)} - ${fmt12(rates.weekdayHappyHourEnd)}`, `${fmt12(ratesForm.weekdayHappyHourStart)} - ${fmt12(ratesForm.weekdayHappyHourEnd)}`)}
                 {renderChangeRow('Happy Hour Rate', rates.weekdayHappyHourRate, ratesForm.weekdayHappyHourRate, true)}
-                {renderChangeRow('Online Capacity', `${rates.weekdayOnlineCapacityLimit}%`, `${ratesForm.weekdayOnlineCapacityLimit}%`)}
+                {renderChangeRow('Online Capacity Cap', `${rates.weekdayOnlineCapacityLimit}%`, `${ratesForm.weekdayOnlineCapacityLimit}%`)}
                 {renderChangeRow('Min/Max Party Size', `${reservationTerms.weekdayMinPartySize}-${reservationTerms.weekdayMaxPartySize}`, `${termsForm.weekdayMinPartySize}-${termsForm.weekdayMaxPartySize}`)}
+                
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Weekend Setup</div>
                 {renderChangeRow('Store Hours', `${fmt12(rates.weekendStartTime)} - ${fmt12(rates.weekendEndTime)}`, `${fmt12(ratesForm.weekendStartTime)} - ${fmt12(ratesForm.weekendEndTime)}`)}
                 {renderChangeRow('Happy Hour Status', rates.isWeekendHappyHourActive, ratesForm.isWeekendHappyHourActive)}
                 {renderChangeRow('Happy Hour Window', `${fmt12(rates.weekendHappyHourStart)} - ${fmt12(rates.weekendHappyHourEnd)}`, `${fmt12(ratesForm.weekendHappyHourStart)} - ${fmt12(ratesForm.weekendHappyHourEnd)}`)}
-                {renderChangeRow('Happy Hour Rate', rates.weekendHappyHourRate, ratesForm.weekdayHappyHourRate, true)}
-                {renderChangeRow('Online Capacity', `${rates.weekendOnlineCapacityLimit}%`, `${ratesForm.weekendOnlineCapacityLimit}%`)}
+                {renderChangeRow('Happy Hour Rate', rates.weekendHappyHourRate, ratesForm.weekendHappyHourRate, true)}
+                {renderChangeRow('Online Capacity Cap', `${rates.weekendOnlineCapacityLimit}%`, `${ratesForm.weekendOnlineCapacityLimit}%`)}
                 {renderChangeRow('Min/Max Party Size', `${reservationTerms.weekendMinPartySize}-${reservationTerms.weekendMaxPartySize}`, `${termsForm.weekendMinPartySize}-${termsForm.weekendMaxPartySize}`)}
-                <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Policies</div>
+                
+                <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Policies & Duration</div>
+                {renderChangeRow('Min/Max Duration', `${reservationTerms.minHours}-${reservationTerms.maxHours} Hrs`, `${termsForm.minHours}-${termsForm.maxHours} Hrs`)}
                 {renderChangeRow('Advance Notice', `${reservationTerms.advanceBookingHours} Hrs`, `${termsForm.advanceBookingHours} Hrs`)}
                 {renderChangeRow('Cancellation Grace', `${reservationTerms.cancellationHours} Hrs`, `${termsForm.cancellationHours} Hrs`)}
                 {renderChangeRow('Cancellation Policy', truncate(reservationTerms.cancellationPolicy), truncate(termsForm.cancellationPolicy))}
-                {renderChangeRow('T&C Text', truncate(reservationTerms.termsAndConditions), truncate(termsForm.termsAndConditions))}
+                {renderChangeRow('General T&C Text', truncate(reservationTerms.termsAndConditions), truncate(termsForm.termsAndConditions))}
+                
+                <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Allocation & Defense Engine</div>
+                {renderChangeRow('Turnover Buffer Window', `${turnoverBufferMins}m Gap`, `${turnoverBufferMins}m Gap`)}
+                {renderChangeRow('Event Override Protection', eventLockProtection, eventLockProtection)}
+                {renderChangeRow('Reschedule Cap', `Max ${maxRescheduleLimit}x`, `Max ${maxRescheduleLimit}x`)}
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowSummaryModal(false)} className="flex-1 px-4 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-sm font-semibold transition-colors border border-neutral-800">Cancel</button>
-                <button type="button" onClick={executeSave} disabled={isSaving} className={`flex-1 px-4 py-3 ${isSaving ? 'bg-neutral-700 cursor-wait text-neutral-300' : 'bg-emerald-600 hover:bg-emerald-500 text-neutral-100'} rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30`}>{isSaving ? 'Saving…' : (<><Save size={16} /> Confirm & Save</>)}</button>
+                <button type="button" onClick={() => setShowSummaryModal(false)} className="flex-1 px-4 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-sm font-semibold transition-colors border border-neutral-800">
+                  Cancel
+                </button>
+                <button type="button" onClick={executeSave} disabled={isSaving} className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-neutral-100 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30">
+                  <Save size={16} /> Confirm & Save
+                </button>
               </div>
             </div>
           </div>

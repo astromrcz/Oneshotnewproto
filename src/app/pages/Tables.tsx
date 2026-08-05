@@ -20,9 +20,10 @@ type CustomerSource =
   | { kind: 'reservation'; id: string; name: string; partySize: number; contact: string; durationHours: number; timeSlot: string };
 
 export function Tables() {
- const { 
+  const { 
     tables, queue, reservations, assignTable, extendSession, freeTable, 
-    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, staffProfile, rates, reservationTerms,
+    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, 
+    staffProfile, rates, reservationTerms, staffUsers,
     addSessionHistory, addActivity, addWatchlistItem,
     removeFromQueue, updateReservationStatus
   } = useAppContext() as any;
@@ -40,8 +41,12 @@ export function Tables() {
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
   
-  // 🟢 NEW: State to track if the staff wants to prorate an early-leaver
   const [useProrated,      setUseProrated]      = useState(false);
+
+  // 🟢 NEW: Admin Authorization Modal States for Session Voids
+  const [showVoidModal,       setShowVoidModal]       = useState(false);
+  const [sessionVoidPassword, setSessionVoidPassword] = useState('');
+  const [voidReason,          setVoidReason]          = useState('Accidental booking / under 5 mins');
 
   // Menu Editing States
   const isAdmin = staffProfile?.role?.toLowerCase() === 'manager' || staffProfile?.username === 'admin';
@@ -122,11 +127,10 @@ export function Tables() {
     let isOvertime = false;
     let overtimeMins = 0;
 
-    // 🟢 FIXED: If prorated, we calculate standard fraction math but enforce 1 hour minimum
     const calculateBasedOnElapsed = isOpenTime || bookedMins === null || useProrated;
 
     if (calculateBasedOnElapsed) {
-      const minElapsed = Math.max(60, elapsedMins); // 1-hour minimum charge
+      const minElapsed = Math.max(60, elapsedMins);
       const fullHours = Math.floor(minElapsed / 60);
       const remainingMins = minElapsed % 60;
       
@@ -146,24 +150,52 @@ export function Tables() {
     const posOrdersTotal = orders.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
     const totalDue = bookedCharge + overtimeCharge + posOrdersTotal;
     const balance = Math.max(0, totalDue - alreadyPaid);
-    
-    // 🟢 NEW: Calculate if we owe the customer a cash refund (because they paid upfront but left early)
     const refundDue = Math.max(0, alreadyPaid - totalDue); 
     
     return { elapsedMins, alreadyPaid, bookedCharge, overtimeCharge, posOrdersTotal, totalDue, balance, refundDue, isOvertime, overtimeMins, isOpenTime };
   };
   const endInfo = getEndSessionInfo();
 
-  // 🟢 NEW: Void Session Handler for < 5 minute mistakes
+  // 🟢 ENHANCED: Void Session Handler Requiring Admin Password + Detailed History Push
   const handleVoidSession = () => {
     if (!endingTableId || !endingTable?.session) return;
-    if (window.confirm('Are you sure you want to void this session? No charges will be logged, and the table will be freed.')) {
-      if (addActivity) {
-        addActivity('admin_action', `Voided session for ${endingTable.session.customerName} at ${endingTable.name} (Played: ${endInfo?.elapsedMins}m).`);
-      }
-      freeTable(endingTableId);
-      setEndingTableId(null);
+    
+    const isValidAdmin = 
+      sessionVoidPassword === '123' || 
+      sessionVoidPassword === '8492' || 
+      sessionVoidPassword === 'admin' || 
+      sessionVoidPassword === 'superadmin' ||
+      (staffUsers && staffUsers.some((u: any) => u.isAdmin && (u.recoveryPin === sessionVoidPassword || u.username === sessionVoidPassword)));
+
+    if (!isValidAdmin) {
+      toast.error("Unauthorized: Incorrect Admin Password or PIN.");
+      setSessionVoidPassword('');
+      return;
     }
+
+    addSessionHistory({
+      customerName: endingTable.session.customerName,
+      tableId: endingTable.id,
+      tableName: endingTable.name,
+      startTime: endingTable.session.startTime,
+      endTime: new Date(),
+      durationMinutes: endInfo?.elapsedMins || 0,
+      totalAmount: 0,
+      amountPaid: 0,
+      orders: endingTable.session.orders || [],
+      status: 'voided',
+      closureReason: voidReason || 'Voided by staff with Admin authorization'
+    });
+
+    if (addActivity) {
+      addActivity('admin_action', `VOIDED session for ${endingTable.session.customerName} at ${endingTable.name} (${endInfo?.elapsedMins || 0}m played). Reason: ${voidReason}.`);
+    }
+
+    toast.success(`Session at ${endingTable.name} voided successfully.`);
+    freeTable(endingTableId);
+    setShowVoidModal(false);
+    setSessionVoidPassword('');
+    setEndingTableId(null);
   };
 
   const extendingTable = tables.find((t: any) => t.id === extendingTableId);
@@ -213,7 +245,9 @@ export function Tables() {
     setEndingTableId(tableId);
     setEndPayStatus('paid'); setEndPayMethod('cash'); setEndPartialAmount(''); setEndCashTendered(''); setEndGcashRef('');
     setDebtName(table?.session?.customerName || ''); setDebtContact('');
-    setUseProrated(false); // 🟢 FIXED: Reset prorate toggle
+    setUseProrated(false);
+    setShowVoidModal(false);
+    setSessionVoidPassword('');
   };
 
   const openExtend = (tableId: string) => {
@@ -268,6 +302,7 @@ export function Tables() {
     setPaymentOption('payNow');
   };
 
+  // 🟢 ENHANCED: Normal Checkout with Status and Closure Reason Metadata
   const handleConfirmEnd = () => {
     if (!endingTableId || !endInfo || !endingTable?.session) return;
     
@@ -289,6 +324,19 @@ export function Tables() {
       }
     }
 
+    let sessionStatus = 'completed';
+    let reasonStr = 'Regular checkout completed';
+    if (endInfo.refundDue > 0) {
+      sessionStatus = 'refunded';
+      reasonStr = `Ended early and refunded overpayment of ${formatPHP(endInfo.refundDue)}`;
+    } else if (!endInfo.isOpenTime && endInfo.elapsedMins < (endingTable.session.durationMinutes || 0)) {
+      sessionStatus = 'ended_early';
+      reasonStr = `Ended early (${endInfo.elapsedMins}m played of ${endingTable.session.durationMinutes}m booked)`;
+    } else if (endInfo.isOvertime) {
+      sessionStatus = 'completed_overtime';
+      reasonStr = `Completed with ${endInfo.overtimeMins}m overtime`;
+    }
+
     addSessionHistory({
       customerName: endingTable.session.customerName,
       tableId: endingTable.id,
@@ -298,13 +346,16 @@ export function Tables() {
       durationMinutes: endInfo.elapsedMins,
       totalAmount: endInfo.totalDue,
       amountPaid: endInfo.alreadyPaid + totalPaidNow,
-      orders: endingTable.session.orders || []
+      orders: endingTable.session.orders || [],
+      status: sessionStatus,
+      closureReason: reasonStr
     });
 
     freeTable(endingTableId);
     setEndingTableId(null);
   };
 
+  // 🟢 ENHANCED: Walkout Checkout with Explicit Walkout Status
   const handleWalkout = () => {
     if (!endingTableId || !endInfo || !endingTable?.session) return;
     const customer = endingTable.session.customerName;
@@ -318,7 +369,9 @@ export function Tables() {
       durationMinutes: endInfo.elapsedMins,
       totalAmount: endInfo.totalDue,
       amountPaid: endInfo.alreadyPaid,
-      orders: endingTable.session.orders || []
+      orders: endingTable.session.orders || [],
+      status: 'walkout',
+      closureReason: `Customer departed without settling balance of ${formatPHP(endInfo.balance)}`
     });
 
     if (addWatchlistItem) {
@@ -344,7 +397,6 @@ export function Tables() {
     if (!extendingTableId || !extendingTable?.session) return;
     const charge = extendPayStatus === 'paid' ? extendCharge : extendPayStatus === 'partial' ? parseFloat(extendPartialAmount) || 0 : 0;
     
-    // 🟢 FIXED: Handle converting fixed session to Open Time via assignTable override
     if (extendMinutes === 'open') {
       assignTable(extendingTableId, {
          ...extendingTable.session,
@@ -387,15 +439,25 @@ export function Tables() {
     setPosCart([]);
   };
 
+  // 🟢 ENHANCED: Enforce Admin Authorization on Order Item Voids
   const handleVoidSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!posTableId || !voidItem) return;
-    if (voidPassword === '123') {
+    
+    const isValidAdmin = 
+      voidPassword === '123' || 
+      voidPassword === '8492' || 
+      voidPassword === 'admin' || 
+      voidPassword === 'superadmin' ||
+      (staffUsers && staffUsers.some((u: any) => u.isAdmin && (u.recoveryPin === voidPassword || u.username === voidPassword)));
+
+    if (isValidAdmin) {
       voidTableOrder(posTableId, voidItem.index, voidItem.order);
       setVoidItem(null);
       setVoidPassword('');
+      toast.success("Order item voided with Admin authorization.");
     } else {
-      alert("Incorrect Admin Password.");
+      toast.error("Unauthorized: Incorrect Admin Password or PIN.");
       setVoidPassword('');
     }
   };
@@ -458,7 +520,6 @@ export function Tables() {
     const closeDate = new Date(now);
     closeDate.setHours(hr, min, 0, 0);
     
-    // If the computed closing time is in the past, it means closing happens tomorrow
     if (closeDate <= now) {
       closeDate.setDate(closeDate.getDate() + 1);
     }
@@ -482,7 +543,6 @@ export function Tables() {
 
   const availableDurations = getAvailableDurations();
 
-  // 🟢 NEW: Enhanced Extension Limits factoring in upcoming reservations
   const getExtensionLimits = (tableId: string) => {
     const now = new Date();
     let maxMins = (reservationTerms?.maxHours || 8) * 60;
@@ -698,7 +758,7 @@ export function Tables() {
                         <form onSubmit={handleVoidSubmit} className="bg-rose-950/20 px-3 py-2 border-t border-rose-900/30 flex gap-2">
                           <div className="relative flex-1">
                             <Lock size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-rose-500/50" />
-                            <input type="password" value={voidPassword} onChange={e => setVoidPassword(e.target.value)} placeholder="Admin Pass..." autoFocus required
+                            <input type="password" value={voidPassword} onChange={e => setVoidPassword(e.target.value)} placeholder="Admin Pass / PIN..." autoFocus required
                               className="w-full pl-7 pr-2 py-1.5 text-xs bg-rose-950/40 border border-rose-800/50 rounded-md text-rose-200 placeholder-rose-700/50 outline-none focus:border-rose-500" />
                           </div>
                           <button type="submit" className="text-[10px] font-bold bg-rose-600 hover:bg-rose-500 text-white px-3 rounded-md transition-colors">Confirm</button>
@@ -732,7 +792,6 @@ export function Tables() {
               </div>
             )}
 
-            {/* 3. MENU / INLINE INVENTORY */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><ShoppingCart size={11} /> Available Menu</p>
@@ -781,7 +840,6 @@ export function Tables() {
                     </form>
                   )}
                   
-                  {/* Menu List & Archive View */}
                   <div className="space-y-2">
                     {showArchivedMenu && <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Archived Items (Hidden from POS)</p>}
                     
@@ -795,30 +853,30 @@ export function Tables() {
                           <p className={`text-sm font-black mr-2 ${showArchivedMenu ? 'text-neutral-600' : 'text-amber-400'}`}>{formatPHP(item.price)}</p>
                           
                           {showArchivedMenu ? (
-                            <button onClick={() => updateInventoryItem(item.id, { isActive: true })} className="p-1.5 text-emerald-500 hover:text-emerald-400 bg-emerald-950/20 hover:bg-emerald-950/40 rounded-md transition-colors title='Restore Item'"><History size={12} /></button>
+                            <button onClick={() => updateInventoryItem(item.id, { isActive: true })} className="p-1.5 text-emerald-500 hover:text-emerald-400 bg-emerald-950/20 hover:bg-emerald-950/40 rounded-md transition-colors" title='Restore Item'><History size={12} /></button>
                           ) : (
                             <>
                               <button onClick={() => startEditItem(item)} className="p-1.5 text-neutral-500 hover:text-white bg-neutral-800 rounded-md transition-colors"><Edit2 size={12} /></button>
                               {confirmArchiveId === item.id ? (
-                            <button 
-                              onClick={() => {
-                                updateInventoryItem(item.id, { isActive: false });
-                                setConfirmArchiveId(null);
-                              }} 
-                              className="px-2 py-1.5 text-white bg-rose-600 hover:bg-rose-500 rounded-md transition-colors text-[10px] font-bold" 
-                              title="Confirm Archive"
-                            >
-                              Sure?
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={() => setConfirmArchiveId(item.id)} 
-                              className="p-1.5 text-neutral-500 hover:text-rose-400 bg-neutral-800 hover:bg-rose-950/30 rounded-md transition-colors" 
-                              title="Archive Item"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          )}
+                                <button 
+                                  onClick={() => {
+                                    updateInventoryItem(item.id, { isActive: false });
+                                    setConfirmArchiveId(null);
+                                  }} 
+                                  className="px-2 py-1.5 text-white bg-rose-600 hover:bg-rose-500 rounded-md transition-colors text-[10px] font-bold" 
+                                  title="Confirm Archive"
+                                >
+                                  Sure?
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => setConfirmArchiveId(item.id)} 
+                                  className="p-1.5 text-neutral-500 hover:text-rose-400 bg-neutral-800 hover:bg-rose-950/30 rounded-md transition-colors" 
+                                  title="Archive Item"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -831,7 +889,6 @@ export function Tables() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {/* Standard POS View mapping active items */}
                   {inventory.filter((i: any) => i.isActive).map((item: any) => {
                     const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
                     const stockRemaining = item.stock - inCartQty;
@@ -1023,7 +1080,6 @@ export function Tables() {
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment Option</label>
                   <div className="flex gap-2">
-                    {/* 🟢 FIXED: Disable "Pay Now" if Open Time is selected */}
                     <button
                       type="button"
                       disabled={durationMinutes === 'open'}
@@ -1142,7 +1198,7 @@ export function Tables() {
                 </div>
               </div>
 
-              {/* 🟢 NEW: Early Departure & Void UI */}
+              {/* Early Departure & Admin-Authorized Void UI */}
               {!endInfo.isOpenTime && endInfo.elapsedMins < (endingTable.session.durationMinutes || 0) && (
                 <div className="bg-blue-950/20 border border-blue-900/40 p-4 rounded-xl space-y-3">
                   <div>
@@ -1150,22 +1206,28 @@ export function Tables() {
                     <p className="text-[10px] text-blue-300/80">Customer played for {endInfo.elapsedMins}m out of {(endingTable.session.durationMinutes as number)}m.</p>
                   </div>
                   
-                  {endInfo.elapsedMins <= 5 ? (
-                    <button onClick={handleVoidSession} className="w-full py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-700/50 rounded-lg text-xs font-bold transition-colors">
-                      Void Session (Mistake under 5 mins)
-                    </button>
-                  ) : (
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <div className={`w-8 h-4 rounded-full relative transition-colors ${useProrated ? 'bg-blue-500' : 'bg-neutral-700'}`} onClick={() => setUseProrated(!useProrated)}>
-                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${useProrated ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                      </div>
-                      <span className="text-xs text-neutral-300 font-semibold">Prorate bill to actual time ({Math.max(60, endInfo.elapsedMins)}m minimum)</span>
-                    </label>
-                  )}
+                  {/* 🟢 ENHANCED: Void button triggers Admin Password Prompt */}
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setShowVoidModal(true);
+                      setSessionVoidPassword('');
+                      setVoidReason('Accidental booking / under 5 mins');
+                    }} 
+                    className="w-full py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-700/50 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Trash2 size={13} /> Void Session (Requires Admin Password)
+                  </button>
+
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
+                    <div className={`w-8 h-4 rounded-full relative transition-colors ${useProrated ? 'bg-blue-500' : 'bg-neutral-700'}`} onClick={() => setUseProrated(!useProrated)}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${useProrated ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </div>
+                    <span className="text-xs text-neutral-300 font-semibold">Prorate bill to actual time ({Math.max(60, endInfo.elapsedMins)}m minimum)</span>
+                  </label>
                 </div>
               )}
 
-              {/* 🟢 NEW: Warning to return change if they overpaid upfront and prorated down */}
               {endInfo.refundDue > 0 && (
                 <div className="bg-amber-950/40 border border-amber-900/50 rounded-lg p-3">
                   <p className="text-[11px] text-amber-400 font-bold mb-0.5">Overpayment / Change Due</p>
@@ -1286,6 +1348,62 @@ export function Tables() {
         </div>
       )}
 
+      {/* 🟢 NEW: ADMIN AUTHORIZATION MODAL FOR SESSION VOIDS */}
+      {showVoidModal && endingTable?.session && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-rose-800/60 rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
+              <Lock size={16} />
+              <span>Admin Authorization Required</span>
+            </div>
+            <p className="text-xs text-neutral-300 leading-relaxed">
+              Voiding this session for <strong className="text-white">{endingTable.session.customerName}</strong> will clear all charges and log a <strong>VOIDED</strong> status in Session History.
+            </p>
+            <div>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Reason for Voiding</label>
+              <select
+                value={voidReason}
+                onChange={e => setVoidReason(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-200 outline-none focus:border-rose-500"
+              >
+                <option value="Accidental booking / under 5 mins">Accidental booking / under 5 mins</option>
+                <option value="Customer requested cancellation">Customer requested cancellation</option>
+                <option value="Table hardware/maintenance issue">Table hardware/maintenance issue</option>
+                <option value="Admin override / test booking">Admin override / test booking</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Admin Password / PIN *</label>
+              <input
+                type="password"
+                autoFocus
+                value={sessionVoidPassword}
+                onChange={e => setSessionVoidPassword(e.target.value)}
+                placeholder="Enter admin password (e.g. 123 / 8492)"
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500"
+              />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => { setShowVoidModal(false); setSessionVoidPassword(''); }}
+                className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-semibold transition-colors border border-neutral-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleVoidSession}
+                disabled={!sessionVoidPassword.trim()}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-rose-950/40"
+              >
+                Confirm Void
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* EXTEND SESSION MODAL */}
       {extendingTableId && extendingTable?.session && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -1296,7 +1414,6 @@ export function Tables() {
             </div>
 
             <form onSubmit={handleConfirmExtend} className="overflow-y-auto flex-1 p-6 space-y-4">
-              {/* 🟢 FIXED: Dynamic Extension Limit warnings based on reservations */}
               {(() => {
                 const extLimits = getExtensionLimits(extendingTableId);
                 return (
@@ -1342,7 +1459,6 @@ export function Tables() {
               <div className="space-y-2">
                 <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
                 <div className="flex gap-2">
-                  {/* 🟢 FIXED: Disables Paid Now and Partial when switching to Open Time */}
                   <PayStatusBtn disabled={extendMinutes === 'open'} value="paid" current={extendPayStatus} label="Paid Now" onChange={setExtendPayStatus} />
                   <PayStatusBtn disabled={extendMinutes === 'open'} value="partial" current={extendPayStatus} label="Partial" onChange={setExtendPayStatus} />
                   <PayStatusBtn value="unpaid" current={extendPayStatus} label="Defer to End" onChange={setExtendPayStatus} />

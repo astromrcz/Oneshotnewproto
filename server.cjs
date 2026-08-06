@@ -10,7 +10,7 @@ const path = require('path');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 
-// 🟢 GLOBAL CRASH GUARDS
+// 🟢 GLOBAL CRASH GUARDS: Prevent server shutdowns from unhandled errors
 process.on('uncaughtException', (err) => {
   console.error('⚠️ [Uncaught Exception Guard]:', err.message);
 });
@@ -18,7 +18,7 @@ process.on('unhandledRejection', (reason) => {
   console.error('⚠️ [Unhandled Rejection Guard]:', reason);
 });
 
-// 🟢 SAFE JSON PARSER
+// 🟢 SAFE JSON PARSER: Prevents malformed JSON strings from crashing requests
 const safeParseJSON = (str, fallback = null) => {
   if (!str) return fallback;
   try {
@@ -32,7 +32,7 @@ const sqlite3 = sqlite3Pkg.verbose();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// 🟢 SUPABASE CONFIGURATION WITH MULTI-KEY FALLBACK
+// 🟢 SUPABASE CONFIGURATION
 const SUPABASE_URL = 
   process.env.SUPABASE_URL || 
   process.env.VITE_SUPABASE_URL || 
@@ -89,7 +89,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`CREATE TABLE IF NOT EXISTS tables (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, isActive INTEGER DEFAULT 1, maintenanceReason TEXT, sessionData TEXT)`);
       db.run(`CREATE TABLE IF NOT EXISTS inventory (id TEXT PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER DEFAULT 0, isActive INTEGER DEFAULT 1, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, partySize INTEGER, status TEXT, queueNumber INTEGER, notes TEXT, arrivalTime DATETIME DEFAULT CURRENT_TIMESTAMP)`);
-      db.run(`CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, email TEXT, date DATETIME, timeSlot TEXT, durationHours INTEGER, partySize INTEGER, tableId TEXT, status TEXT, totalAmount REAL, downPaymentAmount REAL, downPaymentPaid INTEGER DEFAULT 0, balancePaid INTEGER DEFAULT 0, paymentRef TEXT, receiptImg TEXT, cancellationReason TEXT, refundStatus TEXT, refundMethod TEXT, refundNotes TEXT, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, email TEXT, date DATETIME, timeSlot TEXT, durationHours INTEGER, partySize INTEGER, tableId TEXT, status TEXT, totalAmount REAL, downPaymentAmount REAL, downPaymentPaid INTEGER DEFAULT 0, balancePaid INTEGER DEFAULT 0, paymentRef TEXT, receiptImg TEXT, cancellationReason TEXT, refundStatus TEXT, refundMethod TEXT, refundNotes TEXT, createdAt TEXT)`);
       db.run(`CREATE TABLE IF NOT EXISTS session_history (id TEXT PRIMARY KEY, customerName TEXT, tableId TEXT, tableName TEXT, startTime DATETIME, endTime DATETIME, durationMinutes INTEGER, totalAmount REAL, amountPaid REAL, orders TEXT)`);
       db.run(`CREATE TABLE IF NOT EXISTS promo_codes (id TEXT PRIMARY KEY, code TEXT UNIQUE, discount_percent REAL, description TEXT, is_active INTEGER DEFAULT 1, is_limited_uses INTEGER DEFAULT 0, max_usage INTEGER DEFAULT 0, usage_count INTEGER DEFAULT 0, start_date DATETIME, expires_at DATETIME)`);
       db.run(`CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, title TEXT, date TEXT, type TEXT, description TEXT, registrationLink TEXT, bracketLink TEXT, minParticipants INTEGER DEFAULT 8, maxParticipants INTEGER, slotsFull INTEGER DEFAULT 0, attachments TEXT, allowReservations INTEGER DEFAULT 1, reservationTableCount INTEGER DEFAULT 4, caterWalkIns INTEGER DEFAULT 1, walkInTableCount INTEGER DEFAULT 4, walkInTableIds TEXT, reservationTableIds TEXT, eventTableIds TEXT)`);
@@ -100,31 +100,53 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`CREATE TABLE IF NOT EXISTS watchlist (id TEXT PRIMARY KEY, name TEXT, reason TEXT, description TEXT, status TEXT, evidenceLink TEXT, dateAdded DATETIME, resolvedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
       db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`);
 
-      // 🟢 SELF-HEALING COLUMN MIGRATIONS (Fixes 500 errors on older SQLite DB files)
+      // 🟢 SAFE SELF-HEALING COLUMN MIGRATIONS (No non-constant defaults to avoid SQLite errors)
       const resCols = [
-        'createdAt DATETIME DEFAULT CURRENT_TIMESTAMP',
+        'createdAt TEXT',
         'email TEXT',
         'refundStatus TEXT',
         'refundMethod TEXT',
         'refundNotes TEXT',
         'cancellationReason TEXT',
         'paymentRef TEXT',
-        'receiptImg TEXT'
+        'receiptImg TEXT',
+        'promoCode TEXT',
+        'discountAmount REAL DEFAULT 0',
+        'closureReason TEXT',
+        'closureId TEXT',
+        'originalReservationId TEXT',
+        'rescheduleCount INTEGER DEFAULT 0',
+        'lastNotificationId TEXT'
       ];
       resCols.forEach(col => {
         db.run(`ALTER TABLE reservations ADD COLUMN ${col}`, () => {});
       });
 
-      const newEventCols = [
+     const newEventCols = [
+        'duration TEXT',
         'bracketLink TEXT',
         'minParticipants INTEGER DEFAULT 8',
+        'maxParticipants INTEGER DEFAULT 32',
+        'allowReservations INTEGER DEFAULT 1',
         'reservationTableCount INTEGER DEFAULT 4',
+        'caterWalkIns INTEGER DEFAULT 1',
+        'walkInTableCount INTEGER DEFAULT 4',
         'walkInTableIds TEXT',
         'reservationTableIds TEXT',
-        'eventTableIds TEXT'
+        'eventTableIds TEXT',
+        'createdAt TEXT',
+        'isCancelled INTEGER DEFAULT 0',
+        'cancelReason TEXT'
       ];
       newEventCols.forEach(col => {
         db.run(`ALTER TABLE events ADD COLUMN ${col}`, () => {});
+      });
+      const historyCols = [
+        'status TEXT DEFAULT \'completed\'',
+        'closureReason TEXT'
+      ];
+      historyCols.forEach(col => {
+        db.run(`ALTER TABLE session_history ADD COLUMN ${col}`, () => {});
       });
 
       db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) SELECT key_name, setting_value FROM system_settings`, (err) => {
@@ -196,14 +218,14 @@ app.get('/api/tables', (req, res) => {
 });
 
 // 🟢 CRASH-PROOF RESERVATIONS GET ROUTE
-// Uses rowid DESC to avoid "no such column: createdAt" errors on older SQLite schemas
+// Uses ORDER BY rowid DESC to prevent "no such column: createdAt" SQLite errors
 app.get('/api/reservations', (req, res) => {
   db.all(`SELECT * FROM reservations ORDER BY rowid DESC`, [], (err, rows) => {
     if (err) {
       console.error("❌ CRASH IN /api/reservations:", err.message);
       return res.status(500).json({ error: err.message });
     }
-    // Normalize snake_case and camelCase so frontend always receives valid keys
+    // Safe normalization so frontend always gets camelCase keys regardless of underlying column name
     const normalized = rows.map(r => ({
       ...r,
       id: r.id,
@@ -256,16 +278,19 @@ app.get('/api/activities', (req, res) => {
 });
 
 app.get('/api/events', (req, res) => {
-  db.all(`SELECT * FROM events`, [], (err, rows) => {
+  db.all(`SELECT * FROM events ORDER BY rowid DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(e => ({ 
-      ...e, 
+      ...e,
+      id: e.id,
+      duration: e.duration || 'Whole Day',
       slotsFull: e.slotsFull === 1, 
       allowReservations: e.allowReservations !== 0,
       caterWalkIns: e.caterWalkIns !== 0,
       walkInTableCount: e.walkInTableCount ?? 4,
       reservationTableCount: e.reservationTableCount ?? 4,
       minParticipants: e.minParticipants ?? 8,
+      maxParticipants: e.maxParticipants ?? 32,
       attachments: safeParseJSON(e.attachments, []),
       walkInTableIds: safeParseJSON(e.walkInTableIds, []),
       reservationTableIds: safeParseJSON(e.reservationTableIds, []),
@@ -318,7 +343,12 @@ app.get('/api/cms', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     const config = {};
     rows.forEach(row => {
-      config[row.keyName] = row.keyName === 'heroImages' ? safeParseJSON(row.settingValue, []) : row.settingValue;
+      const val = row.settingValue;
+      if (val && (val.startsWith('[') || val.startsWith('{'))) {
+        config[row.keyName] = safeParseJSON(val, val);
+      } else {
+        config[row.keyName] = val;
+      }
     });
     res.json(config);
   });
@@ -341,6 +371,37 @@ app.get('/api/watchlist', (req, res) => {
 // ====================================================================
 // 📥 WRITE ROUTES (POST/PUT/DELETE)
 // ====================================================================
+app.put('/api/cms', (req, res) => {
+  const payload = req.body;
+  const keys = Object.keys(payload);
+  if (keys.length === 0) return res.json({ message: "No CMS content to update" });
+  let index = 0;
+  let errors = [];
+  
+  const processNextKey = () => {
+    if (index >= keys.length) {
+      if (errors.length > 0) return res.status(500).json({ error: "Some CMS fields failed to save.", details: errors });
+      return res.json({ message: "CMS content updated successfully." });
+    }
+    const key = keys[index];
+    const rawVal = payload[key];
+    // Automatically serialize arrays/objects (like heroImages array) into JSON strings for SQLite
+    const value = (typeof rawVal === 'object' && rawVal !== null) ? JSON.stringify(rawVal) : String(rawVal ?? '');
+    
+    db.run(
+      `INSERT INTO cms (keyName, settingValue, updatedAt) VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`,
+      [key, value],
+      function(err) {
+        if (err) { errors.push({ key, error: err.message }); }
+        index++;
+        processNextKey();
+      }
+    );
+  };
+  processNextKey();
+});
+
 app.post('/api/sync-to-cloud', async (req, res) => {
   let syncErrors = [];
   try {
@@ -365,17 +426,36 @@ app.post('/api/sync-to-cloud', async (req, res) => {
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
       syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
       syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: r.is_active ? 1 : 0, is_limited_uses: r.is_limited_uses ? 1 : 0, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
-      syncTable('events', 'events', r => ({ id: r.id, title: r.title, date: r.date || null, type: r.type, description: r.description, registrationLink: r.registrationLink, maxParticipants: r.maxParticipants, slotsFull: r.slotsFull ? 1 : 0, attachments: r.attachments, allowReservations: r.allowReservations !== 0 ? 1 : 0, caterWalkIns: r.caterWalkIns !== 0 ? 1 : 0, walkInTableCount: r.walkInTableCount }), 'id'),
+      syncTable('events', 'events', r => ({ 
+        id: r.id, 
+        title: r.title, 
+        date: r.date || null, 
+        type: r.type, 
+        description: r.description || '', 
+        duration: r.duration || 'Whole Day',
+        registrationLink: r.registrationLink || null, 
+        bracketLink: r.bracketLink || null,
+        minParticipants: r.minParticipants || 8,
+        maxParticipants: r.maxParticipants || 32,
+        slotsFull: r.slotsFull ? 1 : 0, 
+        attachments: r.attachments || null, 
+        allowReservations: r.allowReservations !== 0 ? 1 : 0, 
+        reservationTableCount: r.reservationTableCount || 4,
+        caterWalkIns: r.caterWalkIns !== 0 ? 1 : 0, 
+        walkInTableCount: r.walkInTableCount || 4,
+        isCancelled: r.isCancelled ? 1 : 0,
+        cancelReason: r.cancelReason || null
+      }), 'id'),
       syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: r.is_full_day ? 1 : 0, open_time: r.open_time, close_time: r.close_time }), 'id'),
       syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id'),
       syncTable('reservations', 'reservations', r => ({
-        id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, email: r.email || null,
-        date: r.date, timeSlot: r.timeSlot, durationHours: r.durationHours, partySize: r.partySize,
-        status: r.status, totalAmount: r.totalAmount, downPaymentAmount: r.downPaymentAmount,
-        downPaymentPaid: r.downPaymentPaid ? 1 : 0, balancePaid: r.balancePaid ? 1 : 0,
-        paymentRef: r.paymentRef || null, receiptImg: r.receiptImg || null, cancellationReason: r.cancellationReason || null,
-        refundStatus: r.refundStatus || null, refundMethod: r.refundMethod || null, refundNotes: r.refundNotes || null,
-        createdAt: r.createdAt || new Date().toISOString()
+        id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email || null,
+        date: r.date || r.reservation_date, timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size,
+        status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount,
+        downPaymentPaid: (r.downPaymentPaid === 1 || r.down_payment_paid === 1) ? 1 : 0, balancePaid: (r.balancePaid === 1 || r.balance_paid === 1) ? 1 : 0,
+        paymentRef: r.paymentRef || r.payment_ref || null, receiptImg: r.receiptImg || r.receipt_img_url || null, cancellationReason: r.cancellationReason || r.cancellation_reason || null,
+        refundStatus: r.refundStatus || r.refund_status || null, refundMethod: r.refundMethod || r.refund_method || null, refundNotes: r.refundNotes || r.refund_notes || null,
+        createdAt: r.createdAt || r.created_at || new Date().toISOString()
       }), 'id'),
       syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime || new Date().toISOString() }), 'id'),
       syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date || new Date().toISOString() }), 'id')
@@ -476,19 +556,30 @@ app.post('/api/queue', (req, res) => {
 
 app.post('/api/reservations', (req, res) => {
   const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
-  db.run(`INSERT INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
-  [id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef, receiptImg], function(err) {
+  const createdAt = new Date().toISOString();
+  db.run(`INSERT INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+  [id, customerName, contactNumber, email || null, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef || null, receiptImg || null, createdAt], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: 'Reservation created successfully', id: id });
   });
 });
 
 app.post('/api/events', (req, res) => {
-  const { id, title, date, type, description, registrationLink, bracketLink, minParticipants, maxParticipants, slotsFull, attachments, allowReservations, reservationTableCount, caterWalkIns, walkInTableCount, walkInTableIds, reservationTableIds, eventTableIds } = req.body;
+  const { 
+    title, date, type, description, duration, registrationLink, bracketLink, 
+    minParticipants, maxParticipants, slotsFull, attachments, allowReservations, 
+    reservationTableCount, caterWalkIns, walkInTableCount, walkInTableIds, 
+    reservationTableIds, eventTableIds 
+  } = req.body;
+
+  // Auto-generate ID if not provided by frontend
+  const id = req.body.id || ('ev_' + Date.now() + '_' + Math.round(Math.random() * 1000));
+  const createdAt = new Date().toISOString();
+
   db.run(
-    `INSERT INTO events (id, title, date, type, description, registrationLink, bracketLink, minParticipants, maxParticipants, slotsFull, attachments, allowReservations, reservationTableCount, caterWalkIns, walkInTableCount, walkInTableIds, reservationTableIds, eventTableIds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO events (id, title, date, type, description, duration, registrationLink, bracketLink, minParticipants, maxParticipants, slotsFull, attachments, allowReservations, reservationTableCount, caterWalkIns, walkInTableCount, walkInTableIds, reservationTableIds, eventTableIds, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      id, title, date, type, description,
+      id, title, date, type, description, duration || 'Whole Day',
       registrationLink || '', bracketLink || '',
       minParticipants || 8, maxParticipants || 32, slotsFull ? 1 : 0,
       JSON.stringify(attachments || []),
@@ -496,10 +587,14 @@ app.post('/api/events', (req, res) => {
       caterWalkIns ? 1 : 0, walkInTableCount || 4,
       JSON.stringify(walkInTableIds || []),
       JSON.stringify(reservationTableIds || []),
-      JSON.stringify(eventTableIds || [])
+      JSON.stringify(eventTableIds || []),
+      createdAt
     ],
     function (err) {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) {
+        console.error("❌ CRASH IN /api/events POST:", err.message);
+        return res.status(500).json({ error: err.message });
+      }
       res.status(201).json({ message: "Event created.", id });
     }
   );

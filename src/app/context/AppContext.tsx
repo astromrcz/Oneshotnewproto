@@ -661,11 +661,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSessionHistory(prev => [newItem, ...prev]);
     syncToDB('/api/session-history', 'POST', newItem, `Logged session history`).then(runCloudBackup).catch(()=>{});
     
+    // 🟢 SAFE CONVERSION: Prevents "toISOString is not a function" whether passed as a Date or an SQLite ISO string
+    const startTimeStr = newItem.startTime ? new Date(newItem.startTime).toISOString() : new Date().toISOString();
+    const endTimeStr = newItem.endTime ? new Date(newItem.endTime).toISOString() : new Date().toISOString();
+
     supabase.from('session_history').insert([{
       ...newItem, 
-      startTime: newItem.startTime.toISOString(), 
-      endTime: newItem.endTime.toISOString(),
-      orders: JSON.stringify(newItem.orders)
+      startTime: startTimeStr, 
+      endTime: endTimeStr,
+      orders: JSON.stringify(newItem.orders || [])
     }]).then();
   };
 

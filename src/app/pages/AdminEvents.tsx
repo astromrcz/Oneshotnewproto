@@ -76,6 +76,8 @@ export function AdminEvents() {
 
   // Event Form State
   const [showEventModal, setShowEventModal] = useState(false);
+  const [cancelEventModal, setCancelEventModal] = useState<{ id: string; title: string; date: string } | null>(null);
+  const [eventCancelReason, setEventCancelReason] = useState('Schedule conflict / unforeseen circumstances');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [eventForm, setEventForm] = useState<FormState>(emptyEventForm);
   const [modalMonth, setModalMonth] = useState(new Date()); 
@@ -185,6 +187,24 @@ export function AdminEvents() {
   };
 
   const openEventEdit = (ev: any) => {
+    const eventDates = ev.date ? ev.date.split(',').map((d: string) => d.trim()) : [];
+    const lastDate = [...eventDates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime()).pop();
+    const isPastEvent = lastDate ? isBefore(new Date(lastDate), todayStart) : false;
+    const isOngoingEvent = eventDates.some((d: string) => isSameDay(new Date(d), new Date()));
+
+    if (ev.isCancelled) {
+      alert("Editing is disabled: This event has already been cancelled.");
+      return;
+    }
+    if (isPastEvent) {
+      alert("Editing is disabled: This event is already completed.");
+      return;
+    }
+    if (isOngoingEvent) {
+      alert("Editing is disabled: This event is currently ongoing.");
+      return;
+    }
+
     setEditingEventId(ev.id);
     const durationParts = ev.duration ? ev.duration.split(' - ') : [];
     const savedDates = ev.date ? ev.date.split(',') : [];
@@ -215,7 +235,8 @@ export function AdminEvents() {
     });
     
     if (savedDates.length > 0) setModalMonth(new Date(savedDates[0]));
-    setDayActionDate(null); setShowEventModal(true);
+    setDayActionDate(null); 
+    setShowEventModal(true);
   };
 
   const openClosureCreate = (d: Date) => {
@@ -366,6 +387,10 @@ export function AdminEvents() {
         alert("Min and Max participants must be greater than 0.");
         return;
       }
+      if (minP >= 100 || maxP >= 100) {
+        alert("Participants must be less than 100 (maximum establishment capacity is 99).");
+        return;
+      }
       if (minP > maxP) {
         alert(`Minimum participants (${minP}) cannot be greater than Maximum participants (${maxP}).`);
         return;
@@ -376,6 +401,49 @@ export function AdminEvents() {
     if (highwayClosed) {
       alert("You cannot schedule an event on a date that is marked as Closed.");
       return;
+    }
+
+    const parseTime = (timeStr: string) => {
+      const [h = 0, m = 0] = timeStr.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    for (const d of eventForm.dates) {
+      const conflictingEvent = events.find((ev: any) => {
+        // Ignore the event currently being edited
+        if (editingEventId && ev.id === editingEventId) return false;
+
+        // Check if the existing event occurs on this date
+        const evDates = ev.date ? ev.date.split(',').map((str: string) => str.trim()) : [];
+        if (!evDates.includes(d)) return false;
+
+        // If either the new event OR the existing event is "Whole Day", it is an instant conflict
+        const isEvWholeDay = ev.duration === 'Whole Day' || !ev.duration;
+        if (eventForm.isWholeDay || isEvWholeDay) {
+          return true;
+        }
+
+        // Both are specific time slots -> check if the hours overlap
+        const [evStartStr = '18:00', evEndStr = '22:00'] = ev.duration.split('-').map((s: string) => s.trim());
+        
+        const newStart = parseTime(eventForm.startTime);
+        let newEnd = parseTime(eventForm.endTime);
+        if (newEnd <= newStart) newEnd += 24 * 60; // Handles schedules crossing midnight
+
+        const evStart = parseTime(evStartStr);
+        let evEnd = parseTime(evEndStr);
+        if (evEnd <= evStart) evEnd += 24 * 60; // Handles schedules crossing midnight
+
+        // Returns true if the two time ranges overlap
+        return newStart < evEnd && newEnd > evStart;
+      });
+
+      if (conflictingEvent) {
+        alert(
+          `Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${conflictingEvent.duration || 'Whole Day'}). Please pick a different date or time.`
+        );
+        return;
+      }
     }
 
     if (!editingEventId) {
@@ -646,7 +714,14 @@ export function AdminEvents() {
   };
 
   const renderEventsGrid = () => {
-    const customEvents = events.filter((e: any) => e.type !== 'Holiday');
+    const customEvents = events
+      .filter((e: any) => e.type !== 'Holiday')
+      .sort((a: any, b: any) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        if (timeA !== timeB) return timeB - timeA;
+        return String(b.id || '').localeCompare(String(a.id || ''));
+      });
     const holidays = events.filter((e: any) => e.type === 'Holiday');
 
     return (
@@ -677,10 +752,11 @@ export function AdminEvents() {
                 )}
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start gap-2">
-                    <CardTitle className={`text-base ${isPastEvent ? 'text-neutral-400' : 'text-neutral-200'}`}>{ev.title}</CardTitle>
+                    <CardTitle className={`text-base ${isPastEvent || ev.isCancelled ? 'text-neutral-400 line-through' : 'text-neutral-200'}`}>{ev.title}</CardTitle>
                     <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
                       <span className="text-[10px] px-2 py-1 rounded-full whitespace-nowrap bg-neutral-800 text-neutral-400">{ev.type}</span>
-                      {ev.slotsFull && <span className="text-[10px] bg-rose-900/50 text-rose-400 border border-rose-800/40 px-2 py-1 rounded-full font-bold whitespace-nowrap">FULL</span>}
+                      {ev.isCancelled && <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-700/50 px-2 py-1 rounded-full font-bold whitespace-nowrap">CANCELLED</span>}
+                      {!ev.isCancelled && ev.slotsFull && <span className="text-[10px] bg-rose-900/50 text-rose-400 border border-rose-800/40 px-2 py-1 rounded-full font-bold whitespace-nowrap">FULL</span>}
                     </div>
                   </div>
                   <CardDescription className={`text-xs font-medium flex items-center gap-2 ${isPastEvent ? 'text-neutral-600' : 'text-amber-500'}`}>
@@ -746,17 +822,43 @@ export function AdminEvents() {
                   )}
 
                   <div className="flex justify-end gap-2 mt-auto pt-4">
-                    {!isPastEvent ? (
+                    {ev.isCancelled ? (
+                      <span className="text-[10px] text-rose-400 uppercase tracking-widest font-bold bg-rose-950/30 border border-rose-900/50 px-3 py-1.5 rounded-lg w-full text-center">
+                        Event Cancelled
+                      </span>
+                    ) : isPastEvent ? (
+                      <span className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold bg-neutral-950 border border-neutral-800 px-3 py-1.5 rounded-lg w-full text-center">
+                        Event Completed
+                      </span>
+                    ) : (
                       <>
-                        <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-blue-400 hover:bg-blue-950/30" onClick={() => openEventEdit(ev)}>
-                          <Edit2 size={14} />
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30" onClick={() => deleteEvent(ev.id)}>
-                          <Trash2 size={14} />
+                        {(() => {
+                          const eventDates = ev.date ? ev.date.split(',').map((d: string) => d.trim()) : [];
+                          const isOngoingEvent = eventDates.some((d: string) => isSameDay(new Date(d), new Date()));
+
+                          return !isOngoingEvent ? (
+                            <Button variant="ghost" size="sm" className="h-8 text-neutral-500 hover:text-blue-400 hover:bg-blue-950/30" onClick={() => openEventEdit(ev)} title="Edit Event">
+                              <Edit2 size={14} />
+                            </Button>
+                          ) : (
+                            <span className="text-[10px] text-amber-400 uppercase tracking-wider font-bold bg-amber-950/30 border border-amber-900/50 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                              Ongoing (Edit Locked)
+                            </span>
+                          );
+                        })()}
+
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-8 px-2.5 text-rose-500 hover:text-rose-400 hover:bg-rose-950/30 font-semibold text-xs flex items-center gap-1" 
+                          onClick={() => {
+                            setCancelEventModal({ id: ev.id, title: ev.title, date: dateDisplay });
+                            setEventCancelReason('Schedule conflict / unforeseen circumstances');
+                          }}
+                        >
+                          <AlertTriangle size={13} /> Cancel Event
                         </Button>
                       </>
-                    ) : (
-                      <span className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold bg-neutral-950 border border-neutral-800 px-3 py-1.5 rounded-lg w-full text-center">Event Completed</span>
                     )}
                   </div>
                 </CardContent>
@@ -1077,16 +1179,34 @@ export function AdminEvents() {
                             <button onClick={() => openClosureEdit(dayCls)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
                           </div>
                         )}
-                        {dayEvs.map((e: any) => (
-                          <div key={e.id} className="flex items-center justify-between text-xs mt-2">
-                            <span className={`font-semibold truncate pr-2 ${e.type === 'Holiday' ? 'text-sky-400' : 'text-amber-400'}`}>
-                              {e.type === 'Holiday' ? '🏛️ Holiday: ' : 'Event: '} {e.title}
-                            </span>
-                            {e.type !== 'Holiday' && (
-                               <button onClick={() => openEventEdit(e)} className="text-neutral-500 hover:text-white flex-shrink-0"><Edit2 size={12}/></button>
-                            )}
-                          </div>
-                        ))}
+                        {dayEvs.map((e: any) => {
+                          const evDates = e.date ? e.date.split(',').map((d: string) => d.trim()) : [];
+                          const lastDate = [...evDates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime()).pop();
+                          const isPastEv = lastDate ? isBefore(new Date(lastDate), todayStart) : false;
+                          const isOngoingEv = evDates.some((d: string) => isSameDay(new Date(d), new Date()));
+                          const isLockedEv = e.isCancelled || isPastEv || isOngoingEv;
+
+                          return (
+                            <div key={e.id} className="flex items-center justify-between text-xs mt-2">
+                              <span className={`font-semibold truncate pr-2 ${
+                                e.type === 'Holiday' ? 'text-sky-400' : e.isCancelled ? 'text-neutral-500 line-through' : 'text-amber-400'
+                              }`}>
+                                {e.type === 'Holiday' ? '🏛️ Holiday: ' : 'Event: '} {e.title}
+                              </span>
+                              {e.type !== 'Holiday' && (
+                                isLockedEv ? (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-neutral-900 text-neutral-500 border border-neutral-800">
+                                    {e.isCancelled ? 'Cancelled' : isPastEv ? 'Completed' : 'Ongoing'}
+                                  </span>
+                                ) : (
+                                  <button onClick={() => openEventEdit(e)} className="text-neutral-500 hover:text-white flex-shrink-0" title="Edit Event">
+                                    <Edit2 size={12}/>
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          );
+                        })}
                         {dayPrs.map((p: any) => (
                           <div key={p.id} className="flex items-center justify-between text-xs mt-2">
                             <span className="text-violet-400 font-semibold truncate pr-2">Promo Expiry: {p.code}</span>
@@ -1348,11 +1468,17 @@ export function AdminEvents() {
                           <Users size={11} /> Min Pax {(eventForm.type === 'Tournament' || eventForm.type === 'League') && <span className="text-rose-500">*</span>}
                         </label>
                         <Input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={2}
                           value={eventForm.minParticipants}
-                          onChange={e => setEventForm({...eventForm, minParticipants: e.target.value})}
+                          onChange={e => {
+                            const cleanDigits = e.target.value.replace(/\D/g, '').slice(0, 2);
+                            const num = parseInt(cleanDigits, 10);
+                            const val = !isNaN(num) && num >= 100 ? '99' : cleanDigits;
+                            setEventForm({ ...eventForm, minParticipants: val });
+                          }}
                           placeholder="8"
-                          min="1"
                           className="bg-neutral-950 border-neutral-800"
                         />
                       </div>
@@ -1361,11 +1487,17 @@ export function AdminEvents() {
                           <Users size={11} /> Max Pax {(eventForm.type === 'Tournament' || eventForm.type === 'League') && <span className="text-rose-500">*</span>}
                         </label>
                         <Input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={2}
                           value={eventForm.maxParticipants}
-                          onChange={e => setEventForm({...eventForm, maxParticipants: e.target.value})}
+                          onChange={e => {
+                            const cleanDigits = e.target.value.replace(/\D/g, '').slice(0, 2);
+                            const num = parseInt(cleanDigits, 10);
+                            const val = !isNaN(num) && num >= 100 ? '99' : cleanDigits;
+                            setEventForm({ ...eventForm, maxParticipants: val });
+                          }}
                           placeholder="32"
-                          min="1"
                           className="bg-neutral-950 border-neutral-800"
                         />
                       </div>
@@ -1670,6 +1802,73 @@ export function AdminEvents() {
                 <button type="button" onClick={() => setShowPromoConfirm(false)} className="px-4 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-sm rounded-xl transition-colors border border-neutral-800">Back to Edit</button>
                 <button type="button" onClick={executePromoSave} className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl font-semibold py-2.5 shadow-lg shadow-violet-900/30 transition-colors">Confirm & Publish</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 🟢 NEW: Cancel Event Confirmation Modal */}
+      {cancelEventModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-rose-900/50 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2 text-rose-400 font-bold text-sm border-b border-neutral-800 pb-3">
+              <AlertTriangle size={18} className="text-rose-500" />
+              <span>Confirm Event Cancellation</span>
+            </div>
+            
+            <p className="text-xs text-neutral-300 leading-relaxed">
+              You are about to cancel <strong className="text-white">"{cancelEventModal.title}"</strong> scheduled for <strong className="text-amber-400">{cancelEventModal.date}</strong>.
+            </p>
+
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-3.5 space-y-1 text-xs text-neutral-400">
+              <p className="font-bold text-neutral-200">What happens when an event is canceled?</p>
+              <ul className="list-disc list-inside space-y-1 text-[11px] text-neutral-400 pl-1 pt-1">
+                <li>Allocated tournament tables will be instantly released back into the public inventory.</li>
+                <li>Online bookings and walk-ins will be re-enabled for those tables.</li>
+                <li>External participant notifications must be handled via your registration platform.</li>
+              </ul>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Reason for Cancellation</label>
+              <select
+                value={eventCancelReason}
+                onChange={e => setEventCancelReason(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-200 outline-none focus:border-rose-500"
+              >
+                <option value="Schedule conflict / unforeseen circumstances">Schedule conflict / unforeseen circumstances</option>
+                <option value="Insufficient participant registrations">Insufficient participant registrations</option>
+                <option value="Venue maintenance / hardware issue">Venue maintenance / hardware issue</option>
+                <option value="Emergency closure / bad weather">Emergency closure / bad weather</option>
+              </select>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setCancelEventModal(null)}
+                className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-semibold transition-colors border border-neutral-800"
+              >
+                Keep Event
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  updateEvent(cancelEventModal.id, { 
+                    isCancelled: true, 
+                    cancelReason: eventCancelReason,
+                    allowReservations: true,
+                    reservationTableCount: 0,
+                    caterWalkIns: true,
+                    walkInTableCount: 0,
+                    eventTableIds: []
+                  });
+                  setCancelEventModal(null);
+                  flash(`Event "${cancelEventModal.title}" marked as cancelled and tables released.`);
+                }}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-rose-950/40"
+              >
+                Confirm Cancellation
+              </button>
             </div>
           </div>
         </div>

@@ -53,6 +53,15 @@ export function AdminSiteSettings() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
+    // 🟢 Ask confirmation before replacing an existing About Us image
+    if (target === 'about' && form.aboutImage) {
+      const confirmReplace = window.confirm("Are you sure you want to replace the existing About Us featured image on the live website?");
+      if (!confirmReplace) {
+        e.target.value = '';
+        return;
+      }
+    }
+
     setUploading(true);
     try {
       for (const file of files) {
@@ -90,7 +99,13 @@ export function AdminSiteSettings() {
     }
   };
 
+  // 🟢 Ask confirmation before removing a Hero Gallery image
   const removeHeroImage = (indexToRemove: number) => {
+    const isConfirmed = window.confirm(
+      "Are you sure you want to remove this image from the live Hero Gallery?"
+    );
+    if (!isConfirmed) return;
+
     setForm((prev: any) => ({
       ...prev,
       heroImages: (prev.heroImages || []).filter((_: string, idx: number) => idx !== indexToRemove)

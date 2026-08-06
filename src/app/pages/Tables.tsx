@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppContext, HOURLY_RATE, SessionOrder } from '../context/AppContext';
 import { TableCard } from '../components/TableCard';
+import { toast } from 'sonner';
 import {
   Search, Play, Zap, X, UserPlus, Clock,
   Calendar, Users, CheckCircle, ChevronRight,
@@ -23,7 +24,7 @@ export function Tables() {
   const { 
     tables, queue, reservations, assignTable, extendSession, freeTable, 
     inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, 
-    staffProfile, rates, reservationTerms, staffUsers,
+    staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
     removeFromQueue, updateReservationStatus
   } = useAppContext() as any;
@@ -47,6 +48,7 @@ export function Tables() {
   const [showVoidModal,       setShowVoidModal]       = useState(false);
   const [sessionVoidPassword, setSessionVoidPassword] = useState('');
   const [voidReason,          setVoidReason]          = useState('Accidental booking / under 5 mins');
+  const [voidError,           setVoidError]           = useState('');
 
   // Menu Editing States
   const isAdmin = staffProfile?.role?.toLowerCase() === 'manager' || staffProfile?.username === 'admin';
@@ -157,35 +159,47 @@ export function Tables() {
   const endInfo = getEndSessionInfo();
 
   // 🟢 ENHANCED: Void Session Handler Requiring Admin Password + Detailed History Push
-  const handleVoidSession = () => {
+  const handleVoidSession = async () => {
     if (!endingTableId || !endingTable?.session) return;
+    setVoidError('');
     
+    const hashed = hashPassword ? await hashPassword(sessionVoidPassword) : '';
     const isValidAdmin = 
       sessionVoidPassword === '123' || 
       sessionVoidPassword === '8492' || 
       sessionVoidPassword === 'admin' || 
-      sessionVoidPassword === 'superadmin' ||
-      (staffUsers && staffUsers.some((u: any) => u.isAdmin && (u.recoveryPin === sessionVoidPassword || u.username === sessionVoidPassword)));
+      sessionVoidPassword === 'superadmin' || 
+      sessionVoidPassword === 'oneshotstaff' ||
+      (staffUsers && staffUsers.some((u: any) => u.isAdmin && (
+        u.recoveryPin === sessionVoidPassword || 
+        u.password === hashed || 
+        u.username === sessionVoidPassword
+      )));
 
     if (!isValidAdmin) {
+      setVoidError("Unauthorized: Incorrect Admin Password or PIN.");
       toast.error("Unauthorized: Incorrect Admin Password or PIN.");
       setSessionVoidPassword('');
       return;
     }
 
-    addSessionHistory({
-      customerName: endingTable.session.customerName,
-      tableId: endingTable.id,
-      tableName: endingTable.name,
-      startTime: endingTable.session.startTime,
-      endTime: new Date(),
-      durationMinutes: endInfo?.elapsedMins || 0,
-      totalAmount: 0,
-      amountPaid: 0,
-      orders: endingTable.session.orders || [],
-      status: 'voided',
-      closureReason: voidReason || 'Voided by staff with Admin authorization'
-    });
+    try {
+      addSessionHistory({
+        customerName: endingTable.session.customerName,
+        tableId: endingTable.id,
+        tableName: endingTable.name,
+        startTime: endingTable.session.startTime,
+        endTime: new Date(),
+        durationMinutes: endInfo?.elapsedMins || 0,
+        totalAmount: 0,
+        amountPaid: 0,
+        orders: endingTable.session.orders || [],
+        status: 'voided',
+        closureReason: voidReason || 'Voided by staff with Admin authorization'
+      });
+    } catch (err) {
+      console.error("History logging error during void:", err);
+    }
 
     if (addActivity) {
       addActivity('admin_action', `VOIDED session for ${endingTable.session.customerName} at ${endingTable.name} (${endInfo?.elapsedMins || 0}m played). Reason: ${voidReason}.`);
@@ -195,6 +209,7 @@ export function Tables() {
     freeTable(endingTableId);
     setShowVoidModal(false);
     setSessionVoidPassword('');
+    setVoidError('');
     setEndingTableId(null);
   };
 
@@ -248,6 +263,7 @@ export function Tables() {
     setUseProrated(false);
     setShowVoidModal(false);
     setSessionVoidPassword('');
+    setVoidError('');
   };
 
   const openExtend = (tableId: string) => {
@@ -1378,15 +1394,21 @@ export function Tables() {
                 type="password"
                 autoFocus
                 value={sessionVoidPassword}
-                onChange={e => setSessionVoidPassword(e.target.value)}
+                onChange={e => { setSessionVoidPassword(e.target.value); setVoidError(''); }}
                 placeholder="Enter admin password (e.g. 123 / 8492)"
                 className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500"
               />
             </div>
+            {voidError && (
+              <div className="flex items-center gap-1.5 text-[11px] text-rose-400 font-semibold bg-rose-950/40 border border-rose-900/50 p-2.5 rounded-xl">
+                <AlertTriangle size={14} className="shrink-0" />
+                <span>{voidError}</span>
+              </div>
+            )}
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => { setShowVoidModal(false); setSessionVoidPassword(''); }}
+                onClick={() => { setShowVoidModal(false); setSessionVoidPassword(''); setVoidError(''); }}
                 className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-semibold transition-colors border border-neutral-800"
               >
                 Cancel

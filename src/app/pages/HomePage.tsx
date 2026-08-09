@@ -1508,22 +1508,22 @@ export function HomePage() {
               </div>
 
               <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
-                <h3 className="text-white font-semibold mb-4">Reservation Policies & Terms</h3>
+                <h3 className="text-white font-semibold mb-4">Booking Policies & Terms</h3>
                 <div className="flex gap-3 bg-emerald-950/40 border border-emerald-700/30 rounded-xl p-4 mb-5">
                   <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-600/20 flex items-center justify-center mt-0.5"><Info size={13} className="text-emerald-400" /></div>
                   <div>
-                    <p className="text-emerald-300 text-xs font-semibold mb-1">Reservation Redemption Policy</p>
-                    <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled before or after your game</span> — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
+                    <p className="text-emerald-300 text-xs font-semibold mb-1">Payment Policy</p>
+                    <p className="text-neutral-400 text-xs leading-relaxed">After securing your slot with a {rates?.downPaymentPercent ?? 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled before or after your session at the venue</span> — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   {[
-                    { label: 'Reservation Rule', value: `Requires at least ${reservationTerms.advanceBookingHours || 1} hour(s) advance notice.` },
+                    { label: 'Advance Notice', value: `At least ${reservationTerms.advanceBookingHours || 1} hour(s) before play.` },
                     { label: 'Online Booking Hours', value: bookingHoursDisplay },
-                    { label: 'Minimum Booking', value: `${reservationTerms.minHours || 1} hour(s)` },
-                    { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
-                    { label: 'Grace Period', value: '15 minutes' },
-                    { label: 'Cancellation Policy', value: reservationTerms.cancellationPolicy },
+                    { label: 'Minimum Booking Hour/s', value: `${reservationTerms.minHours || 1} hour(s)` },
+                    { label: 'Maximum Booking Hour/s', value: 'Depends on closing cut-off' },
+                    { label: 'Late Grace Period', value: '15 minutes' },
+                    { label: 'Booking Policy', value: reservationTerms.cancellationPolicy },
                   ].map(({ label, value }) => (
                     <div key={label} className="flex justify-between py-2 border-b border-neutral-800/60"><span className="text-neutral-500">{label}</span><span className="text-neutral-200 font-medium text-right ml-2">{value}</span></div>
                   ))}
@@ -1845,7 +1845,7 @@ export function HomePage() {
 
                   <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mt-2 mb-5 max-h-44 overflow-y-auto">
                     <p className="text-xs font-bold text-white mb-3 flex items-center gap-1.5">
-                      <BookOpen size={12} className="text-emerald-500" /> Reservation Terms & Conditions
+                      <BookOpen size={12} className="text-emerald-500" /> Booking Policies & Terms
                     </p>
                     <ul className="space-y-2 text-[10px] text-neutral-400 leading-relaxed">
                       <li>• Minimum booking duration is {reservationTerms.minHours || 1} hour(s).</li>
@@ -1853,10 +1853,10 @@ export function HomePage() {
                       <li>• Online booking window: {fmt12(rates?.reservationStartTime || '12:00')} to {fmt12(((() => { const e = rates?.reservationEndTime || '02:00'; const [hh, mm] = e.split(':').map(Number); let em = hh*60 + (mm||0); const sm = (rates?.reservationStartTime||'12:00').split(':').map(Number); let smm = sm[0]*60 + (sm[1]||0); if (em <= smm) em += 24*60; return em - 60; })()))} (cutoff 1 hour before close)</li>
                       <li>• Store hours: {fmt12(rates?.reservationStartTime || '12:00')} — {fmt12(rates?.reservationEndTime || '02:00')}</li>
                       <li>• A {rates?.downPaymentPercent ?? 25}% down payment is required to secure your slot.</li>
-                      <li>• Remaining balance must be settled after your session.</li>
+                      <li>• Remaining balance must be settled at the venue.</li>
                       <li>• Online capacity limit: {rates?.onlineCapacityLimit ?? 70}% of tables (admin-configured)</li>
-                      <li>• {reservationTerms.cancellationPolicy}</li>
-                      <li>• {reservationTerms.termsAndConditions}</li>
+                      <li>• <strong>Booking Policy:</strong> {reservationTerms.cancellationPolicy}</li>
+                      <li>• <strong>General Terms:</strong> {reservationTerms.termsAndConditions}</li>
                     </ul>
                   </div>
 

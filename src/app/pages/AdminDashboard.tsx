@@ -103,36 +103,23 @@ export function AdminDashboard() {
   const activeAnn       = announcements.filter((a: any) => a.isActive).length;
   const upcomingClosed  = closedDates.filter((c: any) => new Date(c.date) >= new Date()).length;
   
-  const totalRevenue = 
+ const totalRevenue = 
     reservations.filter((r: any) => r.status === 'completed').reduce((s: number, r: any) => s + r.totalAmount, 0) +
     (sessionHistory || []).reduce((s: number, sh: any) => s + (sh.totalAmount || 0), 0);
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   const pendingReservations = reservations
-    .filter((r: any) => r.status === 'pending' || r.status === 'confirmed')
+    .filter((r: any) => {
+      if (r.status !== 'pending' && r.status !== 'confirmed') return false;
+      const resDate = new Date(r.date);
+      resDate.setHours(0, 0, 0, 0);
+      return resDate.getTime() >= todayStart.getTime();
+    })
     .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const handleWeatherSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if(locationQuery.trim()) {
-      toast.loading("Locating...", { id: 'weather-fetch' });
-      try {
-        const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationQuery.trim())}&count=1`);
-        const data = await res.json();
-        
-        if (data.results && data.results.length > 0) {
-          const { latitude, longitude, name } = data.results[0];
-          updateWeatherLocation(latitude.toString(), longitude.toString(), name);
-          toast.success(`Weather location updated to ${name}`, { id: 'weather-fetch' });
-        } else {
-          toast.error("Location not found. Please try a different city.", { id: 'weather-fetch' });
-        }
-      } catch (err) {
-        toast.error("Network error. Failed to update location.", { id: 'weather-fetch' });
-      }
-    }
-    setIsEditingWeather(false);
-    setLocationQuery('');
-  };
+  
 
   const handleManualSync = async () => {
     if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
@@ -169,7 +156,7 @@ export function AdminDashboard() {
     if (timeSinceSync > 24) {
        alerts.push({
          id: 'alert_sync', title: 'Cloud Sync Overdue',
-         desc: 'Local SQLite data has not been backed up to Supabase in over 24 hours. Run a manual sync to ensure data safety.',
+         desc: 'Local data has not been backed up to Cloud in over 24 hours. Run a manual sync to ensure data safety.',
          style: { box: 'bg-rose-950/20 border-rose-900/30', dot: 'bg-rose-500', title: 'text-rose-400', btn: 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 border-rose-500/20' },
          action: { label: 'Sync Now', onClick: handleManualSync }
        });

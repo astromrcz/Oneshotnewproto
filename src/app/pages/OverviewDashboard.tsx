@@ -192,18 +192,26 @@ export function OverviewDashboard() {
     return new Date() > end;
   });
 
-  const alertTables = tables.filter((t: any) => {
+ const alertTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
     const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     const secsLeft = differenceInSeconds(end, new Date());
     return secsLeft > 0 && secsLeft <= 900;
   });
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   const upcomingReservations = reservations
-    .filter((r: any) => (r.status === 'pending' || r.status === 'confirmed') && isFuture(new Date(r.date)))
+    .filter((r: any) => {
+      if (r.status !== 'pending' && r.status !== 'confirmed') return false;
+      const resDate = new Date(r.date);
+      resDate.setHours(0, 0, 0, 0);
+      return resDate.getTime() >= todayStart.getTime();
+    })
     .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 4);
-
+    
   const getReservationStatusColor = (status: string) => {
     switch (status) {
       case 'confirmed': return 'text-emerald-400 bg-emerald-500/10';

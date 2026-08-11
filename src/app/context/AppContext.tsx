@@ -87,6 +87,7 @@ export type Event = {
 };
 
 export type StaffProfile = {
+  id?: string;
   username: string; password: string; fullName: string; role: string; phone: string; joinedDate: string; avatarImg?: string; 
   isAdmin?: boolean; 
   email?: string;
@@ -224,7 +225,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
  const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
     const saved = sessionStorage.getItem('oneshot_staff_profile');
     return saved ? JSON.parse(saved) : { 
-      username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
+      id: '', username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
     };
   });
   
@@ -480,8 +481,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
     const actor = staffProfile?.fullName || 'System / Customer';
+    const actorId = staffProfile?.id || 'system';
     const detailedDescription = `${description} (Action by: ${actor})`;
-    const newActivity = { id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, type, description: detailedDescription, timestamp: new Date(), metadata };
+    const newActivity = { 
+      id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, 
+      type, 
+      description: detailedDescription, 
+      timestamp: new Date(), 
+      metadata: { ...metadata, actorId } 
+    };
     setActivities(prev => [newActivity, ...prev]);
     syncToDB('/api/activities', 'POST', newActivity, "Activity logged").then(runCloudBackup).catch(()=>{});
   };
@@ -689,7 +697,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
+      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
       
       // 🟢 Automatically sync online customer bookings & push offline POS data on Login
       await performLoginSync();
@@ -707,7 +715,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
-      updateStaffProfile({ fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
+      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
       
       // 🟢 Automatically sync online customer bookings & push offline POS data on Login
       await performLoginSync();

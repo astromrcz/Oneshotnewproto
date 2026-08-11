@@ -46,24 +46,37 @@ export function AdminUsers() {
 
   const openAdd = () => { setForm(blankForm); setShowPw(false); setShowForm(true); };
 
-  const handleSave = async (e: React.FormEvent) => {
+ const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const isUsernameTaken = staffUsers.some((u: any) => u.username.toLowerCase() === form.username.toLowerCase());
-    const hashedPw = await hashPassword(form.password);
-    
-    if (isUsernameTaken) { alert("Error: That username is already taken. Please choose another."); return; }
-    
-    if (!form.username || !form.fullName) {
+    if (!form.username || !form.fullName || !form.password) {
       alert("Please fill all required fields.");
       return;
     }
+
+    if (form.username.length < 4) {
+      alert("Username must be at least 4 characters long.");
+      return;
+    }
+
+    if (form.password.length < 8) {
+      alert("Password must be at least 8 characters long.");
+      return;
+    }
+    
+    const isUsernameTaken = staffUsers.some((u: any) => u.username.toLowerCase() === form.username.toLowerCase());
+    if (isUsernameTaken) { alert("Error: That username is already taken. Please choose another."); return; }
+    
+    const hashedPw = await hashPassword(form.password);
+    
+    // 🟢 NEW: Generate a random 4-digit PIN for offline recovery (1000 - 9999)
+    const generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
     
     const payload = {
       ...form,
       password: hashedPw,
       isActive: true,
-      recoveryPin: '', 
+      recoveryPin: generatedPin, 
       isFirstLogin: 1, 
     };
     
@@ -230,7 +243,7 @@ export function AdminUsers() {
           </div>
         ) : displayUsers.map((u: any) => {
           const rc = roleConfig(u.role);
-          const activityMentions = activities.filter((a: any) => a.description.toLowerCase().includes(u.fullName.toLowerCase()) || a.description.toLowerCase().includes(u.username.toLowerCase())).length;
+          const activityMentions = activities.filter((a: any) => a.metadata?.actorId === u.id).length;
           const performanceScore = activityMentions * 5;
 
           // Check if this card represents the currently logged-in admin
@@ -387,16 +400,44 @@ export function AdminUsers() {
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 text-sm">@</span>
                   <input
                     type="text"
+                    minLength={4}
                     maxLength={50}
                     value={form.username}
                     onChange={e => setForm(f => ({ ...f, username: e.target.value.toLowerCase().replace(/\s/g,'') }))}
                     required
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-7 pr-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors"
-                    placeholder="username (max 50 chars)"
+                    placeholder="Min 4 characters (no spaces)"
                   />
                 </div>
                 <div className="flex justify-end mt-1">
                   <span className="text-[10px] text-neutral-500 font-mono">{form.username.length}/50</span>
+                </div>
+              </div>
+              
+              <div>
+                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Password *</label>
+                <div className="relative">
+                  <input
+                    type={showPw ? 'text' : 'password'}
+                    minLength={8}
+                    maxLength={50}
+                    value={form.password}
+                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                    required
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 pr-10 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors"
+                    placeholder="Min 8 characters"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowPw(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
+                  >
+                    {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <div className="flex justify-end mt-1">
+                  <span className="text-[10px] text-neutral-500 font-mono">{form.password.length}/50</span>
                 </div>
               </div>
               

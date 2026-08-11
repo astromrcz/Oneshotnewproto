@@ -1,8 +1,12 @@
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   TableProperties, Users, Calendar, 
-  AlertTriangle, Clock, ChevronRight, CheckCircle2, ShieldAlert
+  AlertTriangle, Clock, ChevronRight, CheckCircle2, ShieldAlert,
+  Wifi, WifiOff, RefreshCw, Database, Download, Copy, KeyRound
 } from 'lucide-react';
 import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isFuture } from 'date-fns';
 
@@ -31,8 +35,129 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
 }
 
 export function OverviewDashboard() {
-  const { tables, queue, reservations, watchlist } = useAppContext() as any;
+  const { 
+    tables, queue, reservations, watchlist, 
+    staffUsers, promoCodes, announcements, closedDates, rates, 
+    isSystemOffline, refreshLiveMonitor, staffProfile
+  } = useAppContext() as any;
   const navigate = useNavigate();
+
+  // ── Connectivity & Local Backup State ─────────────────────────
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<Date>(new Date());
+  const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [backupSuccess, setBackupSuccess] = useState(false);
+  const [offlineSince, setOfflineSince] = useState<Date | null>(null);
+  
+  // ── Dashboard Recovery PIN State ──────────────────────────────
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [pinCopied, setPinCopied] = useState(false);
+  const [hasInteractedWithPin, setHasInteractedWithPin] = useState(false);
+
+  useEffect(() => {
+    if (staffProfile?.username) {
+      const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
+      if (!isBackedUp) {
+        setShowRecoveryModal(true);
+      }
+    }
+  }, [staffProfile]);
+
+  useEffect(() => {
+    const handleOnline = () => { setIsBrowserOffline(false); setOfflineSince(null); };
+    const handleOffline = () => { setIsBrowserOffline(true); setOfflineSince(new Date()); };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const isFullyOffline = isBrowserOffline || isSystemOffline;
+
+  useEffect(() => {
+    if (isFullyOffline && !offlineSince) setOfflineSince(new Date());
+    else if (!isFullyOffline && offlineSince) setOfflineSince(null);
+  }, [isFullyOffline, offlineSince]);
+
+  const handleRunLocalBackup = () => {
+    setIsBackingUp(true);
+    setBackupSuccess(false);
+    try {
+      const backupPayload = { timestamp: new Date().toISOString(), tables, queue, reservations, watchlist, staffUsers, promoCodes, announcements, closedDates, rates };
+      const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `oneshot-staff-backup-${format(new Date(), 'yyyy-MM-dd_HHmm')}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setBackupSuccess(true);
+      setTimeout(() => setBackupSuccess(false), 3000);
+    } catch (err) {
+      console.error('Backup failed:', err);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+      toast.error("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", { duration: 6000 });
+      return;
+    }
+
+    setIsSyncing(true);
+    toast.loading("Uploading local data to cloud...", { id: 'cloud-sync' });
+    try {
+      const res = await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.details || 'Supabase rejected the sync payload.');
+
+      if (refreshLiveMonitor) await refreshLiveMonitor();
+      setLastSync(new Date());
+      toast.success("Database successfully backed up to Cloud.", { id: 'cloud-sync' });
+      
+    } catch (e: any) {
+      toast.error(`Sync Failed: ${e.message}`, { id: 'cloud-sync', duration: 6000 });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDownloadPin = () => {
+    const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+    if (!targetUser?.recoveryPin) return;
+    
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Recovery PIN downloaded successfully!");
+    setHasInteractedWithPin(true);
+  };
+
+  const handleAcknowledgePin = () => {
+    if (staffProfile?.username) {
+      localStorage.setItem(`oneshot_pin_backed_up_${staffProfile.username}`, 'true');
+      setShowRecoveryModal(false);
+      toast.success("Recovery PIN safely backed up.");
+    }
+  };
 
   const activeWatchlist = watchlist?.filter((w: any) => w.status === 'active' && !w.isArchived) || [];
 
@@ -41,7 +166,6 @@ export function OverviewDashboard() {
   const reserved = tables.filter((t: any) => t.isActive && t.status === 'reserved').length;
   const waiting = queue.filter((q: any) => q.status === 'waiting').length;
 
-  // ── Wait time estimation ──────────────────────────────────────
   const waitingQueue = queue.filter((q: any) => q.status === 'waiting');
   const occupiedWithSession = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
 
@@ -92,8 +216,76 @@ export function OverviewDashboard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       
+      {/* ── System Connectivity & Database Backup Banner ── */}
+      <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3">
+          <div className={`p-2.5 rounded-xl flex-shrink-0 ${
+            isFullyOffline ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+          }`}>
+            {isFullyOffline ? <RefreshCw size={22} className="animate-spin" /> : <Wifi size={22} />}
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-300">
+                System Status
+              </span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                isFullyOffline 
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              }`}>
+                {isFullyOffline ? 'RECONNECTING TO CLOUD...' : 'ONLINE & SYNCED'}
+              </span>
+              <span className="text-neutral-700 hidden sm:inline">|</span>
+              <span className="text-[11px] text-neutral-400 font-medium flex items-center gap-1">
+                <Database size={11} className="text-emerald-500" /> Local Database Active
+              </span>
+            </div>
+            <p className="text-xs text-neutral-500 mt-1">
+              {isFullyOffline
+                ? `Cloud disconnected${offlineSince ? ` since ${format(offlineSince, 'hh:mm a')}` : ''}. Continually attempting to reconnect...`
+                : `Connected to Cloud Server. Last cloud sync completed at ${format(lastSync, 'hh:mm a')}.`}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 self-end lg:self-auto">
+          {backupSuccess && (
+            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 mr-1 animate-fade-in">
+              <CheckCircle2 size={14} /> Local JSON Saved
+            </span>
+          )}
+          
+          <button
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all border ${
+              isSyncing 
+                ? 'bg-neutral-900 text-neutral-500 border-neutral-800 cursor-wait' 
+                : 'bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border-emerald-600/20'
+            }`}
+          >
+            <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+            <span>{isSyncing ? 'Syncing to Cloud...' : 'Run Cloud Backup'}</span>
+          </button>
+
+          <button
+            onClick={handleRunLocalBackup}
+            disabled={isBackingUp}
+            className="flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700/60 text-neutral-200 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+          >
+            {isBackingUp ? (
+              <RefreshCw size={14} className="animate-spin text-amber-400" />
+            ) : (
+              <Download size={14} className="text-amber-400" />
+            )}
+            <span>Run Local Backup</span>
+          </button>
+        </div>
+      </div>
+
       {/* Alerts */}
       {(overtimeTables.length > 0 || alertTables.length > 0) && (
         <div className="space-y-2">
@@ -130,7 +322,7 @@ export function OverviewDashboard() {
         <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables')} />
       </div>
 
-      {/* Table Grid Quick View (UPGRADED HIGH-CONTRAST PALETTE) */}
+      {/* Table Grid Quick View */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-neutral-300">Table Status</h2>
@@ -172,7 +364,6 @@ export function OverviewDashboard() {
           })}
         </div>
         
-        {/* 🟢 UPGRADED LEGEND: 100% distinct colors for every status */}
         <div className="flex flex-wrap items-center gap-4 mt-4">
           {[
             { color: 'bg-emerald-500', label: 'Open' },
@@ -307,6 +498,125 @@ export function OverviewDashboard() {
         </div>
 
       </div>
+
+      {/* ── Floating Offline Alert Toast (Bottom Right) ── */}
+      {isFullyOffline && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-neutral-900/95 border border-amber-800/80 rounded-xl p-4 shadow-2xl backdrop-blur-md animate-slide-up">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg flex-none mt-0.5">
+              <RefreshCw size={18} className="animate-spin" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                  Connection Lost
+                </h4>
+                <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase font-bold animate-pulse">
+                  Reconnecting...
+                </span>
+              </div>
+              <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed">
+                Cloud sync is temporarily unavailable. The system is actively trying to reconnect. Save a local database snapshot to protect recent venue transactions.
+              </p>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  onClick={handleRunLocalBackup}
+                  disabled={isBackingUp}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-neutral-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <Download size={13} />
+                  <span>Run Local Backup</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── First-Time Recovery PIN Modal ── */}
+      <AnimatePresence>
+        {showRecoveryModal && (() => {
+          const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+          return (
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, y: 20 }} 
+                animate={{ scale: 1, y: 0 }} 
+                className="bg-neutral-950 border border-amber-900/50 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden p-8 text-center"
+              >
+                <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4 text-amber-500">
+                  <KeyRound size={28} />
+                </div>
+                <h2 className="text-2xl font-black text-amber-400 tracking-wide uppercase mb-3">Save Your Recovery PIN</h2>
+                <p className="text-sm text-neutral-400 leading-relaxed mb-6">
+                  You haven't backed up your emergency access PIN. Because this system is designed to operate completely offline, this 4-digit PIN is the <strong>ONLY</strong> way to recover your account if you forget your password.
+                </p>
+                
+                <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
+                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                </div>
+                
+                <div className="flex gap-3 mb-6">
+                  <button 
+                    onClick={() => { 
+                      navigator.clipboard.writeText(targetUser?.recoveryPin || '0000'); 
+                      setPinCopied(true); 
+                      setHasInteractedWithPin(true);
+                      setTimeout(()=>setPinCopied(false), 2000); 
+                    }} 
+                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
+                  >
+                    {pinCopied ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Copy size={16} />} {pinCopied ? 'Copied!' : 'Copy PIN'}
+                  </button>
+                  <button 
+                    onClick={handleDownloadPin} 
+                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
+                  >
+                    <Download size={16} /> Save as .txt
+                  </button>
+                </div>
+                
+                <label className={`flex items-start gap-3 p-4 rounded-xl border transition-colors mb-6 text-left ${hasInteractedWithPin ? 'border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 cursor-pointer' : 'border-rose-900/50 bg-rose-950/10 cursor-not-allowed opacity-80'}`}>
+                  <input 
+                    type="checkbox" 
+                    checked={pinSaved} 
+                    disabled={!hasInteractedWithPin}
+                    onChange={() => setPinSaved(!pinSaved)} 
+                    className={`mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 ${!hasInteractedWithPin ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
+                  />
+                  <span className="text-xs text-neutral-400 leading-relaxed">
+                    {hasInteractedWithPin 
+                      ? "I confirm that I have safely copied or downloaded my recovery PIN." 
+                      : "⚠️ Action Required: You must Copy or Download your PIN to proceed."}
+                  </span>
+                </label>
+
+                <button 
+                  onClick={handleAcknowledgePin} 
+                  disabled={!pinSaved}
+                  className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-900 disabled:text-neutral-600 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
+                >
+                  Enter System
+                </button>
+                
+                <button 
+                  onClick={handleAcknowledgePin} 
+                  className="w-full bg-amber-600 hover:bg-amber-500 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
+                >
+                  I have saved my PIN securely
+                </button>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
     </div>
   );
 }

@@ -5,7 +5,7 @@ import {
   User, Lock, Phone, Eye, EyeOff, Palette, Sun, Moon,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
   AlertTriangle, UploadCloud, BarChart2, CalendarCheck, 
-  ShoppingCart, LayoutGrid, Clock
+  ShoppingCart, LayoutGrid, Clock, Download, ShieldAlert
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { formatDistanceToNow } from 'date-fns';
@@ -53,7 +53,7 @@ export function SettingsPage() {
   const [showPw, setShowPw] = useState({ current: false, new: false, confirm: false });
   const [secError, setSecError] = useState('');
 
-  const userActivities = useMemo(() => activities.filter(a => a.description.includes(`(Action by: ${staffProfile.fullName})`)), [activities, staffProfile.fullName]);
+  const userActivities = useMemo(() => activities.filter((a: any) => a.metadata?.actorId === staffProfile.id), [activities, staffProfile.id]);
 
   const stats = useMemo(() => ({
     total: userActivities.length,
@@ -125,6 +125,28 @@ export function SettingsPage() {
     setSecEdit(false); setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '' }));
     flashSaved('security');
   };
+  
+
+  // 🟢 NEW: Handles generating and downloading the Recovery PIN .txt file
+  const handleDownloadPin = () => {
+    const targetUser = staffUsers.find(u => u.username === staffProfile.username);
+    if (!targetUser?.recoveryPin) {
+      toast.error("Recovery PIN not found.");
+      return;
+    }
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Recovery PIN downloaded successfully!");
+  };
+  
 
   const tabs: { id: Section; label: string; icon: React.ElementType }[] = [
     { id: 'overview',   label: 'Overview',   icon: BarChart2 },
@@ -347,65 +369,89 @@ export function SettingsPage() {
 
       {/* SECURITY */}
       {activeSection === 'security' && (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
-            <div><h3 className="text-sm font-bold text-neutral-100">Login Credentials</h3><p className="text-xs text-neutral-500 mt-0.5">Manage your username and password</p></div>
-            {!secEdit ? <button onClick={() => { setSecEdit(true); setSecError(''); setSecForm(f => ({ ...f, username: staffProfile.username })); }} className="flex items-center gap-1.5 text-xs text-neutral-400 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => { setSecEdit(false); setSecError(''); }} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
+              <div><h3 className="text-sm font-bold text-neutral-100">Login Credentials</h3><p className="text-xs text-neutral-500 mt-0.5">Manage your username and password</p></div>
+              {!secEdit ? <button onClick={() => { setSecEdit(true); setSecError(''); setSecForm(f => ({ ...f, username: staffProfile.username })); }} className="flex items-center gap-1.5 text-xs text-neutral-400 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => { setSecEdit(false); setSecError(''); }} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex items-start gap-4">
+                <div className="w-9 h-9 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center mt-1"><User size={16} className="text-neutral-400" /></div>
+                <div className="flex-1">
+                  <p className="text-xs text-neutral-500 mb-1.5 font-medium uppercase tracking-wider">Username</p>
+                  {secEdit ? <input type="text" value={secForm.username} onChange={e => setSecForm(f => ({ ...f, username: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" /> : <p className="text-sm text-neutral-200 font-semibold">@{staffProfile.username}</p>}
+                </div>
+              </div>
+
+              {secEdit && (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+                  <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Change Password</p>
+                  
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1.5">Current Password <span className="text-rose-500">*</span></label>
+                    <div className="relative">
+                      <input type={showPw.current ? 'text' : 'password'} value={secForm.currentPassword} onChange={e => setSecForm(f => ({ ...f, currentPassword: e.target.value }))} placeholder="Your current password" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
+                      <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, current: !s.current }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{showPw.current ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1.5">New Password</label>
+                    <div className="relative">
+                      <input type={showPw.new ? 'text' : 'password'} value={secForm.newPassword} onChange={e => setSecForm(f => ({ ...f, newPassword: e.target.value }))} placeholder="Leave blank to keep current" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
+                      <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, new: !s.new }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{showPw.new ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                    </div>
+                    {secForm.newPassword && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex gap-1 h-1.5 w-full rounded-full overflow-hidden bg-neutral-800/50">
+                          <div className={`h-full ${pwStrength.score >= 1 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                          <div className={`h-full ${pwStrength.score >= 2 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                          <div className={`h-full ${pwStrength.score >= 3 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
+                        </div>
+                        <p className={`text-[10px] ${pwStrength.isValid ? 'text-emerald-500' : 'text-neutral-500'}`}>Requires 8+ characters, letters, and numbers.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1.5">Confirm New Password</label>
+                    <div className="relative">
+                      <input type={showPw.confirm ? 'text' : 'password'} value={secForm.confirmPassword} onChange={e => setSecForm(f => ({ ...f, confirmPassword: e.target.value }))} placeholder="Re-enter new password" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
+                      <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, confirm: !s.confirm }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">{showPw.confirm ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                    </div>
+                  </div>
+                  {secError && <div className="flex items-center gap-2 bg-rose-950/50 border border-rose-800/40 text-rose-400 text-xs px-3 py-2.5 rounded-xl"><AlertTriangle size={13} className="flex-shrink-0" />{secError}</div>}
+                </div>
+              )}
+              {secEdit && (
+                <div className="pt-1 flex justify-end">
+                  <button onClick={handleSaveSecurity} disabled={secForm.newPassword ? !pwStrength.isValid : false} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold"><Save size={14} /> Save Credentials</button>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="p-6 space-y-4">
-            <div className="flex items-start gap-4">
-              <div className="w-9 h-9 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center mt-1"><User size={16} className="text-neutral-400" /></div>
-              <div className="flex-1">
-                <p className="text-xs text-neutral-500 mb-1.5 font-medium uppercase tracking-wider">Username</p>
-                {secEdit ? <input type="text" value={secForm.username} onChange={e => setSecForm(f => ({ ...f, username: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-600/50" /> : <p className="text-sm text-neutral-200 font-semibold">@{staffProfile.username}</p>}
+
+          {/* 🟢 NEW: Offline Recovery PIN Backup Box */}
+          <div className="bg-neutral-950 border border-amber-900/40 rounded-2xl overflow-hidden shadow-lg shadow-amber-900/5">
+            <div className="px-6 py-4 border-b border-amber-900/40 flex items-center gap-3 bg-amber-500/5">
+              <ShieldAlert size={18} className="text-amber-500" />
+              <div>
+                <h3 className="text-sm font-bold text-amber-500">Offline Recovery Credential</h3>
+                <p className="text-xs text-amber-500/70 mt-0.5">Your emergency access PIN</p>
               </div>
             </div>
-
-            {secEdit && (
-              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
-                <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Change Password</p>
-                
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1.5">Current Password <span className="text-rose-500">*</span></label>
-                  <div className="relative">
-                    <input type={showPw.current ? 'text' : 'password'} value={secForm.currentPassword} onChange={e => setSecForm(f => ({ ...f, currentPassword: e.target.value }))} placeholder="Your current password" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
-                    <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, current: !s.current }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{showPw.current ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1.5">New Password</label>
-                  <div className="relative">
-                    <input type={showPw.new ? 'text' : 'password'} value={secForm.newPassword} onChange={e => setSecForm(f => ({ ...f, newPassword: e.target.value }))} placeholder="Leave blank to keep current" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
-                    <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, new: !s.new }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{showPw.new ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-                  </div>
-                  {secForm.newPassword && (
-                    <div className="mt-2 space-y-1">
-                      <div className="flex gap-1 h-1.5 w-full rounded-full overflow-hidden bg-neutral-800/50">
-                        <div className={`h-full ${pwStrength.score >= 1 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
-                        <div className={`h-full ${pwStrength.score >= 2 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
-                        <div className={`h-full ${pwStrength.score >= 3 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
-                      </div>
-                      <p className={`text-[10px] ${pwStrength.isValid ? 'text-emerald-500' : 'text-neutral-500'}`}>Requires 8+ characters, letters, and numbers.</p>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1.5">Confirm New Password</label>
-                  <div className="relative">
-                    <input type={showPw.confirm ? 'text' : 'password'} value={secForm.confirmPassword} onChange={e => setSecForm(f => ({ ...f, confirmPassword: e.target.value }))} placeholder="Re-enter new password" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
-                    <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, confirm: !s.confirm }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">{showPw.confirm ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-                  </div>
-                </div>
-                {secError && <div className="flex items-center gap-2 bg-rose-950/50 border border-rose-800/40 text-rose-400 text-xs px-3 py-2.5 rounded-xl"><AlertTriangle size={13} className="flex-shrink-0" />{secError}</div>}
-              </div>
-            )}
-            {secEdit && (
-              <div className="pt-1 flex justify-end">
-                <button onClick={handleSaveSecurity} disabled={secForm.newPassword ? !pwStrength.isValid : false} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold"><Save size={14} /> Save Credentials</button>
-              </div>
-            )}
+            <div className="p-6">
+              <p className="text-xs text-neutral-400 leading-relaxed mb-5">
+                Because this system is designed to operate completely offline, there are no email reset links. If you forget your password, your 4-digit Recovery PIN is the <strong>ONLY</strong> way to regain access to your account without requiring a Super Admin to manually reset it.
+              </p>
+              <button 
+                onClick={handleDownloadPin}
+                className="flex items-center gap-2 px-5 py-3 bg-amber-600/10 hover:bg-amber-600/20 text-amber-500 border border-amber-600/30 rounded-xl text-sm font-bold transition-all"
+              >
+                <Download size={16} /> Download Recovery PIN (.txt)
+              </button>
+            </div>
           </div>
         </div>
       )}

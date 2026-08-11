@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRound, CheckCircle, TerminalSquare, X } from 'lucide-react';
+import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRound, CheckCircle, TerminalSquare, X, Copy, Download } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
-type FormView = 'login' | 'reset' | 'force-change' | 'god-mode';
+type FormView = 'login' | 'reset' | 'force-change' | 'recovery-pin' | 'god-mode';
 
 const getPasswordStrength = (pw: string) => {
   if (!pw) return { score: 0, color: 'bg-neutral-800/50', isValid: false };
@@ -47,6 +47,9 @@ export function OfflineLogin() {
 
   // 🟢 Close Confirmation Modal State
   const [showCloseModal, setShowCloseModal] = useState(false);
+
+  const [pinSaved, setPinSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const sliderImages = siteConfig?.heroImages && siteConfig.heroImages.length > 0 
     ? siteConfig.heroImages 
@@ -123,12 +126,46 @@ export function OfflineLogin() {
     if (targetUser) {
       const hashedNew = await hashPassword(newPassword);
       updateStaffUser(targetUser.id, { password: hashedNew });
-      setSuccessMsg('Security verified. Logging you in...');
-      setTimeout(() => navigate(targetUser.isAdmin ? '/admin' : '/staff'), 1500);
+      setSuccessMsg('Password updated. Generating recovery credentials...');
+      setTimeout(() => { switchView('recovery-pin'); setIsProcessing(false); }, 1500);
     } else {
       setError('User record not found.');
       setIsProcessing(false);
     }
+  };
+
+  const handleCopyPin = (pin: string) => {
+    navigator.clipboard.writeText(pin);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownloadPin = () => {
+    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+    if (!targetUser) return;
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCompleteSetup = async () => {
+    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+    
+    // 🟢 FIXED: Actually authenticate the user into the session before navigating
+    if (targetUser?.isAdmin || username === 'superadmin') {
+      await adminLogin(username, newPassword);
+    } else {
+      await staffLogin(username, newPassword);
+    }
+    
+    navigate(targetUser?.isAdmin ? '/admin' : '/staff');
   };
 
   const handleConfirmReset = async (e: React.FormEvent) => {
@@ -441,6 +478,54 @@ export function OfflineLogin() {
                   </form>
                 </motion.div>
               )}
+
+              {/* ── RECOVERY PIN BACKUP VIEW ── */}
+              {view === 'recovery-pin' && (() => {
+                const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+                return (
+                  <motion.div key="recovery-pin" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
+                    <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-5 mb-5 text-center">
+                      <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-3 text-amber-500">
+                        <ShieldCheck size={24} />
+                      </div>
+                      <h2 className="text-lg font-black text-amber-400 tracking-wide uppercase mb-2">Save Your Recovery PIN</h2>
+                      <p className="text-xs text-amber-200/80 leading-relaxed mb-5">
+                        This system operates offline. If you forget your password, this 4-digit PIN is the <strong>ONLY</strong> way to recover your account without a Super Admin.
+                      </p>
+                      
+                      <div className="bg-black/40 border border-black/50 rounded-lg p-5 mb-5">
+                        <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-1">Your Unique PIN</p>
+                        <p className="text-5xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                      </div>
+                      
+                      <div className="flex gap-3">
+                        <button onClick={() => handleCopyPin(targetUser?.recoveryPin || '0000')} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
+                          {copied ? <CheckCircle size={15} className="text-emerald-400" /> : <Copy size={15} />} {copied ? 'Copied!' : 'Copy PIN'}
+                        </button>
+                        <button onClick={handleDownloadPin} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
+                          <Download size={15} /> Save as .txt
+                        </button>
+                      </div>
+                    </div>
+
+                    <label className="flex items-start gap-3 cursor-pointer p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 transition-colors mb-6">
+                      <input type="checkbox" checked={pinSaved} onChange={() => setPinSaved(!pinSaved)} className="mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500" />
+                      <span className="text-xs text-neutral-400 leading-relaxed">
+                        I confirm that I have copied or downloaded my recovery PIN and stored it in a safe, private place.
+                      </span>
+                    </label>
+
+                    <button 
+                      onClick={handleCompleteSetup} 
+                      disabled={!pinSaved} 
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
+                    >
+                      Complete Setup & Enter System
+                    </button>
+                  </motion.div>
+                );
+              })()}
+
             </AnimatePresence>
           </div>
           

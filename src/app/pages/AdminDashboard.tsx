@@ -214,9 +214,9 @@ export function AdminDashboard() {
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
           <div className={`p-2.5 rounded-xl flex-shrink-0 ${
-            isFullyOffline ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'
+            isFullyOffline ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
           }`}>
-            {isFullyOffline ? <WifiOff size={22} /> : <Wifi size={22} />}
+            {isFullyOffline ? <RefreshCw size={22} className="animate-spin" /> : <Wifi size={22} />}
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -225,10 +225,10 @@ export function AdminDashboard() {
               </span>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                 isFullyOffline 
-                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' 
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
                   : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
               }`}>
-                {isFullyOffline ? 'OFFLINE MODE' : 'ONLINE & SYNCED'}
+                {isFullyOffline ? 'RECONNECTING TO CLOUD...' : 'ONLINE & SYNCED'}
               </span>
               <span className="text-neutral-700 hidden sm:inline">|</span>
               <span className="text-[11px] text-neutral-400 font-medium flex items-center gap-1">
@@ -237,7 +237,7 @@ export function AdminDashboard() {
             </div>
             <p className="text-xs text-neutral-500 mt-1">
               {isFullyOffline
-                ? `Cloud disconnected${offlineSince ? ` since ${format(offlineSince, 'hh:mm a')}` : ''}. Local server is processing all venue transactions safely.`
+                ? `Cloud disconnected${offlineSince ? ` since ${format(offlineSince, 'hh:mm a')}` : ''}. Continually attempting to reconnect...`
                 : `Connected to Cloud Server. Last cloud sync completed at ${format(lastSync, 'hh:mm a')}.`}
             </p>
           </div>
@@ -448,23 +448,28 @@ export function AdminDashboard() {
 
       {/* ── Floating Offline Alert Toast (Bottom Right) ── */}
       {isFullyOffline && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-neutral-900/95 border border-rose-800/80 rounded-xl p-4 shadow-2xl backdrop-blur-md animate-slide-up">
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-neutral-900/95 border border-amber-800/80 rounded-xl p-4 shadow-2xl backdrop-blur-md animate-slide-up">
           <div className="flex items-start gap-3">
-            <div className="p-2 bg-rose-500/10 text-rose-400 rounded-lg flex-none mt-0.5">
-              <WifiOff size={18} />
+            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg flex-none mt-0.5">
+              <RefreshCw size={18} className="animate-spin" />
             </div>
             <div className="flex-1 min-w-0">
-              <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wider">
-                System Offline
-              </h4>
-              <p className="text-xs text-neutral-300 mt-1 leading-relaxed">
-                Cloud sync is unavailable. Save a local database snapshot to protect recent venue transactions.
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                  Connection Lost
+                </h4>
+                <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase font-bold animate-pulse">
+                  Reconnecting...
+                </span>
+              </div>
+              <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed">
+                Cloud sync is temporarily unavailable. The system is actively trying to reconnect. Save a local database snapshot to protect recent venue transactions.
               </p>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   onClick={handleRunLocalBackup}
                   disabled={isBackingUp}
-                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-neutral-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
                 >
                   <Download size={13} />
                   <span>Run Local Backup</span>
@@ -474,6 +479,7 @@ export function AdminDashboard() {
           </div>
         </div>
       )}
+      
 
     </div>
   );

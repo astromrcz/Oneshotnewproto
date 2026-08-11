@@ -358,7 +358,7 @@ export function Layout() {
               {/* User Menu */}
               <div className="relative">
                 <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 bg-neutral-800/60 rounded-full pl-1 pr-3 py-1 border border-neutral-700/50 hover:bg-neutral-800 transition-colors">
-                  <div className="w-8 h-8 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden">
+                  <div className="w-8 h-8 bg-emerald-600/30 rounded-full border border-emerald-600/50 flex items-center justify-center text-emerald-400 text-xs font-bold overflow-hidden flex-shrink-0">
                     {staffProfile?.avatarImg ? (
                       <img 
                         src={staffProfile.avatarImg.startsWith('http') ? staffProfile.avatarImg : `http://localhost:3001${staffProfile.avatarImg}`} 
@@ -369,6 +369,9 @@ export function Layout() {
                       staffProfile?.fullName?.charAt(0) || 'S'
                     )}
                   </div>
+                  <span className="text-xs text-neutral-300 font-medium hidden sm:block truncate max-w-[120px]">
+                    {staffProfile?.fullName || 'Staff User'}
+                  </span>
                 </button>
                 
                 {showUserMenu && (

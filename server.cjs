@@ -421,10 +421,17 @@ app.post('/api/sync-to-cloud', async (req, res) => {
       });
     };
 
-    await Promise.all([
+   await Promise.all([
+      // 🟢 SITE SETTINGS & CMS
       syncTable('cms', 'cms', r => ({ keyName: r.keyName, settingValue: r.settingValue }), 'keyName'),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
+      
+      // 🟢 TABLE MANAGEMENT & SESSIONS
       syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
+      syncTable('session_history', 'session_history', r => ({ id: r.id, customerName: r.customerName, tableId: r.tableId, tableName: r.tableName, startTime: r.startTime, endTime: r.endTime, durationMinutes: r.durationMinutes, totalAmount: r.totalAmount, amountPaid: r.amountPaid, orders: r.orders, status: r.status || 'completed', closureReason: r.closureReason || null }), 'id'),
+      syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime || new Date().toISOString() }), 'id'),
+      
+      // 🟢 PROMOS, EVENTS, ANNOUNCEMENTS & CLOSURES
       syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: r.is_active ? 1 : 0, is_limited_uses: r.is_limited_uses ? 1 : 0, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
       syncTable('events', 'events', r => ({ 
         id: r.id, 
@@ -446,19 +453,20 @@ app.post('/api/sync-to-cloud', async (req, res) => {
         isCancelled: r.isCancelled ? 1 : 0,
         cancelReason: r.cancelReason || null
       }), 'id'),
+      syncTable('announcements', 'announcements', r => ({ id: r.id, title: r.title, content: r.content, type: r.type, isActive: r.isActive ? 1 : 0, expiresAt: r.expiresAt || null, createdAt: r.createdAt || new Date().toISOString() }), 'id'),
       syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: r.is_full_day ? 1 : 0, open_time: r.open_time, close_time: r.close_time }), 'id'),
+      
+      // 🟢 MENU INVENTORY
       syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id'),
-      syncTable('reservations', 'reservations', r => ({
-        id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email || null,
-        date: r.date || r.reservation_date, timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size,
-        status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount,
-        downPaymentPaid: (r.downPaymentPaid === 1 || r.down_payment_paid === 1) ? 1 : 0, balancePaid: (r.balancePaid === 1 || r.balance_paid === 1) ? 1 : 0,
-        paymentRef: r.paymentRef || r.payment_ref || null, receiptImg: r.receiptImg || r.receipt_img_url || null, cancellationReason: r.cancellationReason || r.cancellation_reason || null,
-        refundStatus: r.refundStatus || r.refund_status || null, refundMethod: r.refundMethod || r.refund_method || null, refundNotes: r.refundNotes || r.refund_notes || null,
-        createdAt: r.createdAt || r.created_at || new Date().toISOString()
-      }), 'id'),
-      syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime || new Date().toISOString() }), 'id'),
-      syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date || new Date().toISOString() }), 'id')
+      
+      // 🟢 CUSTOMER RELATIONS & LOGS
+      syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date || new Date().toISOString() }), 'id'),
+      syncTable('lost_and_found', 'lost_and_found', r => ({ id: r.id, itemName: r.itemName, description: r.description, foundDate: r.foundDate || null, status: r.status, image: r.image || null, claimedBy: r.claimedBy || null, claimedDate: r.claimedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
+      syncTable('watchlist', 'watchlist', r => ({ id: r.id, name: r.name, reason: r.reason, description: r.description, status: r.status, evidenceLink: r.evidenceLink || null, dateAdded: r.dateAdded || null, resolvedDate: r.resolvedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
+      syncTable('activities', 'activities', r => ({ id: r.id, type: r.type, description: r.description, timestamp: r.timestamp || new Date().toISOString(), metadata: r.metadata || null }), 'id')
+      
+      // ❌ EXCLUDED: 'reservations' (Source of Truth is Supabase)
+      // ❌ EXCLUDED: 'staff' (Stored strictly on Local Machine)
     ]);
 
     if (syncErrors.length > 0) {

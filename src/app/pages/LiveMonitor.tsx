@@ -265,9 +265,11 @@ export function LiveMonitor() {
       {/* Header Bar */}
       <header className="flex-none bg-black/60 border-b border-neutral-800/80 px-6 py-4 flex items-center justify-between backdrop-blur-sm">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-950">
-            <span className="text-white font-black text-base tracking-tight">1S</span>
-          </div>
+          <img 
+            src="/electron/icon.ico" 
+            alt="One Shot Logo" 
+            className="w-10 h-10 object-contain rounded-xl flex-shrink-0 bg-neutral-900 border border-neutral-800 p-0.5 shadow-lg shadow-emerald-950/20" 
+          />
           <div>
             <p className="text-white font-black text-base tracking-tight leading-tight">ONE SHOT BAR & BILLIARDS</p>
             <p className="text-[11px] text-neutral-500 uppercase tracking-widest">Live Table Status & Walk-in Queue</p>

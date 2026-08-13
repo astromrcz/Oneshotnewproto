@@ -65,9 +65,17 @@ export function Queue() {
   };
 
   // Get upcoming reservations (today and future)
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   const upcomingReservations = reservations
-    .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed')
-    .sort((a: any, b: any) => a.date.getTime() - b.date.getTime())
+    .filter((r: any) => {
+      if (r.status === 'cancelled' || r.status === 'completed') return false;
+      const resDate = new Date(r.date);
+      resDate.setHours(0, 0, 0, 0);
+      return resDate.getTime() >= todayStart.getTime();
+    })
+    .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 10);
 
   const CharCount = ({ current, max }: { current?: string, max: number }) => {
@@ -476,7 +484,7 @@ export function Queue() {
                         <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-neutral-500">
                           <span className="flex items-center gap-1">
                             <Clock size={10} />
-                            {isToday(reservation.date) ? 'Today' : isTomorrow(reservation.date) ? 'Tomorrow' : format(reservation.date, 'MMM d')}, {reservation.timeSlot}
+                            {isToday(new Date(reservation.date)) ? 'Today' : isTomorrow(new Date(reservation.date)) ? 'Tomorrow' : format(new Date(reservation.date), 'MMM d')}, {reservation.timeSlot}
                           </span>
                           <span>{reservation.durationHours}h</span>
                           <span>{reservation.partySize} pax</span>

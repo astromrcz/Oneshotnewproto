@@ -54,6 +54,7 @@ export function OverviewDashboard() {
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [pinCopied, setPinCopied] = useState(false);
   const [hasInteractedWithPin, setHasInteractedWithPin] = useState(false);
+  const [pinSaved, setPinSaved] = useState(false);
 
   useEffect(() => {
     if (staffProfile?.username) {
@@ -611,13 +612,6 @@ export function OverviewDashboard() {
                   className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-900 disabled:text-neutral-600 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
                 >
                   Enter System
-                </button>
-                
-                <button 
-                  onClick={handleAcknowledgePin} 
-                  className="w-full bg-amber-600 hover:bg-amber-500 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
-                >
-                  I have saved my PIN securely
                 </button>
               </motion.div>
             </motion.div>

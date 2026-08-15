@@ -75,14 +75,22 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
   for (let d = 1; d <= remaining; d++) { cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) }); }
 
   const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
-  const isClosed = (date: Date) => closedDates.some((cd: any) => { 
-    if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
-    if (!cd.date) return false;
-    const d = new Date(cd.date); 
-    if (isNaN(d.getTime())) return false;
-    d.setHours(0, 0, 0, 0); 
-    return d.getTime() === date.getTime(); 
-  });
+
+  // 🟢 FIXED: Bulletproof closure finder that grabs the reason and ignores database column name mismatches
+  const getClosureReason = (date: Date) => {
+    const record = closedDates.find((cd: any) => { 
+      if (cd?.type === 'weekly' && cd.dayOfWeek !== undefined) return date.getDay() === Number(cd.dayOfWeek);
+      
+      // Look for the date regardless of whether it's named 'date', 'closed_date', or just a raw string
+      const rawDate = cd?.date || cd?.closed_date || cd?.closedDate || Object.values(cd).find((v: any) => typeof v === 'string' && v.match(/^\d{4}-\d{2}-\d{2}/));
+      if (!rawDate) return false;
+      
+      const targetStr = String(rawDate).split('T')[0].split(' ')[0].trim();
+      return targetStr === format(date, 'yyyy-MM-dd');
+    });
+    return record ? (record.reason || 'Closed / Private Event') : null;
+  };
+
   const isPast = (date: Date) => date < today;
   const isSelected = (date: Date) => selectedDate ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })() : false;
   const isTodayDate = (date: Date) => date.getTime() === today.getTime();
@@ -100,14 +108,41 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
       <div className="grid grid-cols-7 gap-y-3">
         {cells.map(({ day, currentMonth, date }, idx) => {
           const past = isPast(date); const selected = isSelected(date); const today_ = isTodayDate(date);
-          const reserved = isReserved(date) && currentMonth; const closed = isClosed(date) && currentMonth;
-          const clickable = currentMonth && !past && !closed;
+          const reserved = isReserved(date) && currentMonth; 
+          const closureReason = getClosureReason(date);
+          const closed = !!closureReason && currentMonth;
+          
+          // 🟢 FIXED: Removed !closed so users can click on blocked dates
+          const clickable = currentMonth && !past; 
+          
           return (
             <div key={idx} className="flex justify-center">
-              <button type="button" disabled={!clickable} onClick={() => clickable && onSelect(date)} className={`relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all ${!currentMonth ? 'opacity-20 cursor-default' : ''} ${past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''} ${closed && !past && currentMonth ? 'opacity-50 cursor-not-allowed text-rose-500' : ''} ${selected ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5' : ''} ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400' : ''} ${!selected && clickable && !today_ ? 'text-neutral-300 hover:bg-neutral-800' : ''}`}>
+              <button 
+                type="button" 
+                disabled={!clickable} 
+                onClick={() => clickable && onSelect(date)} 
+                title={closed ? `Venue Closed: ${closureReason}` : reserved ? 'Bookings Active' : ''}
+                className={`relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all ${
+                  !currentMonth ? 'opacity-20 cursor-default' : ''
+                } ${
+                  past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''
+                } ${
+                  closed && !past && currentMonth && !selected ? 'bg-rose-950/40 border border-rose-900/50 text-rose-400 hover:bg-rose-900/40' : ''
+                } ${
+                  selected && closed ? 'border border-rose-500 text-rose-400 bg-rose-500/10 shadow-inner shadow-rose-900/50' : ''
+                } ${
+                  selected && !closed ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5' : ''
+                } ${
+                  !selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400' : ''
+                } ${
+                  !selected && clickable && !today_ && !closed ? 'text-neutral-300 hover:bg-neutral-800' : ''
+                }`}
+              >
                 <span className={selected ? 'font-bold' : 'font-medium'}>{day}</span>
+                {closed && !past && !selected && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-rose-500 animate-pulse" />}
                 {reserved && !selected && !closed && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-amber-500" />}
-                {selected && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-emerald-500" />}
+                {selected && !closed && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-emerald-500" />}
+                {selected && closed && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-rose-400" />}
               </button>
             </div>
           );
@@ -274,6 +309,8 @@ export function HomePage() {
     tiktok: siteConfig?.tiktok || '@oneshotbilliards',
   };
 
+
+
   useEffect(() => {
     if (heroSlides.length > 0) {
       const interval = setInterval(() => {
@@ -353,6 +390,16 @@ export function HomePage() {
       if (d.reservationStep !== undefined) setReservationStep(d.reservationStep);
     } catch (e) { console.warn('Failed to load draft', e); }
   }, []);
+
+  useEffect(() => {
+    if (trackedReservations && trackedReservations.length > 0) {
+      const activeIds = trackedReservations.map((tr: any) => tr.id);
+      const refreshed = reservations.filter((r: any) => activeIds.includes(r.id));
+      if (refreshed.length > 0) {
+        setTrackedReservations(refreshed);
+      }
+    }
+  }, [reservations]);
 
   useEffect(() => {
     loadReservationDraft();
@@ -493,8 +540,19 @@ export function HomePage() {
     }
   }, [maxAllowedDuration, resForm.timeSlot]);
 
-  const validateTimeSlot = (time: string, duration: number) => {
-    if (!time || !selectedDate) return 'invalid';
+  const validateTimeSlot = (time: string, duration: number, customDate: Date | null = selectedDate) => {
+    if (!time || !customDate) return 'invalid';
+
+    // 🟢 FIXED: Hard-block the time slot and extract reason if the day is closed
+    const closedRecord = closedDates.find((cd: any) => {
+      if (cd?.type === 'weekly' && cd.dayOfWeek !== undefined) return customDate.getDay() === Number(cd.dayOfWeek);
+      const rawDate = cd?.date || cd?.closed_date || cd?.closedDate || Object.values(cd).find((v: any) => typeof v === 'string' && v.match(/^\d{4}-\d{2}-\d{2}/));
+      if (!rawDate) return false;
+      const targetStr = String(rawDate).split('T')[0].split(' ')[0].trim();
+      return targetStr === format(customDate, 'yyyy-MM-dd');
+    });
+
+    if (closedRecord) return `closed_day:${closedRecord.reason || 'Private Event / Holiday'}`;
 
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
@@ -503,7 +561,7 @@ export function HomePage() {
 
     const slotMins = parseToMins(time);
 
-    if (isToday(new Date(selectedDate))) {
+    if (isToday(new Date(customDate))) {
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
       
       if (slotMins <= nowMins) return 'past'; 
@@ -519,7 +577,7 @@ export function HomePage() {
 
     if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
-    const isSlotWeekend = [0, 5, 6].includes(new Date(selectedDate).getDay());
+    const isSlotWeekend = [0, 5, 6].includes(new Date(customDate).getDay());
     const isHHActive = isSlotWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
     
     if (isHHActive) {
@@ -532,7 +590,7 @@ export function HomePage() {
       if (slotNorm >= s && slotNorm < (e <= s ? e + 24 * 60 : e)) return 'happyhour';
     }
 
-    const requestedStart = new Date(selectedDate);
+    const requestedStart = new Date(customDate);
     const [h, m] = time.split(':').map(Number);
     requestedStart.setHours(h, m, 0, 0);
     const requestedEnd = addMinutes(requestedStart, duration * 60);
@@ -669,19 +727,27 @@ export function HomePage() {
   };
 
   const handleCancelBooking = (id: string) => {
-    if(window.confirm("Are you sure you want to cancel this booking?")) {
-       cancelReservation(id, "Cancelled by user");
-       if (trackForm.reservationId || currentUser) {
-         setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId || r.email === currentUser?.email));
-       }
+    if (window.confirm("Are you sure you want to cancel this booking?")) {
+      cancelReservation(id, "Cancelled by customer");
+      setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'cancelled' } : r) : null);
     }
   };
 
   const handleRescheduleSubmit = (id: string) => {
     if (!rescheduleData.date || !rescheduleData.timeSlot) return;
-    const val = validateTimeSlot(rescheduleData.timeSlot, 2);
+    
+    // Pass rescheduleData.date directly to the validator
+    const val = validateTimeSlot(rescheduleData.timeSlot, 2, rescheduleData.date);
     if (val !== 'valid') {
-      alert(`Invalid time selected: ${val === 'closed' ? 'Outside of reservation hours' : 'Walk-in only happy hour'}`);
+      const errorMsg = 
+        val === 'closed' ? 'Outside of online reservation hours.' :
+        val === 'happyhour' ? 'This slot is reserved for walk-in Happy Hour only.' :
+        val === 'past' ? 'This time slot has already passed.' :
+        val === 'advance' ? 'Bookings require at least 1 hour advance notice.' :
+        val === 'full' ? 'Online capacity reached for this slot.' :
+        val === 'event_blocked' ? 'This slot conflicts with a scheduled event.' :
+        'Invalid time selected.';
+      alert(errorMsg);
       return;
     }
 
@@ -689,9 +755,21 @@ export function HomePage() {
     const [hours, minutes] = rescheduleData.timeSlot.split(':').map(Number);
     reservationDate.setHours(hours, minutes, 0, 0);
 
-    updateReservation(id, { date: reservationDate, timeSlot: rescheduleData.timeSlot, status: 'pending' });
+    updateReservation(id, { 
+      date: reservationDate, 
+      timeSlot: rescheduleData.timeSlot, 
+      status: 'pending' 
+    });
+
+    setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { 
+      ...r, 
+      date: reservationDate, 
+      timeSlot: rescheduleData.timeSlot, 
+      status: 'pending' 
+    } : r) : null);
+
     setReschedulingId(null);
-    alert('Reservation successfully rescheduled! Staff will review and confirm your new time.');
+    alert('Reschedule request submitted! The venue staff will review and confirm your new schedule.');
   };
 
   const handleFeedbackSubmit = (e?: React.FormEvent) => {
@@ -735,7 +813,7 @@ export function HomePage() {
     return lastDate ? isBefore(new Date(lastDate), todayStart) : false;
   });
 
-  const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
+  const safeClosedDates = closedDates;
   const reservedDates = reservations.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date));
 
   const allNavSections: { id: Section; label: string }[] = [
@@ -1027,40 +1105,60 @@ export function HomePage() {
                         reservedDates={reservedDates}
                         closedDates={safeClosedDates}
                       />
-                      {selectedDate && (
-                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-3">
-                          <div className="bg-emerald-600/10 border border-emerald-600/25 rounded-xl p-3 flex items-center gap-2">
-                            <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
-                            <span className="text-xs text-emerald-300">
-                              Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
-                            </span>
-                          </div>
+                      {selectedDate && (() => {
+                        let selectedClosureReason = null;
+                        const closedRecord = closedDates.find((cd: any) => {
+                          if (cd?.type === 'weekly' && cd.dayOfWeek !== undefined) return selectedDate.getDay() === Number(cd.dayOfWeek);
+                          const rawDate = cd?.date || cd?.closed_date || cd?.closedDate || Object.values(cd).find((v: any) => typeof v === 'string' && v.match(/^\d{4}-\d{2}-\d{2}/));
+                          if (!rawDate) return false;
+                          const targetStr = String(rawDate).split('T')[0].split(' ')[0].trim();
+                          return targetStr === format(selectedDate, 'yyyy-MM-dd');
+                        });
+                        if (closedRecord) selectedClosureReason = closedRecord.reason || 'Private Event / Holiday';
 
-                          <div className="rounded-xl border border-emerald-900/20 bg-emerald-950/20 p-3">
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Today's Activity Guide</p>
-                              <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max {Number(rates?.onlineCapacityLimit ?? 70)}% Online Limit</span>
+                        return (
+                          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-3">
+                            <div className={`bg-${selectedClosureReason ? 'rose' : 'emerald'}-600/10 border border-${selectedClosureReason ? 'rose' : 'emerald'}-600/25 rounded-xl p-3 flex items-center gap-2`}>
+                              {selectedClosureReason ? <XCircle size={14} className="text-rose-400 flex-shrink-0" /> : <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />}
+                              <span className={`text-xs text-${selectedClosureReason ? 'rose' : 'emerald'}-300`}>
+                                Selected: <strong>{selectedDate.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                              </span>
                             </div>
-                            <div className="space-y-1.5">
-                              {reservations
-                                .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), new Date(selectedDate)))
-                                .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                                .map((r: any) => (
-                                  <div key={r.id} className="flex items-center gap-2 text-[10px]">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                                    <span className="text-neutral-400 w-24 flex-shrink-0">{r.timeSlot} — {format(addMinutes(new Date(`2000/01/01 ${r.timeSlot}`), r.durationHours * 60), 'HH:mm')}</span>
-                                    <span className="text-neutral-600 truncate">{r.partySize} pax booking</span>
-                                  </div>
-                                ))}
-                              {reservations.filter((r: any) => r.status !== 'cancelled' && isSameDay(new Date(r.date), new Date(selectedDate))).length === 0 && (
-                                <p className="text-[10px] text-emerald-500 italic flex items-center gap-1">
-                                  <CheckCircle size={10} /> Wide open! Plenty of tables available today.
-                                </p>
-                              )}
+
+                            <div className={`rounded-xl border border-${selectedClosureReason ? 'rose' : 'emerald'}-900/20 bg-${selectedClosureReason ? 'rose' : 'emerald'}-950/20 p-3`}>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Today's Activity Guide</p>
+                                {!selectedClosureReason && <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max {Number(rates?.onlineCapacityLimit ?? 70)}% Online Limit</span>}
+                              </div>
+                              <div className="space-y-1.5">
+                                {selectedClosureReason ? (
+                                  <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1">
+                                    <AlertTriangle size={10} /> Venue Closed
+                                  </p>
+                                ) : (
+                                  <>
+                                    {reservations
+                                      .filter((r: any) => r.status !== 'cancelled' && r.status !== 'completed' && isSameDay(new Date(r.date), new Date(selectedDate)))
+                                      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                                      .map((r: any) => (
+                                        <div key={r.id} className="flex items-center gap-2 text-[10px]">
+                                          <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                                          <span className="text-neutral-400 w-24 flex-shrink-0">{r.timeSlot} — {format(addMinutes(new Date(`2000/01/01 ${r.timeSlot}`), r.durationHours * 60), 'HH:mm')}</span>
+                                          <span className="text-neutral-600 truncate">{r.partySize} pax booking</span>
+                                        </div>
+                                      ))}
+                                    {reservations.filter((r: any) => r.status !== 'cancelled' && isSameDay(new Date(r.date), new Date(selectedDate))).length === 0 && (
+                                      <p className="text-[10px] text-emerald-500 italic flex items-center gap-1">
+                                        <CheckCircle size={10} /> Wide open! Plenty of tables available today.
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        </motion.div>
-                      )}
+                          </motion.div>
+                        );
+                      })()}
                     </div>
 
                     <div>
@@ -1069,198 +1167,269 @@ export function HomePage() {
                           <Calendar size={32} className="text-neutral-600" />
                           <p className="text-neutral-500 text-sm">Please select a date from the calendar to continue your reservation.</p>
                         </div>
-                      ) : (
-                        <div>
-                          <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 2 — Your Details</p>
-                          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5">Full Name <span className="text-rose-500">*</span></label>
-                              <input type="text" value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5">Email Address {currentUser ? '' : <span className="text-neutral-600">(Optional)</span>}</label>
-                              <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5">Phone Number <span className="text-rose-500">*</span></label>
-                              <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
-                              <p className="mt-1 text-[10px] text-neutral-500">Use 13 digits max, numbers only.</p>
-                            </div>
-                            
-                            {/* FLEXIBLE TIME INPUT */}
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5">
-                                <Clock size={13} className="text-white" />
-                                Preferred Time
-                              </label>
-                              <input
-                                type="time"
-                                style={{ colorScheme: 'dark' }}
-                                value={resForm.timeSlot}
-                                onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
-                                className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
-                                  timeValidation === 'closed' || timeValidation === 'happyhour' || timeValidation === 'full' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
-                                }`}
-                              />
+                      ) : (() => {
+                        // 🟢 EVALUATE CLOSURE STATUS FOR SELECTED DATE
+                        let selectedClosureReason = null;
+                        const closedRecord = closedDates.find((cd: any) => {
+                          if (cd?.type === 'weekly' && cd.dayOfWeek !== undefined) return selectedDate.getDay() === Number(cd.dayOfWeek);
+                          const rawDate = cd?.date || cd?.closed_date || cd?.closedDate || Object.values(cd).find((v: any) => typeof v === 'string' && v.match(/^\d{4}-\d{2}-\d{2}/));
+                          if (!rawDate) return false;
+                          const targetStr = String(rawDate).split('T')[0].split(' ')[0].trim();
+                          return targetStr === format(selectedDate, 'yyyy-MM-dd');
+                        });
+                        if (closedRecord) selectedClosureReason = closedRecord.reason || 'Private Event / Holiday';
+
+                        // 🟢 IF CLOSED: HIDE FORM AND SHOW MESSAGE
+                        if (selectedClosureReason) {
+                          return (
+                            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="h-full flex flex-col">
+                              <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 2 — Your Details</p>
+                              <div className="bg-rose-950/20 border border-rose-900/50 rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-4 flex-1 shadow-inner shadow-rose-900/20">
+                                <div className="w-16 h-16 bg-rose-500/10 flex items-center justify-center rounded-full mb-2">
+                                  <XCircle size={32} className="text-rose-500" />
+                                </div>
+                                <div>
+                                  <h3 className="text-xl font-bold text-white mb-2">Date Unavailable</h3>
+                                  <p className="text-neutral-400 text-sm max-w-sm mx-auto leading-relaxed">
+                                    We are not accepting reservations on this date due to:
+                                  </p>
+                                  <div className="mt-4 inline-block bg-rose-950/60 border border-rose-900/60 text-rose-400 font-bold py-3 px-6 rounded-lg shadow-lg text-sm">
+                                    {selectedClosureReason}
+                                  </div>
+                                </div>
+                                <button onClick={() => setSelectedDate(null)} className="mt-6 px-6 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-sm font-semibold transition-colors border border-neutral-700">Select Another Date</button>
+                              </div>
+                            </motion.div>
+                          );
+                        }
+
+                        // 🟢 IF OPEN: SHOW THE NORMAL FORM
+                        return (
+                          <div>
+                            <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold mb-3">Step 2 — Your Details</p>
+                            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
+                              <div>
+                                <label className="block text-xs text-neutral-400 mb-1.5">Full Name <span className="text-rose-500">*</span></label>
+                                <input type="text" maxLength={50} value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-neutral-400 mb-1.5">Email Address {currentUser ? '' : <span className="text-neutral-600">(Optional)</span>}</label>
+                                <input type="email" maxLength={100} value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-neutral-400 mb-1.5">Phone Number <span className="text-rose-500">*</span></label>
+                                <input type="tel" maxLength={13} inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                                <p className="mt-1 text-[10px] text-neutral-500">Use 13 digits max, numbers only.</p>
+                              </div>
                               
-                              <p className="text-[10px] text-amber-500/80 mt-2 font-semibold flex items-start gap-1">
-                                <AlertTriangle size={12} className="flex-shrink-0" />
-                                <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
-                              </p>
-                                
-                               {timeValidation === 'past' && (
-                                <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
-                                  <XCircle size={10} /> This time slot has already passed today.
-                                </p>
-                              )}
-                              {timeValidation === 'advance' && (
-                                <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
-                                  <AlertTriangle size={10} /> Bookings require at least 1 hour advance notice.
-                                </p>
-                              )}
-
-                              {timeValidation === 'closed' && (
-                                <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
-                                  <XCircle size={10} /> The establishment is not accepting bookings at this hour.
-                                </p>
-                              )}
-                              {timeValidation === 'happyhour' && (
-                                <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
-                                  <AlertTriangle size={10} /> Happy Hour is strictly walk-in only.
-                                </p>
-                              )}
-                              {timeValidation === 'full' && (
-                                <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
-                                  <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
-                                </p>
-                              )}
-                              {timeValidation === 'event_blocked' && (
-                                <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
-                                  <AlertTriangle size={12} className="flex-shrink-0" /> This time slot overlaps with a special event. Online reservations are temporarily disabled.
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
+                              {/* FLEXIBLE TIME INPUT */}
                               <div>
-                                <label className="block text-xs text-neutral-400 mb-1.5">No. of Persons</label>
-                                <input type="number" min={1} max={20} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
-                              </div>
-                              <div>
-                                <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
-                                  <span>Duration (hours)</span>
-                                  {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h based on cut-off</span>}
+                                <label className="block text-xs text-neutral-400 mb-1.5 flex items-center gap-1.5">
+                                  <Clock size={13} className="text-white" />
+                                  Preferred Time
                                 </label>
-                                <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
-                                  {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
-                                    <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
+                                <input
+                                  type="time"
+                                  style={{ colorScheme: 'dark' }}
+                                  value={resForm.timeSlot}
+                                  onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))}
+                                  className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none transition-colors ${
+                                    timeValidation === 'closed' || timeValidation === 'happyhour' || timeValidation === 'full' ? 'border-rose-500/50' : 'border-neutral-700 focus:border-emerald-500'
+                                  }`}
+                                />
+                                
+                                <p className="text-[10px] text-amber-500/80 mt-2 font-semibold flex items-start gap-1">
+                                  <AlertTriangle size={12} className="flex-shrink-0" />
+                                  <span>Note: We observe a strict 15-minute grace period. Late arrivals may forfeit their table to waiting walk-ins.</span>
+                                </p>
+                                  
+                                 {timeValidation === 'past' && (
+                                  <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+                                    <XCircle size={10} /> This time slot has already passed today.
+                                  </p>
+                                )}
+                                {timeValidation === 'advance' && (
+                                  <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
+                                    <AlertTriangle size={10} /> Bookings require at least 1 hour advance notice.
+                                  </p>
+                                )}
 
-                            <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <label className="block text-xs text-neutral-400">Preferred Table <span className="text-neutral-600">(optional)</span></label>
-                                <button type="button" onClick={() => setIsPreferredTableExpanded(prev => !prev)} className="text-[10px] font-semibold text-neutral-400 hover:text-white transition-colors">
-                                  {isPreferredTableExpanded ? 'Minimize' : 'Expand'}
-                                </button>
+                                {timeValidation === 'closed' && (
+                                  <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+                                    <XCircle size={10} /> The establishment is not accepting bookings at this hour.
+                                  </p>
+                                )}
+                                {timeValidation === 'closed_day' && (
+                                  <p className="text-[10px] text-rose-400 mt-2 font-semibold flex items-center gap-1">
+                                    <XCircle size={10} /> The venue is closed on this date.
+                                  </p>
+                                )}
+                                {timeValidation === 'happyhour' && (
+                                  <p className="text-[10px] text-amber-500 mt-2 font-semibold flex items-center gap-1">
+                                    <AlertTriangle size={10} /> Happy Hour is strictly walk-in only.
+                                  </p>
+                                )}
+                                {timeValidation === 'full' && (
+                                  <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+                                    <Users size={12} /> Online reservation limit reached for this time slot. We reserve tables for walk-ins—try arriving in person!
+                                  </p>
+                                )}
+                                {timeValidation === 'event_blocked' && (
+                                  <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+                                    <AlertTriangle size={12} className="flex-shrink-0" /> This time slot overlaps with a special event. Online reservations are temporarily disabled.
+                                  </p>
+                                )}
+                                {timeValidation.startsWith('closed_day') && (
+                                  <p className="text-[10px] text-rose-400 mt-2 font-bold flex items-center gap-1 bg-rose-950/30 p-2 rounded border border-rose-900/50">
+                                    <XCircle size={12} className="flex-shrink-0" />
+                                    Venue Closed: {timeValidation.split(':')[1]}
+                                  </p>
+                                )}
                               </div>
-                              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-                                {!isPreferredTableExpanded ? (
-                                  <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2 gap-3">
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-xs font-semibold text-neutral-200 truncate">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
-                                      <p className="text-[10px] text-neutral-500 truncate">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-xs text-neutral-400 mb-1.5">
+                                    No. of Persons <span className="text-neutral-500">({reservationTerms.minPartySize || 1}-{reservationTerms.maxPartySize || 10})</span>
+                                  </label>
+                                  <input 
+                                    type="number" 
+                                    min={reservationTerms.minPartySize || 1} 
+                                    max={reservationTerms.maxPartySize || 10} 
+                                    value={resForm.pax} 
+                                    onChange={e => {
+                                      const raw = e.target.value;
+                                      if (raw === '') { setResForm(f => ({ ...f, pax: '' as any })); return; }
+                                      let val = parseInt(raw);
+                                      const max = reservationTerms.maxPartySize || 10;
+                                      if (val > max) val = max; // Auto-cap if they type a massive number
+                                      setResForm(f => ({ ...f, pax: val }));
+                                    }}
+                                    onBlur={e => {
+                                      // Failsafe: enforce minimum when they click away
+                                      let val = parseInt(e.target.value as any);
+                                      const min = reservationTerms.minPartySize || 1;
+                                      if (isNaN(val) || val < min) setResForm(f => ({ ...f, pax: min }));
+                                    }}
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" 
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                                    <span>Duration (hours)</span>
+                                    {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h based on cut-off</span>}
+                                  </label>
+                                  <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors">
+                                    {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                                      <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="flex items-center justify-between mb-2">
+                                  <label className="block text-xs text-neutral-400">Preferred Table <span className="text-neutral-600">(optional)</span></label>
+                                  <button type="button" onClick={() => setIsPreferredTableExpanded(prev => !prev)} className="text-[10px] font-semibold text-neutral-400 hover:text-white transition-colors">
+                                    {isPreferredTableExpanded ? 'Minimize' : 'Expand'}
+                                  </button>
+                                </div>
+                                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                                  {!isPreferredTableExpanded ? (
+                                    <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2 gap-3">
+                                      <div className="min-w-0 flex-1">
+                                        <p className="text-xs font-semibold text-neutral-200 truncate">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
+                                        <p className="text-[10px] text-neutral-500 truncate">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
+                                      </div>
+                                      <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors flex-shrink-0">Expand</button>
                                     </div>
-                                    <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors flex-shrink-0">Expand</button>
+                                  ) : (
+                                    <>
+                                      <button type="button" onClick={() => { setSelectedTableId(null); setIsPreferredTableExpanded(true); }} className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${!selectedTableId ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'}`}>
+                                        <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
+                                      </button>
+                                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                        {tables.filter((table: any) => table.isActive).map((table: any) => {
+                                          const isAvail = table.status === 'available';
+                                          const isRes = table.status === 'reserved';
+                                          const isOcc = table.status === 'occupied';
+                                          const isSel = selectedTableId === table.id;
+                                          const disabled = isOcc || isRes;
+                                          const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
+                                          const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
+                                          const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
+                                          
+                                          return (
+                                            <button key={table.id} type="button" disabled={disabled} onClick={() => { const nextSelection = isSel ? null : table.id; setSelectedTableId(nextSelection); setIsPreferredTableExpanded(nextSelection ? false : true); }} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${isSel ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20' : disabled ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60' : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'}`}>
+                                              <div className="flex items-center justify-between w-full mb-1">
+                                                <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
+                                                {isSel && <CheckCircle size={14} className="text-emerald-400" />}
+                                              </div>
+                                              <div className="flex items-center gap-1.5">
+                                                <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
+                                                <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>{statusText}</span>
+                                              </div>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs text-neutral-400 mb-1.5">Promo Code <span className="text-neutral-600">(optional)</span></label>
+                                {appliedPromo ? (
+                                  <div className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg px-3 py-2">
+                                    <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
+                                    <span className="text-xs text-emerald-300 font-semibold flex-1">{appliedPromo.code} — {appliedPromo.discountPercent}% off applied!</span>
+                                    <button onClick={handleRemovePromo} className="text-neutral-500 hover:text-rose-400 transition-colors"><X size={13} /></button>
                                   </div>
                                 ) : (
-                                  <>
-                                    <button type="button" onClick={() => { setSelectedTableId(null); setIsPreferredTableExpanded(true); }} className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${!selectedTableId ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'}`}>
-                                      <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
-                                    </button>
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                      {tables.filter((table: any) => table.isActive).map((table: any) => {
-                                        const isAvail = table.status === 'available';
-                                        const isRes = table.status === 'reserved';
-                                        const isOcc = table.status === 'occupied';
-                                        const isSel = selectedTableId === table.id;
-                                        const disabled = isOcc || isRes;
-                                        const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
-                                        const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
-                                        const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
-                                        
-                                        return (
-                                          <button key={table.id} type="button" disabled={disabled} onClick={() => { const nextSelection = isSel ? null : table.id; setSelectedTableId(nextSelection); setIsPreferredTableExpanded(nextSelection ? false : true); }} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${isSel ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20' : disabled ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60' : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'}`}>
-                                            <div className="flex items-center justify-between w-full mb-1">
-                                              <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
-                                              {isSel && <CheckCircle size={14} className="text-emerald-400" />}
-                                            </div>
-                                            <div className="flex items-center gap-1.5">
-                                              <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
-                                              <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>{statusText}</span>
-                                            </div>
-                                          </button>
-                                        );
-                                      })}
+                                  <div className="space-y-1">
+                                    <div className="flex gap-2">
+                                      <input type="text" value={promoCodeInput} onChange={e => { setPromoCodeInput(e.target.value.toUpperCase()); setPromoError(''); }} placeholder="e.g. WELCOME20" className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 font-mono" />
+                                      <button onClick={handleApplyPromo} disabled={!promoCodeInput.trim()} className="px-4 py-2 bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg text-xs font-semibold hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">Apply</button>
                                     </div>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1.5">Promo Code <span className="text-neutral-600">(optional)</span></label>
-                              {appliedPromo ? (
-                                <div className="flex items-center gap-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg px-3 py-2">
-                                  <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
-                                  <span className="text-xs text-emerald-300 font-semibold flex-1">{appliedPromo.code} — {appliedPromo.discountPercent}% off applied!</span>
-                                  <button onClick={handleRemovePromo} className="text-neutral-500 hover:text-rose-400 transition-colors"><X size={13} /></button>
-                                </div>
-                              ) : (
-                                <div className="space-y-1">
-                                  <div className="flex gap-2">
-                                    <input type="text" value={promoCodeInput} onChange={e => { setPromoCodeInput(e.target.value.toUpperCase()); setPromoError(''); }} placeholder="e.g. WELCOME20" className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-emerald-500 font-mono" />
-                                    <button onClick={handleApplyPromo} disabled={!promoCodeInput.trim()} className="px-4 py-2 bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg text-xs font-semibold hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">Apply</button>
+                                    {promoError && <p className="text-[11px] text-rose-400">{promoError}</p>}
                                   </div>
-                                  {promoError && <p className="text-[11px] text-rose-400">{promoError}</p>}
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="bg-neutral-800/60 rounded-xl p-4 border border-neutral-700/50">
-                              <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Booking Summary</p>
-                              <div className="space-y-1.5 text-xs">
-                                <div className="flex justify-between"><span className="text-neutral-400">Date</span><span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
-                                <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot || '—'}</span></div>
-                                <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{effectiveHourly}/hr</span></div>
-                                {appliedPromo && (
-                                  <div className="flex justify-between text-emerald-400"><span>Promo ({appliedPromo.code})</span><span>−₱{discountAmount}.00</span></div>
                                 )}
-                                <div className="border-t border-neutral-700 pt-1.5 mt-1.5 flex justify-between">
-                                  <span className="text-neutral-400">Total Amount</span><span className="text-white font-semibold">₱{totalAmount}.00</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-amber-400">Down Payment ({rates?.downPaymentPercent || 25}%)</span><span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
+                              </div>
+
+                              <div className="bg-neutral-800/60 rounded-xl p-4 border border-neutral-700/50">
+                                <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Booking Summary</p>
+                                <div className="space-y-1.5 text-xs">
+                                  <div className="flex justify-between"><span className="text-neutral-400">Date</span><span className="text-neutral-200">{selectedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
+                                  <div className="flex justify-between"><span className="text-neutral-400">Time</span><span className="text-neutral-200">{resForm.timeSlot || '—'}</span></div>
+                                  <div className="flex justify-between"><span className="text-neutral-400">Duration</span><span className="text-neutral-200">{resForm.duration}h × ₱{effectiveHourly}/hr</span></div>
+                                  {appliedPromo && (
+                                    <div className="flex justify-between text-emerald-400"><span>Promo ({appliedPromo.code})</span><span>−₱{discountAmount}.00</span></div>
+                                  )}
+                                  <div className="border-t border-neutral-700 pt-1.5 mt-1.5 flex justify-between">
+                                    <span className="text-neutral-400">Total Amount</span><span className="text-white font-semibold">₱{totalAmount}.00</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-amber-400">Down Payment ({rates?.downPaymentPercent || 25}%)</span><span className="text-amber-300 font-semibold">₱{downPayment}.00</span>
+                                  </div>
                                 </div>
                               </div>
+                              <button 
+                                onClick={handleReservationSubmit} 
+                                disabled={
+                                  !resForm.name.trim() || 
+                                  !resForm.phone.trim() || 
+                                  !resForm.timeSlot || 
+                                  timeValidation !== 'valid'
+                                } 
+                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                              >
+                                Proceed to Payment <ArrowRight size={14} />
+                              </button>
                             </div>
-                            <button 
-                              onClick={handleReservationSubmit} 
-                              disabled={
-                                !resForm.name.trim() || 
-                                !resForm.phone.trim() || 
-                                !resForm.timeSlot || 
-                                timeValidation !== 'valid'
-                              } 
-                              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
-                            >
-                              Proceed to Payment <ArrowRight size={14} />
-                            </button>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   </div>
                 </>
@@ -1311,8 +1480,13 @@ export function HomePage() {
                           {!currentUser && <button onClick={() => setTrackedReservations(null)} className="text-xs text-emerald-400 hover:underline">New Search</button>}
                         </div>
                         {myBookings.map((r: any) => {
-                          const isAffectedByClosure = closedDates.some((cd: any) => isSameDay(new Date(cd.date), new Date(r.date)));
-                          
+                          const isAffectedByClosure = closedDates.some((cd: any) => {
+                            if (cd?.type === 'weekly' && cd.dayOfWeek !== undefined) return new Date(r.date).getDay() === Number(cd.dayOfWeek);
+                            if (!cd?.date) return false;
+                            
+                            const cdStr = typeof cd.date === 'string' ? cd.date.slice(0, 10) : format(new Date(cd.date), 'yyyy-MM-dd');
+                            return cdStr === format(new Date(r.date), 'yyyy-MM-dd');
+                          });                         
                           return (
                           <div key={r.id} className={`border rounded-xl p-4 flex flex-col gap-4 ${isAffectedByClosure && r.status !== 'cancelled' ? 'bg-rose-950/20 border-rose-900/50' : 'bg-neutral-900 border-neutral-800'}`}>
                             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1548,13 +1722,31 @@ export function HomePage() {
                   <div className="space-y-6">
                     {upcomingEvents.map((event: any) => (
                       <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden relative group transition-all hover:border-emerald-600/30 flex flex-col">
-                        {event.attachments && event.attachments.length > 0 ? (
-                          <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative flex-shrink-0">
-                            <img src={event.attachments[0]} alt={event.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 to-transparent" />
+                        {/* 🟢 UPCOMING: STRICT CHECK & ONERROR FALLBACK */}
+                        {event.attachments && event.attachments.length > 0 && typeof event.attachments[0] === 'string' && event.attachments[0].trim() !== '' && event.attachments[0] !== 'null' ? (
+                          <div className="w-full h-48 sm:h-64 bg-neutral-950 overflow-hidden relative flex-shrink-0 border-b border-neutral-800/60">
+                            <img 
+                              src={event.attachments[0]} 
+                              alt={event.title} 
+                              onError={(e) => { 
+                                e.currentTarget.onerror = null; 
+                                e.currentTarget.src = logoImg; 
+                                e.currentTarget.className = "w-full h-full object-contain p-12 opacity-20 bg-neutral-950 transition-none";
+                              }}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 bg-neutral-900" 
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 to-transparent pointer-events-none" />
                           </div>
                         ) : (
-                          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
+                          <div className="w-full h-48 sm:h-64 bg-neutral-950 overflow-hidden relative flex-shrink-0 border-b border-neutral-800/60">
+                            <img src={cms.aboutImage} alt="Event Placeholder" className="w-full h-full object-cover opacity-20 grayscale group-hover:scale-105 transition-transform duration-500" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/60 to-transparent pointer-events-none" />
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                              <div className="w-20 h-20 rounded-2xl bg-neutral-950/50 backdrop-blur-sm border border-neutral-800/50 flex items-center justify-center p-3 shadow-2xl">
+                                <img src={logoImg} alt="One Shot Logo" className="w-full h-full object-contain opacity-70" />
+                              </div>
+                            </div>
+                          </div>
                         )}
                         <div className="p-6 relative z-10 flex-1 flex flex-col">
                           <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center mb-4">
@@ -1577,16 +1769,33 @@ export function HomePage() {
               )}
 
               {pastEvents.length > 0 && (
-                <div>
+                <div className="mt-8">
                   <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                     <Clock size={16} /> Past Events
                   </h3>
                   <div className="space-y-4">
                     {pastEvents.map((event: any) => (
                       <div key={event.id} className="bg-neutral-900/50 border border-neutral-800/60 rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center opacity-70 grayscale hover:grayscale-0 hover:opacity-100 transition-all">
-                        {event.attachments && event.attachments.length > 0 && (
-                          <img src={event.attachments[0]} alt={event.title} className="w-full sm:w-24 h-24 object-cover rounded-lg flex-shrink-0" />
+                        
+                        {/* 🟢 PAST: STRICT CHECK & ONERROR FALLBACK */}
+                        {event.attachments && event.attachments.length > 0 && typeof event.attachments[0] === 'string' && event.attachments[0].trim() !== '' && event.attachments[0] !== 'null' ? (
+                          <img 
+                            src={event.attachments[0]} 
+                            alt={event.title} 
+                            onError={(e) => { 
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.src = logoImg;
+                              e.currentTarget.className = "w-full sm:w-24 h-24 object-contain p-5 bg-neutral-900 rounded-lg flex-shrink-0 border border-neutral-800 opacity-40 drop-shadow-md";
+                            }}
+                            className="w-full sm:w-24 h-24 object-cover rounded-lg flex-shrink-0 border border-neutral-800 bg-neutral-900" 
+                          />
+                        ) : (
+                          <div className="w-full sm:w-24 h-24 bg-neutral-900 border border-neutral-800 rounded-lg flex-shrink-0 flex items-center justify-center relative overflow-hidden">
+                            <img src={cms.aboutImage} alt="Placeholder" className="absolute inset-0 w-full h-full object-cover opacity-10 grayscale pointer-events-none" />
+                            <img src={logoImg} alt="Logo" className="w-8 h-8 opacity-40 relative z-10 drop-shadow-md pointer-events-none" />
+                          </div>
                         )}
+
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-[9px] bg-neutral-800 text-neutral-400 px-1.5 py-0.5 rounded uppercase font-bold">{event.type}</span>
@@ -1595,11 +1804,23 @@ export function HomePage() {
                           <p className="text-xs text-neutral-500 line-clamp-2 mb-2">{event.description}</p>
                           <p className="text-[10px] text-neutral-400 font-medium">Held on: {new Date(event.date.split(',')[0]).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                         </div>
-                        {event.bracketLink && (
-                          <a href={event.bracketLink} target="_blank" rel="noopener noreferrer" className="text-[10px] bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-3 py-1.5 rounded-md transition-colors flex-shrink-0 whitespace-nowrap">
-                            View Results
+                        
+                        {/* 🟢 NEW: BRACKET LINK LOGIC WITH FALLBACK */}
+                        {event.bracketLink && event.bracketLink.trim() !== '' ? (
+                          <a 
+                            href={event.bracketLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="text-[10px] bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 hover:text-emerald-300 border border-emerald-600/30 px-4 py-2.5 rounded-lg transition-colors flex-shrink-0 whitespace-nowrap font-bold flex items-center gap-1.5"
+                          >
+                            View Results <ExternalLink size={10} strokeWidth={2.5} />
                           </a>
+                        ) : (
+                          <div className="text-[10px] bg-neutral-900 border border-neutral-800 text-neutral-600 px-4 py-2.5 rounded-lg flex-shrink-0 whitespace-nowrap font-medium cursor-not-allowed select-none flex items-center gap-1.5">
+                            <XCircle size={10} /> No bracket found
+                          </div>
                         )}
+                        
                       </div>
                     ))}
                   </div>
@@ -1686,29 +1907,32 @@ export function HomePage() {
               ) : (
                 <form onSubmit={handleFeedbackSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-5">
                   <div className="flex items-center gap-2 mb-1"><Mail className="text-sky-400" size={18} /><p className="text-sm font-semibold text-white">Direct Message to Management</p></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label><input type="text" value={feedbackForm.name} onChange={e => setFeedbackForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
+                  <div><label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label><input type="text" maxLength={50} value={feedbackForm.name} onChange={e => setFeedbackForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* 🟢 FIXED: Contact number is strictly digits and limited to 13 characters */}
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label><input type="tel" inputMode="numeric" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="e.g. 09123456789" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label><input type="tel" maxLength={13} inputMode="numeric" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="e.g. 09123456789" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
                     
-                    {/* 🟢 NEW: Optional Reservation ID input */}
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label><input type="text" value={feedbackForm.reservationId} onChange={e => setFeedbackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 font-mono tracking-widest uppercase" /></div>
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label><input type="text" maxLength={6} value={feedbackForm.reservationId} onChange={e => setFeedbackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 font-mono tracking-widest uppercase" /></div>
                   </div>
                   <div>
                     <label className="block text-xs text-neutral-400 mb-1.5">Type of Feedback <span className="text-rose-500">*</span></label>
                     <div className="relative"><select value={feedbackForm.type} onChange={e => setFeedbackForm(f => ({ ...f, type: e.target.value }))} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 appearance-none"><option value="" disabled>Select a category...</option><option value="compliment">Compliment</option><option value="suggestion">Suggestion</option><option value="complaint">Concern / Complaint</option><option value="lost_item">Lost Item</option><option value="other">Other</option></select><ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" /></div>
                   </div>
 
-                  {/* 🟢 FIXED: Drops down a mandatory text input when "Other" is selected */}
                   {feedbackForm.type === 'other' && (
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden">
                       <label className="block text-xs text-neutral-400 mb-1.5">Please Specify <span className="text-rose-500">*</span></label>
-                      <input type="text" value={feedbackForm.customType} onChange={e => setFeedbackForm(f => ({ ...f, customType: e.target.value }))} placeholder="e.g. Partnership Inquiry" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" />
+                      <input type="text" maxLength={50} value={feedbackForm.customType} onChange={e => setFeedbackForm(f => ({ ...f, customType: e.target.value }))} placeholder="e.g. Partnership Inquiry" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" />
                     </motion.div>
                   )}
 
-                  <div><label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label><textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none" /></div>
+                  <div>
+                    <div className="flex justify-between items-end mb-1.5">
+                      <label className="block text-xs text-neutral-400">Message <span className="text-rose-500">*</span></label>
+                      <span className="text-[10px] text-neutral-500">{feedbackForm.message.length}/500</span>
+                    </div>
+                    <textarea maxLength={500} value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none" />
+                  </div>
                   <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 text-white py-3 rounded-xl text-sm font-semibold">Submit Feedback</button>
                 </form>
               )}

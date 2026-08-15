@@ -140,11 +140,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
 
   // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions
-  const refreshLiveMonitor = async () => {
+ const refreshLiveMonitor = async () => {
     try {
-      const [ { data: newTables }, { data: newQueue } ] = await Promise.all([
+      const [ 
+        { data: newTables }, 
+        { data: newQueue },
+        { data: newClosedDates }
+      ] = await Promise.all([
         supabase.from('tables').select('*'),
-        supabase.from('queue').select('*')
+        supabase.from('queue').select('*'),
+        supabase.from('closed_dates').select('*')
       ]);
       
       if (newTables) {
@@ -164,6 +169,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           queueNumber: q.queueNumber || q.queue_number,
         }));
         setQueue(prev => JSON.stringify(prev) !== JSON.stringify(mappedQueue) ? mappedQueue as QueueItem[] : prev);
+      }
+      if (newClosedDates) {
+        setClosedDates(prev => JSON.stringify(prev) !== JSON.stringify(newClosedDates) ? (newClosedDates as ClosedDate[]) : prev);
       }
     } catch (error) {
       console.error("Live Monitor Refresh Error:", error);

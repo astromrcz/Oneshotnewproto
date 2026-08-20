@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
 
@@ -416,9 +416,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     fetchHolidays();
   }, []);
-
+  const cloudSyncTimeout = useRef<NodeJS.Timeout | null>(null);
   const runCloudBackup = () => {
-    setTimeout(() => {
+    if (cloudSyncTimeout.current) clearTimeout(cloudSyncTimeout.current);
+    cloudSyncTimeout.current = setTimeout(() => {
       fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
     }, 1500); 
   };

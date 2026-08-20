@@ -155,20 +155,15 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
 export function HomePage() {
   const navigate = useNavigate();
   const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund } = useAppContext() as any;
+  const [isFirstTime, setIsFirstTime] = useState(false);
 
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
-  const [isFirstTime, setIsFirstTime] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('oneshot_read_announcements');
     if (stored) {
       try { setReadAnnouncements(JSON.parse(stored)); } catch(e) {}
-    }
-    const visited = localStorage.getItem('oneshot_visited');
-    if (!visited) {
-      setIsFirstTime(true);
-      localStorage.setItem('oneshot_visited', 'true');
     }
   }, []);
 
@@ -177,30 +172,174 @@ export function HomePage() {
   const userReservations = currentUser 
     ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()) 
     : [];
+    
   const resNotifications = userReservations.map((r: any) => ({
     id: `notif_${r.id}_${r.status}`,
     type: 'Reservation Update',
     title: `Booking ${r.status.toUpperCase()}`,
     content: `Your reservation for ${format(new Date(r.date), 'MMM d, yyyy')} is currently marked as ${r.status}.`,
-    createdAt: r.createdAt
+    createdAt: r.createdAt,
+    isPinned: false
   }));
 
-  const allNotifications = [...activeAnnouncements, ...resNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const smartNotifications: any[] = [];
+  const currentDate = new Date();
 
-  const hasUnread = isFirstTime || allNotifications.some((n: any) => !readAnnouncements.includes(n.id));
+  // 🟢 1. DYNAMIC EVENTS LOGIC (Hype Engine, Happening Soon, Cancellations)
+  events.forEach((event: any) => {
+    const eventDate = new Date(event.date.split(',')[0]);
+    const createdAt = new Date(event.createdAt || currentDate);
+    // Version-controlled ID: Changes if Admin edits the event, re-triggering the Red Dot
+    const versionId = `evt_${event.id}_${new Date(event.updated_at || createdAt).getTime()}`;
+
+    // A. CANCELLATION LOGIC
+    if (event.status === 'cancelled') {
+      const cancelledAt = new Date(event.cancelled_at || currentDate);
+      const hoursLiveBeforeCancel = (cancelledAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+      
+      // Rule: Ghosting (Silently drop if cancelled within 24hrs of creation)
+      if (hoursLiveBeforeCancel < 24) return;
+
+      // Rule: Expiration (72hrs if > 20 registered, otherwise 48hrs)
+      const registered = event.registered_count || 0;
+      const expirationHours = registered > 20 ? 72 : 48;
+      const hoursSinceCancel = (currentDate.getTime() - cancelledAt.getTime()) / (1000 * 60 * 60);
+
+      if (hoursSinceCancel <= expirationHours) {
+        smartNotifications.push({
+          id: `cancel_${versionId}`,
+          type: 'Event Cancelled',
+          title: `Cancelled: ${event.title}`,
+          content: `This event has been cancelled. Please contact the establishment for any concerns or refunds.`,
+          createdAt: cancelledAt.toISOString(),
+          isPinned: true // Cancellations pin to the top
+        });
+      }
+      return; // Stop processing further alerts for cancelled events
+    }
+
+    // B. HYPE ENGINE (Promoted Events)
+    if (event.is_promoted && event.promo_start && event.promo_end) {
+      if (currentDate >= new Date(event.promo_start) && currentDate <= new Date(event.promo_end)) {
+        smartNotifications.push({
+          id: `promo_${versionId}`,
+          type: 'Featured Event',
+          title: `🔥 ${event.title}`,
+          content: event.description || `Don't miss out on this event happening on ${format(eventDate, 'MMMM d')}!`,
+          createdAt: event.promo_start,
+          isPinned: event.is_pinned
+        });
+      }
+    }
+
+    // C. HAPPENING TODAY / THIS WEEK
+    const daysUntil = (startOfDay(eventDate).getTime() - startOfDay(currentDate).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysUntil === 0) {
+      smartNotifications.push({
+        id: `today_${versionId}`,
+        type: 'Happening Today',
+        title: `Today: ${event.title}`,
+        content: `Join us today! Tap 'Events' to view details.`,
+        createdAt: startOfDay(currentDate).toISOString(),
+        isPinned: false
+      });
+    } else if (daysUntil > 0 && daysUntil <= 7) {
+      smartNotifications.push({
+        id: `week_${versionId}`,
+        type: 'Happening This Week',
+        title: `Upcoming: ${event.title}`,
+        content: `Get ready! This event is happening in ${daysUntil} day${daysUntil > 1 ? 's' : ''}.`,
+        createdAt: new Date(currentDate.getTime() - 10000).toISOString(),
+        isPinned: false
+      });
+    }
+  });
+
+ // 🟢 2. DYNAMIC CLOSURES LOGIC
+  closedDates.forEach((cd: any) => {
+    const createdAt = new Date(cd.createdAt || currentDate);
+    const versionId = `close_${cd.id}_${new Date(cd.updated_at || createdAt).getTime()}`;
+    
+    // Explicitly grab the date without accidentally matching the updated_at/cancelled_at timestamps
+    const specificDateStr = cd.date || cd.closed_date || cd.closedDate;
+    
+    let isClosedToday = false;
+    let isClosedTomorrow = false;
+    
+    const tomorrow = new Date(currentDate);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Accurately evaluate Weekly vs Specific dates
+    if (cd.type === 'weekly' && cd.dayOfWeek !== undefined) {
+      if (currentDate.getDay() === Number(cd.dayOfWeek)) isClosedToday = true;
+      if (tomorrow.getDay() === Number(cd.dayOfWeek)) isClosedTomorrow = true;
+    } else if (specificDateStr) {
+      const targetStr = String(specificDateStr).split('T')[0].split(' ')[0].trim();
+      if (targetStr === format(currentDate, 'yyyy-MM-dd')) isClosedToday = true;
+      if (targetStr === format(tomorrow, 'yyyy-MM-dd')) isClosedTomorrow = true;
+    }
+
+    // A. CLOSURE CANCELLATION
+    if (cd.status === 'cancelled') {
+      const cancelledAt = new Date(cd.cancelled_at || currentDate);
+      const hoursLiveBeforeCancel = (cancelledAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+      if (hoursLiveBeforeCancel < 24) return; // Ghosting
+      
+      const hoursSinceCancel = (currentDate.getTime() - cancelledAt.getTime()) / (1000 * 60 * 60);
+      if (hoursSinceCancel <= 48) {
+        let dateLabel = 'the scheduled date';
+        if (cd.type === 'weekly' && cd.dayOfWeek !== undefined) {
+           dateLabel = `every ${DAYS_OF_WEEK[Number(cd.dayOfWeek)]}`;
+        } else if (specificDateStr) {
+           dateLabel = format(new Date(String(specificDateStr).split('T')[0]), 'MMM d, yyyy');
+        }
+
+        smartNotifications.push({
+          id: `cancel_${versionId}`,
+          type: 'Update',
+          title: `Schedule Update`,
+          content: `The venue closure for ${dateLabel} has been cancelled. We will be open for regular operations!`,
+          createdAt: cancelledAt.toISOString(),
+          isPinned: true
+        });
+      }
+      return;
+    }
+
+    // B. CLOSURE ALERTS (Today & Tomorrow)
+    if (isClosedToday || isClosedTomorrow) {
+      smartNotifications.push({
+        id: `alert_${versionId}_${isClosedToday ? 'today' : 'tomorrow'}`,
+        type: 'System Alert',
+        title: isClosedToday ? 'Emergency Alert: Venue Closed Today' : 'Notice: Venue Closed Tomorrow',
+        content: `Please be advised that One Shot Bar is closed ${isClosedToday ? 'today' : 'tomorrow'} (${format(isClosedToday ? currentDate : tomorrow, 'MMMM d, yyyy')})${cd.reason ? ` due to: ${cd.reason}` : '.'}`,
+        createdAt: startOfDay(currentDate).toISOString(),
+        isPinned: true
+      });
+    }
+  });
+
+  // 🟢 3. MERGE, SORT & PIN
+  const rawNotifications = [...smartNotifications, ...activeAnnouncements, ...resNotifications];
+  const allNotifications = rawNotifications.sort((a: any, b: any) => {
+    if (a.isPinned && !b.isPinned) return -1;
+    if (!a.isPinned && b.isPinned) return 1;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+
+  // Strict Unread Check
+  const hasUnread = allNotifications.length > 0 && allNotifications.some((n: any) => !readAnnouncements.includes(n.id));
 
   const markAsRead = (id: string) => {
     const newRead = [...readAnnouncements, id];
     setReadAnnouncements(newRead);
     localStorage.setItem('oneshot_read_announcements', JSON.stringify(newRead));
-    if (isFirstTime) setIsFirstTime(false);
   };
 
   const markAllAsRead = () => {
     const ids = allNotifications.map((n: any) => n.id);
     setReadAnnouncements(ids);
     localStorage.setItem('oneshot_read_announcements', JSON.stringify(ids));
-    setIsFirstTime(false);
   };
 
   const getOpenHoursDisplay = () => {
@@ -2067,9 +2206,21 @@ export function HomePage() {
                       <label className="block text-xs text-neutral-400 mb-1.5">Upload Receipt Screenshot <span className="text-rose-500">*</span></label>
                       <div className="flex items-center gap-3">
                         <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 hover:border-blue-500 rounded-lg px-3 py-3 text-center transition-colors flex flex-col items-center justify-center gap-1">
-                          <input type="file" accept="image/*" className="hidden" onChange={e => { 
+                          <input type="file" accept="image/jpeg, image/png, image/webp" className="hidden" onChange={e => { 
                             const file = e.target.files?.[0]; 
                             if (file) {
+                              // Security: 5MB File Size Limit
+                              if (file.size > 5 * 1024 * 1024) {
+                                alert("File is too large. Maximum allowed size is 5MB.");
+                                e.target.value = '';
+                                return;
+                              }
+                              // Security: Strict MIME Type Check
+                              if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+                                alert("Unsupported file type. Only JPEG, PNG, and WEBP are allowed.");
+                                e.target.value = '';
+                                return;
+                              }
                               setReceiptImg(URL.createObjectURL(file)); 
                               setReceiptFile(file);
                             } 

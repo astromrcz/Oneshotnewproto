@@ -650,6 +650,8 @@ export function HomePage() {
   };
 
   // 🟢 FIXED: Converted to async to handle the cloud upload before saving the reservation
+  declare const grecaptcha: any;
+
   const handlePaymentConfirm = async () => {
     if (reservations.some((r: any) => r.paymentRef === paymentRef)) {
       alert("This GCash reference number has already been recorded in our system. Please verify your transaction and enter a valid, unique reference number.");
@@ -659,6 +661,20 @@ export function HomePage() {
     setConfirmingPayment(true);
     
     try {
+      let captchaToken = null;
+      if (typeof grecaptcha !== 'undefined') {
+        captchaToken = await new Promise((resolve) => {
+          grecaptcha.ready(async () => {
+            try {
+              const token = await grecaptcha.execute('YOUR_RECAPTCHA_SITE_KEY', { action: 'submit_reservation' });
+              resolve(token);
+            } catch (err) {
+              resolve(null);
+            }
+          });
+        });
+      }
+
       let finalReceiptUrl = null;
 
       // 1. Upload the receipt to Supabase Storage
@@ -2092,6 +2108,9 @@ export function HomePage() {
                 <button onClick={handlePaymentConfirm} disabled={confirmingPayment || !paymentRef || paymentRef.length < 13 || !receiptImg || !agreedToTerms} className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
                   {confirmingPayment ? 'Processing...' : <><CheckCircle size={15} /> I've Sent the Payment</>}
                 </button>
+                <p className="text-[9px] text-neutral-500 text-center mt-4">
+                  This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-neutral-300">Privacy Policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-neutral-300">Terms of Service</a> apply.
+                </p>
               </div>
             </motion.div>
           </motion.div>

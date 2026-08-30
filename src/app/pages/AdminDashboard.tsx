@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { toast } from 'sonner';
 import { 
   Users, Table2, Tag, Megaphone, CalendarX2, DollarSign, 
   TrendingUp, Bell, CloudRain, Sun, Cloud, MapPin, 
   Database, RefreshCw, CalendarDays, ArrowRight, ShieldCheck,
-  Wifi, WifiOff, Download, CheckCircle2
+  Wifi, WifiOff, Download, CheckCircle2, CheckCircle, AlertTriangle, X
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { format, isToday, isTomorrow } from 'date-fns';
@@ -24,6 +23,16 @@ export function AdminDashboard() {
   const [locationQuery, setLocationQuery] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date>(new Date());
+
+  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
+  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToast({ msg, type });
+    toastTimeout.current = setTimeout(() => setToast(null), 5000); // 5 seconds
+  };
 
   // ── Connectivity & Local Backup State ─────────────────────────
   const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
@@ -119,16 +128,13 @@ export function AdminDashboard() {
     })
     .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  
-
   const handleManualSync = async () => {
     if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-      toast.error("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", { duration: 6000 });
+      flash("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", "error");
       return;
     }
 
     setIsSyncing(true);
-    toast.loading("Uploading local data to cloud...", { id: 'cloud-sync' });
     try {
       const res = await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
       const data = await res.json();
@@ -139,13 +145,22 @@ export function AdminDashboard() {
 
       if (refreshLiveMonitor) await refreshLiveMonitor();
       setLastSync(new Date());
-      toast.success("Database successfully backed up to Cloud.", { id: 'cloud-sync' });
+      flash("Database successfully backed up to Cloud.", "success");
       
     } catch (e: any) {
       console.error(e);
-      toast.error(`Sync Failed: ${e.message}`, { id: 'cloud-sync', duration: 6000 });
+      flash(`Sync Failed: ${e.message}`, "error");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleWeatherSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (locationQuery.trim()) {
+      // Basic coordinates for the search query (simplified for demo)
+      updateWeatherLocation('14.5995', '120.9842', locationQuery.trim());
+      setIsEditingWeather(false);
     }
   };
 
@@ -197,6 +212,45 @@ export function AdminDashboard() {
   return (
     <div className="space-y-6 relative">
       
+      {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
+      {toast && (
+        <div 
+          className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: 'toast-fade-out 5s forwards' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toast.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
+            <button 
+              onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+              className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+            >
+              <X size={14} />
+            </button>
+            <div 
+              className={`absolute bottom-0 left-0 h-1 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+              style={{ animation: 'toast-shrink 5s linear forwards' }}
+            />
+          </div>
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* ── MERGED: System Connectivity & Database Backup Operator Banner ── */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">

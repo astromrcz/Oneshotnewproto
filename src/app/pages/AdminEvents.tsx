@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, } from 'react';
 import {
   Calendar as CalendarIcon, Plus, Trash2, Edit2, Tag, Paperclip, X, Link,
   Users, ToggleLeft, ToggleRight, ChevronDown, ChevronUp,
@@ -72,8 +72,8 @@ export function AdminEvents() {
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
   const [viewMonth, setViewMonth] = useState(new Date());
   const [dayActionDate, setDayActionDate] = useState<Date | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-
+  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
   // Event Form State
   const [showEventModal, setShowEventModal] = useState(false);
   const [cancelEventModal, setCancelEventModal] = useState<{ id: string; title: string; date: string } | null>(null);
@@ -109,8 +109,11 @@ export function AdminEvents() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
-
+  const flash = (msg: string, type: 'success' | 'error' = 'success') => {
+      if (toastTimeout.current) clearTimeout(toastTimeout.current);
+      setToast({ msg, type });
+      toastTimeout.current = setTimeout(() => setToast(null), 5000); // 5 seconds
+    };
   const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
   
   const closedMap = new Map(
@@ -192,18 +195,9 @@ export function AdminEvents() {
     const isPastEvent = lastDate ? isBefore(new Date(lastDate), todayStart) : false;
     const isOngoingEvent = eventDates.some((d: string) => isSameDay(new Date(d), new Date()));
 
-    if (ev.isCancelled) {
-      alert("Editing is disabled: This event has already been cancelled.");
-      return;
-    }
-    if (isPastEvent) {
-      alert("Editing is disabled: This event is already completed.");
-      return;
-    }
-    if (isOngoingEvent) {
-      alert("Editing is disabled: This event is currently ongoing.");
-      return;
-    }
+    if (ev.isCancelled) { flash("Editing is disabled: This event has already been cancelled.", "error"); return; }
+    if (isPastEvent) { flash("Editing is disabled: This event is already completed.", "error"); return; }
+    if (isOngoingEvent) { flash("Editing is disabled: This event is currently ongoing.", "error"); return; }
 
     setEditingEventId(ev.id);
     const durationParts = ev.duration ? ev.duration.split(' - ') : [];
@@ -363,10 +357,9 @@ export function AdminEvents() {
   };
 
   const saveEvent = () => {
-    if (!eventForm.title || eventForm.dates.length === 0) {
-      alert("Please provide a title and select at least one date.");
-      return;
-    }
+    if (!eventForm.title || eventForm.dates.length === 0) { 
+    flash("Please provide a title and select at least one date.", "error"); return; 
+  }
 
     if (!eventForm.isWholeDay) {
       if (eventForm.startTime === eventForm.endTime) {
@@ -413,6 +406,9 @@ export function AdminEvents() {
         // Ignore the event currently being edited
         if (editingEventId && ev.id === editingEventId) return false;
 
+        // 🟢 FIX: Ignore System Holidays so they don't block your custom events
+        if (ev.type?.toLowerCase() === 'holiday' || eventForm.type?.toLowerCase() === 'holiday') return false;
+
         // Check if the existing event occurs on this date
         const evDates = ev.date ? ev.date.split(',').map((str: string) => str.trim()) : [];
         if (!evDates.includes(d)) return false;
@@ -438,12 +434,9 @@ export function AdminEvents() {
         return newStart < evEnd && newEnd > evStart;
       });
 
-      if (conflictingEvent) {
-        alert(
-          `Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${conflictingEvent.duration || 'Whole Day'}). Please pick a different date or time.`
-        );
-        return;
-      }
+     if (conflictingEvent) { 
+      flash(`Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${conflictingEvent.duration || 'Whole Day'}). Please pick a different date or time.`, "error"); return; 
+    }
     }
 
     if (!editingEventId) {
@@ -496,10 +489,9 @@ export function AdminEvents() {
 
   const saveClosure = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!closureForm.isFullDay && closureForm.openTime === closureForm.closeTime) {
-      alert("Open time and Close time cannot be the same for partial closures.");
-      return;
-    }
+    if (!closureForm.isFullDay && closureForm.openTime === closureForm.closeTime) { 
+  flash("Open time and Close time cannot be the same for partial closures.", "error"); return; 
+}
 
     const payload = {
       ...closureForm,
@@ -515,17 +507,11 @@ export function AdminEvents() {
     if (!promoForm.code || !promoForm.description) return;
     
     if (promoForm.hasExpiry && promoForm.expiresAt) {
-       if (new Date(promoForm.expiresAt) <= new Date()) {
-         alert("Expiry date must be set in the future.");
-         return;
-       }
+       if (new Date(promoForm.expiresAt) <= new Date()) { flash("Expiry date must be set in the future.", "error"); return; }
     }
 
     if (promoForm.hasStart && promoForm.hasExpiry && promoForm.startDate && promoForm.expiresAt) {
-      if (new Date(promoForm.expiresAt) <= new Date(promoForm.startDate)) {
-        alert("Expiry date must be after the start date.");
-        return;
-      }
+      if (new Date(promoForm.expiresAt) <= new Date(promoForm.startDate)) { flash("Expiry date must be after the start date.", "error"); return; }
     }
     setShowPromoConfirm(true); 
   };
@@ -556,14 +542,8 @@ export function AdminEvents() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     files.forEach(file => {
-      if (!file.type.startsWith('image/')) {
-        alert(`File "${file.name}" is not a valid image format. Please upload JPG, PNG, WEBP, or GIF only.`);
-        return;
-      }
-      if (file.size > 50 * 1024 * 1024) {
-        alert(`File "${file.name}" exceeds the maximum 50MB limit.`);
-        return;
-      }
+      if (!file.type.startsWith('image/')) { flash(`File "${file.name}" is not a valid image format. Please upload JPG, PNG, WEBP, or GIF only.`, "error"); return; }
+      if (file.size > 50 * 1024 * 1024) { flash(`File "${file.name}" exceeds the maximum 50MB limit.`, "error"); return; }
 
       const reader = new FileReader();
       reader.onload = () => {
@@ -1024,9 +1004,35 @@ export function AdminEvents() {
         </div>
       </div>
 
+      {/* 🟢 NEW TOP-RIGHT FLOATING TOAST WITH 5S TIMER */}
       {toast && (
-        <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-sm px-4 py-3 rounded-xl">
-          <CheckCircle size={14} /> {toast}
+        <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300">
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toast.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
+            <button 
+              onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+              className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+            >
+              <X size={14} />
+            </button>
+            <div 
+              className={`absolute bottom-0 left-0 h-1 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+              style={{ animation: 'toast-shrink 5s linear forwards' }}
+            />
+          </div>
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+          `}</style>
         </div>
       )}
 

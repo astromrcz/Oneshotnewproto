@@ -1,6 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { toast } from 'sonner';
 import {
   User, Lock, Phone, Eye, EyeOff, Palette, Sun, Moon,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
@@ -64,26 +63,33 @@ export function SettingsPage() {
 
   const pwStrength = getPasswordStrength(secForm.newPassword);
 
-  const flashSaved = (key: string) => { setSaved(key); setTimeout(() => setSaved(null), 2500); };
+  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToast({ msg, type });
+    toastTimeout.current = setTimeout(() => setToast(null), 5000); // 5 seconds
+  };
 
   // 🟢 FIXED: Added strict validation checks before saving
   const handleSaveProfile = () => {
     if (!profileForm.fullName.trim()) {
-      toast.error("Full Name cannot be empty.");
+      flash("Full Name cannot be empty.", "error");
       return;
     }
     if (profileForm.phone.length !== 11) {
-      toast.error("Phone number must be exactly 11 digits.");
+      flash("Phone number must be exactly 11 digits.", "error");
       return;
     }
     updateStaffProfile({ fullName: profileForm.fullName.trim(), phone: profileForm.phone });
     setProfileEdit(false); 
-    flashSaved('profile');
+    flash("Profile changes saved!", "success");
   };
 
   const handleSaveAvatar = async () => {
     if (!pendingFile) return;
-    toast.loading("Uploading profile picture...", { id: 'avatar-upload' });
+    flash("Uploading profile picture...", "success");
     try {
       const formData = new FormData();
       formData.append('image', pendingFile);
@@ -99,9 +105,9 @@ export function SettingsPage() {
       if (targetUser) updateStaffUser(targetUser.id, { avatarImg: data.url });
 
       setPendingAvatar(null); setPendingFile(null);
-      toast.success("Profile picture updated!", { id: 'avatar-upload' });
+      flash("Profile picture updated!", "success");
     } catch (error) {
-      toast.error("Failed to update profile picture.", { id: 'avatar-upload' });
+      flash("Failed to update profile picture.", "error");
     }
   };
 
@@ -123,15 +129,13 @@ export function SettingsPage() {
     updateStaffProfile({ username: secForm.username || staffProfile.username, ...(hashedNew ? { password: hashedNew } : {}) });
     
     setSecEdit(false); setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '' }));
-    flashSaved('security');
+    flash("Security credentials saved!", "success");
   };
-  
 
-  // 🟢 NEW: Handles generating and downloading the Recovery PIN .txt file
   const handleDownloadPin = () => {
     const targetUser = staffUsers.find(u => u.username === staffProfile.username);
     if (!targetUser?.recoveryPin) {
-      toast.error("Recovery PIN not found.");
+      flash("Recovery PIN not found.", "error");
       return;
     }
     const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
@@ -144,9 +148,8 @@ export function SettingsPage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    toast.success("Recovery PIN downloaded successfully!");
+    flash("Recovery PIN downloaded successfully!", "success");
   };
-  
 
   const tabs: { id: Section; label: string; icon: React.ElementType }[] = [
     { id: 'overview',   label: 'Overview',   icon: BarChart2 },
@@ -157,6 +160,45 @@ export function SettingsPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-12">
+      {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
+      {toast && (
+        <div 
+          className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: 'toast-fade-out 5s forwards' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toast.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
+            <button 
+              onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+              className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+            >
+              <X size={14} />
+            </button>
+            <div 
+              className={`absolute bottom-0 left-0 h-1 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+              style={{ animation: 'toast-shrink 5s linear forwards' }}
+            />
+          </div>
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* HEADER */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex items-center gap-5 shadow-sm">
         <div className="flex flex-col items-center gap-2">
@@ -179,7 +221,6 @@ export function SettingsPage() {
           <h2 className="text-xl font-black text-neutral-100">{staffProfile.fullName}</h2>
           <p className="text-sm text-neutral-400 font-medium">{staffProfile.role} · @{staffProfile.username}</p>
         </div>
-        {saved && <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-xs px-3 py-2 rounded-xl animate-in fade-in"><CheckCircle size={13} /> Changes saved!</div>}
       </div>
 
       <div className="flex flex-wrap sm:flex-nowrap gap-1 bg-neutral-950 border border-neutral-800 rounded-xl p-1">

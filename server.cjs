@@ -149,6 +149,11 @@ const db = new sqlite3.Database(dbPath, (err) => {
         db.run(`ALTER TABLE session_history ADD COLUMN ${col}`, () => {});
       });
 
+      const annCols = ['startDate TEXT'];
+      annCols.forEach(col => {
+        db.run(`ALTER TABLE announcements ADD COLUMN ${col}`, () => {});
+      });
+
       db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) SELECT key_name, setting_value FROM system_settings`, (err) => {
         if (!err) {
           db.run(`DELETE FROM systemSettings WHERE keyName LIKE '%_%'`);
@@ -423,7 +428,10 @@ app.post('/api/sync-to-cloud', async (req, res) => {
 
    await Promise.all([
       // 🟢 SITE SETTINGS & CMS
-      syncTable('cms', 'cms', r => ({ keyName: r.keyName, settingValue: r.settingValue }), 'keyName'),
+      syncTable('cms', 'cms', r => ({ 
+        keyName: r.keyName, 
+        settingValue: r.settingValue 
+      }), 'keyName'),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
       
       // 🟢 TABLE MANAGEMENT & SESSIONS
@@ -432,7 +440,18 @@ app.post('/api/sync-to-cloud', async (req, res) => {
       syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime || new Date().toISOString() }), 'id'),
       
       // 🟢 PROMOS, EVENTS, ANNOUNCEMENTS & CLOSURES
-      syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: r.is_active ? 1 : 0, is_limited_uses: r.is_limited_uses ? 1 : 0, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
+      syncTable('promo_codes', 'promo_codes', r => ({ 
+      id: r.id, 
+      code: r.code, 
+      discount_percent: r.discount_percent, 
+      description: r.description, 
+      is_active: !!r.is_active,             // Converts 1/0 to true/false
+      is_limited_uses: !!r.is_limited_uses, // Converts 1/0 to true/false
+      max_usage: r.max_usage, 
+      usage_count: r.usage_count, 
+      start_date: r.start_date || null, 
+      expires_at: r.expires_at || null 
+    }), 'id'),
       syncTable('events', 'events', r => ({ 
         id: r.id, 
         title: r.title, 
@@ -453,8 +472,26 @@ app.post('/api/sync-to-cloud', async (req, res) => {
         isCancelled: r.isCancelled ? 1 : 0,
         cancelReason: r.cancelReason || null
       }), 'id'),
-      syncTable('announcements', 'announcements', r => ({ id: r.id, title: r.title, content: r.content, type: r.type, isActive: r.isActive ? 1 : 0, expiresAt: r.expiresAt || null, createdAt: r.createdAt || new Date().toISOString() }), 'id'),
-      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: r.is_full_day ? 1 : 0, open_time: r.open_time, close_time: r.close_time }), 'id'),
+      syncTable('announcements', 'announcements', r => ({ 
+        id: r.id, 
+        title: r.title, 
+        content: r.content, 
+        type: r.type, 
+        isActive: r.isActive ? 1 : 0, 
+        expiresAt: r.expiresAt || null, 
+        createdAt: r.createdAt || new Date().toISOString()
+        // 🟢 REMOVED startDate from cloud sync to prevent Supabase 500 crashes
+      }), 'id'),
+            syncTable('closed_dates', 'closed_dates', r => ({ 
+        id: r.id, 
+        closed_date: r.closed_date || null, 
+        type: r.type, 
+        day_of_week: r.day_of_week, 
+        reason: r.reason, 
+        is_full_day: !!r.is_full_day,         // Converts 1/0 to true/false
+        open_time: r.open_time, 
+        close_time: r.close_time 
+      }), 'id'),
       
       // 🟢 MENU INVENTORY
       syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id'),
@@ -606,6 +643,44 @@ app.post('/api/events', (req, res) => {
       res.status(201).json({ message: "Event created.", id });
     }
   );
+});
+
+app.post('/api/announcements', (req, res) => {
+  const { id, title, content, type, isActive, expiresAt, createdAt, startDate } = req.body;
+  db.run(
+    `INSERT INTO announcements (id, title, content, type, isActive, expiresAt, createdAt, startDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, title, content, type, isActive ? 1 : 0, expiresAt || null, createdAt || new Date().toISOString(), startDate || null],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Announcement added.", id });
+    }
+  );
+});
+
+app.put('/api/announcements/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE announcements SET ${setClause} WHERE id = ?`, values, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Announcement updated." });
+  });
+});
+
+app.delete('/api/announcements/:id', (req, res) => {
+  db.run(`DELETE FROM announcements WHERE id = ?`, [req.params.id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Announcement deleted." });
+  });
 });
 
 app.put('/api/events/:id', (req, res) => {

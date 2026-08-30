@@ -4,7 +4,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import { useAppContext } from '../context/AppContext';
-import { TrendingUp, TrendingDown, BarChart3, Clock, DollarSign, TableProperties, Calendar as CalendarIcon, Printer, CheckCircle, Table2, Users, BarChart2, Download } from 'lucide-react';
+import { 
+  TrendingUp, BarChart3, Clock, DollarSign, TableProperties, 
+  Calendar as CalendarIcon, Printer, CheckCircle, Table2, Users, 
+  BarChart2, Download, X, ClipboardList 
+} from 'lucide-react';
 import { format, isToday, startOfDay, endOfDay, subDays, isSameDay, parseISO, eachDayOfInterval } from 'date-fns';
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
@@ -55,13 +59,14 @@ function StatCard({ label, value, sub, icon: Icon, color }: any) {
 export function Analytics() {
   const { tables, reservations, queue, sessionHistory } = useAppContext() as any;
   
-  // 🟢 NEW: Custom Date Range for Overall Analytics (Defaults to last 7 days)
+  // 🟢 Custom Date Range for Overall Analytics
   const [dateRange, setDateRange] = useState({
     start: format(subDays(new Date(), 6), 'yyyy-MM-dd'),
     end: format(new Date(), 'yyyy-MM-dd')
   });
 
-  // Shift Summary Date (Single Date)
+  // 🟢 Drawer & Shift Summary State
+  const [isShiftDrawerOpen, setIsShiftDrawerOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   
   const history = sessionHistory || [];
@@ -72,7 +77,7 @@ export function Analytics() {
   const filteredHistory = useMemo(() => {
     const start = startOfDay(parseISO(dateRange.start));
     let end = endOfDay(parseISO(dateRange.end));
-    if (end < start) end = endOfDay(start); // Safety fallback
+    if (end < start) end = endOfDay(start); 
 
     return history.filter((h: any) => {
       const d = new Date(h.startTime || h.endTime);
@@ -80,7 +85,7 @@ export function Analytics() {
     });
   }, [history, dateRange]);
 
-  // 1. Revenue Trend (Daily Breakdown across the custom range)
+  // 1. Revenue Trend
   const revenueTrend = useMemo(() => {
     const start = parseISO(dateRange.start);
     let end = parseISO(dateRange.end);
@@ -101,7 +106,7 @@ export function Analytics() {
     }
   }, [filteredHistory, dateRange]);
 
-  // 2. Revenue by Day of Week (Which days are busiest in this range?)
+  // 2. Revenue by Day of Week
   const revenueByDayOfWeek = useMemo(() => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const totals = [0, 0, 0, 0, 0, 0, 0];
@@ -159,7 +164,7 @@ export function Analytics() {
         name: table.name,
         sessions: tHist.length,
         revenue: totalRev,
-        usage: Math.min(100, Math.round((tHist.length / 20) * 100)) // Arbitrary 20 for visual scaling
+        usage: Math.min(100, Math.round((tHist.length / 20) * 100))
       };
     }).sort((a: any, b: any) => b.revenue - a.revenue);
   }, [tables, filteredHistory]);
@@ -174,7 +179,7 @@ export function Analytics() {
 
 
   // ==========================================
-  // 🟢 SHIFT SUMMARY CALCULATIONS (BOTTOM SECTION)
+  // 🟢 SHIFT SUMMARY CALCULATIONS (FOR DRAWER)
   // ==========================================
   const dayStart = useMemo(() => startOfDay(new Date(selectedDate + 'T00:00:00')), [selectedDate]);
   const dayEnd   = useMemo(() => endOfDay(new Date(selectedDate + 'T00:00:00')), [selectedDate]);
@@ -241,7 +246,6 @@ export function Analytics() {
         h.id,
         `"${h.customerName}"`,
         `"${tableName}"`,
-        // 🟢 FIXED: Changed to M/d/yy HH:mm to match your reference and fit inside Excel's default column width
         format(new Date(h.startTime), 'M/d/yy HH:mm'),
         h.endTime ? format(new Date(h.endTime), 'M/d/yy HH:mm') : '',
         h.durationMinutes || 0,
@@ -292,7 +296,175 @@ export function Analytics() {
     <div className="space-y-6">
       
       {/* ============================== */}
-      {/* OVERALL ANALYTICS SECTION      */}
+      {/* SHIFT SUMMARY DRAWER OVERLAY   */}
+      {/* ============================== */}
+      {isShiftDrawerOpen && (
+        <div 
+          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm transition-opacity"
+          onClick={() => setIsShiftDrawerOpen(false)}
+        />
+      )}
+
+      {/* ============================== */}
+      {/* SHIFT SUMMARY SLIDING DRAWER   */}
+      {/* ============================== */}
+      <div 
+        className={`fixed inset-y-0 right-0 z-[110] w-full max-w-3xl bg-neutral-950 border-l border-neutral-800 shadow-2xl transform transition-transform duration-300 ease-in-out flex flex-col ${
+          isShiftDrawerOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        <div className="flex-none flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-900/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-sky-500/10 text-sky-400 rounded-lg">
+              <TrendingUp size={18} />
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-neutral-100">Daily Shift Summary</h2>
+              <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Detailed single-day report</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setIsShiftDrawerOpen(false)} 
+            className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-xl transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2">
+              <CalendarIcon size={14} className="text-neutral-500" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="bg-transparent text-sm text-neutral-200 focus:outline-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
+            
+            <div className="flex gap-2">
+              <button
+                onClick={handleExportShiftCSV}
+                className="flex items-center gap-2 px-3 py-2 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-700/50 text-sky-400 text-sm rounded-xl font-semibold transition-all"
+                title="Export shift data to CSV"
+              >
+                <Download size={14} /> Export CSV
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-2 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 text-sm rounded-xl font-semibold transition-all"
+                title="Print Shift Report"
+              >
+                <Printer size={14} /> Print
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-500">Showing data for:</span>
+            <span className="text-xs font-semibold text-neutral-200 bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1">
+              {format(new Date(selectedDate + 'T00:00:00'), 'EEEE, MMMM d, yyyy')}
+              {isSelectedToday && <span className="ml-2 text-sky-400">(Today)</span>}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {[
+              { label: 'Tables Used', value: tablesUsedToday, icon: Table2, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+              { label: 'Completed Sessions', value: dayHistory.length, icon: BarChart2, color: 'text-sky-400', bg: 'bg-sky-500/10 border-sky-500/20' },
+              { label: 'Revenue Collected', value: formatPHP(revenueCollected), icon: DollarSign, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
+              { label: 'Reservations Served', value: reservationsServed, icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+              { label: 'Avg Session Duration', value: dayHistory.length ? `${(dayHistory.reduce((s: number, r: any) => s + (r.durationMinutes || 0), 0) / dayHistory.length / 60).toFixed(1)}h` : '—', icon: Clock, color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20' },
+              { label: 'Queue Served', value: isSelectedToday ? queue.filter((q: any) => q.status === 'called' || q.status === 'seated').length : '—', icon: Users, color: 'text-rose-400', bg: 'bg-rose-500/10 border-rose-500/20' },
+            ].map(({ label, value, icon: Icon, color, bg }) => (
+              <div key={label} className={`bg-neutral-950 border rounded-xl p-4 ${bg}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Icon size={14} className={color} />
+                  <p className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">{label}</p>
+                </div>
+                <p className={`text-xl font-black ${color}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden flex flex-col max-h-[500px]">
+            <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between flex-none bg-neutral-900/50">
+              <h3 className="text-sm font-bold text-neutral-200">
+                Transactions Log
+              </h3>
+              <span className="text-xs text-neutral-500">{combinedShiftData.length} records</span>
+            </div>
+
+            {combinedShiftData.length === 0 ? (
+              <div className="px-5 py-12 text-center flex-1">
+                <CalendarIcon size={28} className="mx-auto text-neutral-700 mb-2" />
+                <p className="text-sm text-neutral-500">No transactions or reservations for this date.</p>
+              </div>
+            ) : (
+              <div className="overflow-auto flex-1">
+                <table className="w-full relative whitespace-nowrap">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="border-b border-neutral-800 bg-neutral-950 shadow-sm">
+                      {['Customer', 'Time', 'Duration', 'Party', 'Table', 'Status', 'Total', 'Paid'].map(h => (
+                        <th key={h} className="text-left text-[10px] text-neutral-500 uppercase tracking-wider font-semibold px-4 py-3">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-800/50">
+                    {combinedShiftData.map((r: any, idx: number) => {
+                      const cfg = statusConfig[r.status] || statusConfig.completed;
+                      const tableName = r.tableId ? tables.find((t: any) => t.id === r.tableId)?.name || r.tableId : '—';
+                      return (
+                        <tr key={`${r.id}-${idx}`} className="hover:bg-neutral-900/40 transition-colors">
+                          <td className="px-4 py-3">
+                            <p className="text-sm font-semibold text-neutral-200">
+                              {r.customerName}
+                              {r.isReservation ? (
+                                <span className="ml-2 text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded uppercase border border-blue-500/30">Reservation</span>
+                              ) : (
+                                <span className="ml-2 text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded uppercase border border-emerald-500/30">Walk-in</span>
+                              )}
+                            </p>
+                            <p className="text-xs text-neutral-500">{r.contactNumber}</p>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-neutral-400">{r.timeSlot}</td>
+                          <td className="px-4 py-3 text-sm text-neutral-400">{r.duration}</td>
+                          <td className="px-4 py-3 text-sm text-neutral-400">{r.partySize}</td>
+                          <td className="px-4 py-3 text-sm text-neutral-400">{tableName}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${cfg.color}`}>
+                              {cfg.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-neutral-200 font-semibold">{formatPHP(r.totalAmount || 0)}</td>
+                          <td className="px-4 py-3 text-sm text-emerald-400 font-semibold">{formatPHP(r.paidAmount || 0)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {combinedShiftData.length > 0 && (
+              <div className="flex-none border-t border-neutral-700 bg-neutral-900/80 p-4 flex items-center justify-end gap-6 shadow-md">
+                <span className="text-xs text-neutral-500 font-semibold uppercase tracking-wider">Day Totals:</span>
+                <span className="text-sm font-black text-white">
+                  {formatPHP(combinedShiftData.reduce((s: number, r: any) => s + (r.totalAmount || 0), 0))}
+                </span>
+                <span className="text-sm font-black text-emerald-400">
+                  {formatPHP(combinedShiftData.reduce((s: number, r: any) => s + (r.paidAmount || 0), 0))}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+
+      {/* ============================== */}
+      {/* MAIN ANALYTICS VIEW            */}
       {/* ============================== */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-neutral-800 pb-4">
@@ -331,9 +503,18 @@ export function Analytics() {
 
             <button
               onClick={handleExportAnalyticsCSV}
-              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30 flex-none"
+              className="flex items-center gap-2 px-3.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white text-sm rounded-xl font-semibold transition-all border border-neutral-700 flex-none"
+              title="Export Range"
             >
-              <Download size={14} /> Export Range
+              <Download size={14} /> <span className="hidden sm:inline">Export</span>
+            </button>
+            
+            {/* 🟢 NEW: Daily Shift Summary Drawer Toggle */}
+            <button
+              onClick={() => setIsShiftDrawerOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/30 text-sky-400 text-sm rounded-xl font-semibold transition-all flex-none shadow-lg shadow-sky-900/20"
+            >
+              <ClipboardList size={16} /> Daily Shift Summary
             </button>
           </div>
         </div>
@@ -495,153 +676,6 @@ export function Analytics() {
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-
-      <div className="h-px bg-neutral-800 my-8" />
-
-      {/* ============================== */}
-      {/* DAILY SHIFT SUMMARY SECTION    */}
-      {/* ============================== */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-black text-neutral-100 flex items-center gap-2">
-              <TrendingUp className="text-sky-400" /> Daily Shift Summary
-            </h2>
-            <p className="text-xs text-neutral-500 mt-1">Detailed summary of table activity, revenue, and reservations for a single day.</p>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2">
-              <CalendarIcon size={14} className="text-neutral-500" />
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={e => setSelectedDate(e.target.value)}
-                className="bg-transparent text-sm text-neutral-200 focus:outline-none"
-                style={{ colorScheme: 'dark' }}
-              />
-            </div>
-            
-            <div className="flex gap-2">
-              <button
-                onClick={handleExportShiftCSV}
-                className="flex items-center gap-2 px-3 py-2 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-700/50 text-sky-400 text-sm rounded-xl font-semibold transition-all"
-                title="Export shift data to CSV"
-              >
-                <Download size={14} /> Export CSV
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="flex items-center gap-2 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 text-sm rounded-xl font-semibold transition-all"
-                title="Print Shift Report"
-              >
-                <Printer size={14} /> Print
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Date Label */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-neutral-500">Showing data for:</span>
-          <span className="text-xs font-semibold text-neutral-200 bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1">
-            {format(new Date(selectedDate + 'T00:00:00'), 'EEEE, MMMM d, yyyy')}
-            {isSelectedToday && <span className="ml-2 text-sky-400">(Today)</span>}
-          </span>
-        </div>
-
-        {/* Shift Summary Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          {[
-            { label: 'Tables Used', value: tablesUsedToday, icon: Table2, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
-            { label: 'Completed Sessions', value: dayHistory.length, icon: BarChart2, color: 'text-sky-400', bg: 'bg-sky-500/10 border-sky-500/20' },
-            { label: 'Revenue Collected', value: formatPHP(revenueCollected), icon: DollarSign, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
-            { label: 'Reservations Served', value: reservationsServed, icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
-            { label: 'Avg Session Duration', value: dayHistory.length ? `${(dayHistory.reduce((s: number, r: any) => s + (r.durationMinutes || 0), 0) / dayHistory.length / 60).toFixed(1)}h` : '—', icon: Clock, color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20' },
-            { label: 'Queue Served', value: isSelectedToday ? queue.filter((q: any) => q.status === 'called' || q.status === 'seated').length : '—', icon: Users, color: 'text-rose-400', bg: 'bg-rose-500/10 border-rose-500/20' },
-          ].map(({ label, value, icon: Icon, color, bg }) => (
-            <div key={label} className={`bg-neutral-950 border rounded-xl p-4 ${bg}`}>
-              <div className="flex items-center gap-3 mb-2">
-                <Icon size={15} className={color} />
-                <p className="text-xs text-neutral-500 font-semibold">{label}</p>
-              </div>
-              <p className={`text-2xl font-black ${color}`}>{value}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Shift Transactions Table */}
-        <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-neutral-200">
-              Transactions Log
-            </h3>
-            <span className="text-xs text-neutral-500">{combinedShiftData.length} records</span>
-          </div>
-
-          {combinedShiftData.length === 0 ? (
-            <div className="px-5 py-12 text-center">
-              <CalendarIcon size={28} className="mx-auto text-neutral-700 mb-2" />
-              <p className="text-sm text-neutral-500">No transactions or reservations for this date.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto max-h-[600px]">
-              <table className="w-full relative">
-                <thead className="sticky top-0 z-10">
-                  <tr className="border-b border-neutral-800 bg-neutral-900 shadow-md">
-                    {['Customer', 'Time', 'Duration', 'Party', 'Table', 'Status', 'Total', 'Paid'].map(h => (
-                      <th key={h} className="text-left text-[10px] text-neutral-500 uppercase tracking-wider font-semibold px-4 py-3">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-800/50">
-                  {combinedShiftData.map((r: any, idx: number) => {
-                    const cfg = statusConfig[r.status] || statusConfig.completed;
-                    const tableName = r.tableId ? tables.find((t: any) => t.id === r.tableId)?.name || r.tableId : '—';
-                    return (
-                      <tr key={`${r.id}-${idx}`} className="hover:bg-neutral-900/40 transition-colors">
-                        <td className="px-4 py-3">
-                          <p className="text-sm font-semibold text-neutral-200">
-                            {r.customerName}
-                            {r.isReservation ? (
-                              <span className="ml-2 text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded uppercase border border-blue-500/30">Reservation</span>
-                            ) : (
-                              <span className="ml-2 text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded uppercase border border-emerald-500/30">Walk-in</span>
-                            )}
-                          </p>
-                          <p className="text-xs text-neutral-500">{r.contactNumber}</p>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-neutral-400">{r.timeSlot}</td>
-                        <td className="px-4 py-3 text-sm text-neutral-400">{r.duration}</td>
-                        <td className="px-4 py-3 text-sm text-neutral-400">{r.partySize}</td>
-                        <td className="px-4 py-3 text-sm text-neutral-400">{tableName}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${cfg.color}`}>
-                            {cfg.label}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-neutral-200 font-semibold">{formatPHP(r.totalAmount || 0)}</td>
-                        <td className="px-4 py-3 text-sm text-emerald-400 font-semibold">{formatPHP(r.paidAmount || 0)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot className="sticky bottom-0 z-10">
-                  <tr className="border-t border-neutral-700 bg-neutral-900 shadow-md">
-                    <td colSpan={6} className="px-4 py-4 text-xs text-neutral-500 font-semibold uppercase tracking-wider text-right">Day Totals:</td>
-                    <td className="px-4 py-4 text-sm font-black text-white">
-                      {formatPHP(combinedShiftData.reduce((s: number, r: any) => s + (r.totalAmount || 0), 0))}
-                    </td>
-                    <td className="px-4 py-4 text-sm font-black text-emerald-400">
-                      {formatPHP(combinedShiftData.reduce((s: number, r: any) => s + (r.paidAmount || 0), 0))}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
         </div>
       </div>
     </div>

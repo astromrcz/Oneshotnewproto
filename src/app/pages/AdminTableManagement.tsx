@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   Plus, X, Pencil, Table2, CheckCircle, AlertTriangle,
-  PowerOff, Power, Wrench, MoreVertical
+  PowerOff, Power, Wrench, MoreVertical, Users, Clock, Percent, ShieldAlert
 } from 'lucide-react';
-import { PageLoader } from '../components/PageLoader';
+
+import { format } from 'date-fns';
 
 const COMMON_MAINTENANCE_REASONS = [
   'Torn / Damaged Felt',
@@ -41,7 +42,6 @@ export function AdminTableManagement() {
 
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
-  // 🟢 NEW: PageLoader state instead of window.location.reload()
   const [isLoading, setIsLoading]   = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('PROCESSING...');
 
@@ -74,8 +74,6 @@ export function AdminTableManagement() {
     }
 
     setIsSubmitting(true);
-    
-    // 🟢 Use PageLoader instead of reload
     setLoadingMsg('ADDING NEW TABLE...');
     setIsLoading(true);
     addTable(trimmedName);
@@ -121,8 +119,6 @@ export function AdminTableManagement() {
     }
 
     setIsConfirming(true);
-    
-    // 🟢 Use PageLoader instead of reload
     setLoadingMsg('UPDATING TABLE STATUS...');
     setIsLoading(true);
 
@@ -150,8 +146,6 @@ export function AdminTableManagement() {
 
   const handleReactivateTable = async (table: any) => {
     setOpenDropdownId(null);
-    
-    // 🟢 Use PageLoader instead of reload
     setLoadingMsg('REACTIVATING TABLE...');
     setIsLoading(true);
 
@@ -168,16 +162,41 @@ export function AdminTableManagement() {
     }, 800);
   };
 
+  // 🟢 NEW: Admin Force Clear Action
+  const handleForceClear = async (table: any) => {
+    setOpenDropdownId(null);
+    if (window.confirm(`⚠️ WARNING: Are you sure you want to forcefully clear ${table.name}? This will wipe any active sessions without saving to history.`)) {
+      setLoadingMsg('CLEARING TABLE...');
+      setIsLoading(true);
+      
+      freeTable(table.id);
+      await fetch(`http://localhost:3001/api/tables/${table.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'available', sessionData: null, maintenanceReason: null })
+      });
+
+      setTimeout(() => {
+        setIsLoading(false);
+        flash(`"${table.name}" forcefully cleared and reset to available.`);
+      }, 800);
+    }
+  };
+
   const STATUS_COLOR: Record<string, string> = {
     available:   'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
     occupied:    'bg-rose-500/10 text-rose-400 border-rose-500/20',
     reserved:    'bg-amber-500/10 text-amber-400 border-amber-500/20',
     maintenance: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+    event:       'bg-purple-500/10 text-purple-400 border-purple-500/20',
   };
 
   const activeCount   = tables.filter((t: any) => t.isActive).length;
   const inactiveCount = tables.filter((t: any) => !t.isActive || t.status === 'maintenance').length;
   const occupiedCount = tables.filter((t: any) => t.status === 'occupied').length;
+  
+  // 🟢 NEW: Utilization Calculation
+  const utilization = activeCount > 0 ? Math.round((occupiedCount / activeCount) * 100) : 0;
 
   const filtered = tables.filter((t: any) => {
     if (filter === 'active')   return t.isActive && t.status !== 'maintenance';
@@ -186,9 +205,24 @@ export function AdminTableManagement() {
   });
 
   return (
-    <div className="relative space-y-5">
-      {/* 🟢 eFootball 3D Loader Overlay */}
-      <PageLoader isLoading={isLoading} message={loadingMsg} />
+    <div className="relative space-y-6">
+      {/* 🟢 FULL SCREEN SPINNER TO BLOCK INPUTS */}
+      {isLoading && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="flex flex-col items-center gap-4 bg-neutral-950 p-8 rounded-2xl border border-neutral-800 shadow-2xl">
+            <div className="w-12 h-12 border-4 border-sky-500/20 border-t-sky-500 rounded-full animate-spin"></div>
+            <p className="text-xs font-bold text-sky-400 uppercase tracking-widest animate-pulse">
+              {loadingMsg || "Syncing Changes..."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Header Info */}
+      <div>
+        <h2 className="text-2xl font-black text-neutral-100 tracking-tight">Table Management</h2>
+        <p className="text-sm text-neutral-500 mt-1">Add, rename, and manage the physical status of billiard tables.</p>
+      </div>
 
       {toast && (
         <div className={`flex items-center gap-2.5 text-sm px-4 py-3 rounded-xl border animate-in fade-in ${
@@ -201,21 +235,27 @@ export function AdminTableManagement() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* 🟢 UPGRADED: Enhanced Analytics Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          { label: 'Total Tables',     value: tables.length,  color: 'text-white' },
-          { label: 'Active',           value: activeCount,    color: 'text-emerald-400' },
-          { label: 'In Maintenance',   value: inactiveCount,  color: 'text-orange-400' },
-          { label: 'Occupied Now',     value: occupiedCount,  color: 'text-rose-400' },
+          { label: 'Total Tables',     value: tables.length,  color: 'text-white',          icon: Table2 },
+          { label: 'Utilization',      value: `${utilization}%`, color: 'text-blue-400',    icon: Percent },
+          { label: 'Active',           value: activeCount,    color: 'text-emerald-400',    icon: CheckCircle },
+          { label: 'Occupied Now',     value: occupiedCount,  color: 'text-rose-400',       icon: Users },
+          { label: 'In Maintenance',   value: inactiveCount,  color: 'text-orange-400',     icon: Wrench },
         ].map(s => (
-          <div key={s.label} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center">
-            <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-neutral-500 uppercase tracking-wider mt-1">{s.label}</p>
+          <div key={s.label} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col justify-between">
+            <div className="flex justify-between items-start mb-2">
+              <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">{s.label}</p>
+              <s.icon size={14} className={s.color} />
+            </div>
+            <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
           </div>
         ))}
       </div>
 
-      <div className="bg-neutral-950 border border-amber-900/30 rounded-xl overflow-hidden">
+      {/* Add New Table Control */}
+      <div className="bg-neutral-950 border border-amber-900/30 rounded-xl overflow-hidden shadow-lg shadow-amber-900/5">
         {!showAddForm ? (
           <button
             onClick={() => setShowAddForm(true)}
@@ -224,9 +264,11 @@ export function AdminTableManagement() {
             <Plus size={16} /> Add New Table
           </button>
         ) : (
-          <div className="p-5">
-            <h3 className="text-sm font-bold text-neutral-200 mb-4">New Table</h3>
-            <form onSubmit={handleAdd} className="space-y-4">
+          <div className="p-5 bg-neutral-900/30">
+            <h3 className="text-sm font-bold text-neutral-200 mb-4 flex items-center gap-2">
+              <Plus size={16} className="text-amber-500" /> New Table Configuration
+            </h3>
+            <form onSubmit={handleAdd} className="space-y-4 max-w-lg">
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs text-neutral-400 font-medium">Table Name *</label>
@@ -239,7 +281,7 @@ export function AdminTableManagement() {
                   maxLength={15}
                   placeholder="e.g. Table 11, VIP 1 (max 15 chars)"
                   autoFocus
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-amber-600/50"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-amber-600/50"
                 />
               </div>
 
@@ -247,16 +289,16 @@ export function AdminTableManagement() {
                 <button
                   type="button"
                   onClick={() => { setShowAddForm(false); setNewName(''); }}
-                  className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-sm font-semibold transition-all"
+                  className="px-6 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-sm font-semibold transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!newName.trim() || isSubmitting}
-                  className="flex-1 flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-amber-900/20"
                 >
-                  {isSubmitting ? 'Saving Table...' : <><Plus size={14} /> Add Table</>}
+                  {isSubmitting ? 'Saving...' : 'Add Table to System'}
                 </button>
               </div>
             </form>
@@ -264,167 +306,191 @@ export function AdminTableManagement() {
         )}
       </div>
 
-      <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between gap-3 flex-wrap">
-          <h3 className="text-sm font-bold text-neutral-200">All Tables ({tables.length})</h3>
-          <div className="flex gap-1.5">
-            {(['all', 'active', 'inactive'] as const).map(f => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-all capitalize ${
-                  filter === f
-                    ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                    : 'bg-neutral-900 text-neutral-500 border-neutral-800 hover:border-neutral-700'
-                }`}
-              >
-                {f === 'inactive' ? 'In Maintenance' : f}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Table Filters */}
+      <div className="flex items-center gap-1.5 border-b border-neutral-800 pb-4">
+        {(['all', 'active', 'inactive'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all capitalize ${
+              filter === f
+                ? 'bg-neutral-100 text-neutral-900'
+                : 'bg-neutral-900 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
+            }`}
+          >
+            {f === 'inactive' ? 'In Maintenance' : f}
+          </button>
+        ))}
+      </div>
 
-        <div className="divide-y divide-neutral-800/50">
-          {filtered.length === 0 ? (
-            <div className="px-5 py-10 text-center">
-              <Table2 size={28} className="mx-auto text-neutral-700 mb-2" />
-              <p className="text-sm text-neutral-500">No tables found.</p>
-            </div>
-          ) : filtered.map((t: any) => {
+      {/* 🟢 UPGRADED: Rich Grid Layout for Tables */}
+      {filtered.length === 0 ? (
+        <div className="px-5 py-16 text-center border border-dashed border-neutral-800 rounded-2xl">
+          <Table2 size={32} className="mx-auto text-neutral-700 mb-3" />
+          <p className="text-sm text-neutral-400 font-medium">No tables match your filter.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+          {filtered.map((t: any) => {
             const isMaintenance = t.status === 'maintenance' || !t.isActive;
+            const isOccupied = t.status === 'occupied' && t.session;
 
             return (
               <div
                 key={t.id}
-                className={`px-5 py-3.5 flex items-center gap-4 transition-colors relative ${
-                  openDropdownId === t.id ? 'z-50' : 'z-0'
-                } ${
-                  t.isActive && !isMaintenance
-                    ? 'hover:bg-neutral-900/30'
-                    : 'bg-neutral-900/20'
+                className={`bg-neutral-950 border rounded-2xl p-5 flex flex-col relative transition-all ${
+                  isMaintenance ? 'border-orange-900/30 opacity-80' : 
+                  isOccupied ? 'border-rose-900/30 shadow-[0_0_15px_rgba(225,29,72,0.05)]' : 
+                  'border-neutral-800 hover:border-neutral-700'
                 }`}
               >
-                {/* Table Icon Box */}
-                <div className="flex-shrink-0">
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center border ${
-                    t.isActive && !isMaintenance
-                      ? 'bg-neutral-800 border-neutral-700 text-neutral-400'
-                      : 'bg-orange-950/20 border-orange-900/40 text-orange-400'
-                  }`}>
-                    {isMaintenance ? <Wrench size={18} /> : <Table2 size={18} />}
-                  </div>
-                </div>
-
-                {editingId === t.id ? (
-                  <div className="flex-1 flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={e => setEditName(e.target.value)}
-                      maxLength={15}
-                      onKeyDown={e => { if (e.key === 'Enter') handleUpdateName(t.id); if (e.key === 'Escape') setEditingId(null); }}
-                      autoFocus
-                      className="flex-1 max-w-[200px] bg-neutral-900 border border-amber-600/50 rounded-lg px-3 py-1.5 text-sm text-neutral-200 focus:outline-none"
-                    />
-                    <span className="text-[10px] text-neutral-500 font-mono w-8">{editName.length}/15</span>
-                    <button onClick={() => handleUpdateName(t.id)} className="p-1.5 text-emerald-400 hover:bg-emerald-950/30 rounded-lg">
-                      <CheckCircle size={15} />
-                    </button>
-                    <button onClick={() => setEditingId(null)} className="p-1.5 text-neutral-500 hover:bg-neutral-800 rounded-lg">
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold truncate text-neutral-200">
-                        {t.name}
-                      </p>
-                      {!t.isActive && t.status !== 'maintenance' && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
-                          INACTIVE
-                        </span>
-                      )}
-                    </div>
-                    {t.session && <p className="text-[11px] text-neutral-500 truncate">{t.session.customerName}</p>}
-                  </div>
-                )}
-
-                {/* Status Badges - Always Visible Even Under Maintenance */}
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                {/* Card Header */}
+                <div className="flex justify-between items-start mb-5">
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded border flex items-center gap-1.5 uppercase tracking-wider ${
                     STATUS_COLOR[t.status] || STATUS_COLOR.available
                   }`}>
-                    {t.status === 'maintenance' && <Wrench size={10} />}
+                    {t.status === 'maintenance' && <Wrench size={11} />}
+                    {isOccupied && <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
                     {t.status}
                   </span>
-                  {t.status === 'maintenance' && t.maintenanceReason && (
-                    <span className="text-[11px] text-orange-400 max-w-[180px] truncate text-right font-medium">
-                      {t.maintenanceReason}
-                    </span>
-                  )}
-                </div>
 
-                {/* Actions Dropdown Menu - Full Opacity & Always Above Adjacent Rows */}
-                {editingId !== t.id && (
-                  <div className="relative flex-shrink-0" ref={openDropdownId === t.id ? dropdownRef : null}>
-                    <button
-                      onClick={() => setOpenDropdownId(openDropdownId === t.id ? null : t.id)}
-                      className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700 transition-colors"
-                      title="Table Actions"
-                    >
-                      <MoreVertical size={16} />
-                    </button>
+                  {/* Actions Dropdown Menu */}
+                  {editingId !== t.id && (
+                    <div className="relative flex-shrink-0" ref={openDropdownId === t.id ? dropdownRef : null}>
+                      <button
+                        onClick={() => setOpenDropdownId(openDropdownId === t.id ? null : t.id)}
+                        className="p-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700 transition-colors"
+                      >
+                        <MoreVertical size={14} />
+                      </button>
 
-                    {openDropdownId === t.id && (
-                      <div className="absolute right-0 top-full mt-2 w-52 bg-neutral-950 border border-neutral-800 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] z-50 overflow-hidden py-1">
-                        <button
-                          onClick={() => {
-                            setOpenDropdownId(null);
-                            setEditingId(t.id);
-                            setEditName(t.name);
-                          }}
-                          className="w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 transition-colors flex items-center gap-2"
-                        >
-                          <Pencil size={13} className="text-amber-400" />
-                          <span>Rename Table</span>
-                        </button>
-
-                        {t.status !== 'maintenance' ? (
+                      {openDropdownId === t.id && (
+                        <div className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
                           <button
                             onClick={() => {
                               setOpenDropdownId(null);
-                              if (t.status === 'occupied') {
-                                flash('Cannot set an occupied table to maintenance.', 'error');
-                                return;
-                              }
-                              setMaintenanceModal({ tableId: t.id, tableName: t.name, targetActive: false });
-                              setSelectedReason(COMMON_MAINTENANCE_REASONS[0]);
-                              setCustomReason('');
+                              setEditingId(t.id);
+                              setEditName(t.name);
                             }}
-                            className="w-full px-4 py-2.5 text-left text-xs text-orange-400 hover:bg-orange-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
+                            className="w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-800 transition-colors flex items-center gap-2"
                           >
-                            <PowerOff size={13} />
-                            <span>Set Maintenance / Disable</span>
+                            <Pencil size={13} className="text-amber-400" />
+                            <span>Rename Table</span>
                           </button>
-                        ) : (
-                          <button
-                            onClick={() => handleReactivateTable(t)}
-                            className="w-full px-4 py-2.5 text-left text-xs text-emerald-400 hover:bg-emerald-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
-                          >
-                            <Power size={13} />
-                            <span>Reactivate Table</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
+
+                          {/* 🟢 Force Clear Action */}
+                          {(t.status === 'occupied' || t.status === 'reserved' || t.status === 'event') && (
+                            <button
+                              onClick={() => handleForceClear(t)}
+                              className="w-full px-4 py-2.5 text-left text-xs text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
+                            >
+                              <ShieldAlert size={13} />
+                              <span>Force Clear Table</span>
+                            </button>
+                          )}
+
+                          {t.status !== 'maintenance' ? (
+                            <button
+                              onClick={() => {
+                                setOpenDropdownId(null);
+                                if (t.status === 'occupied') {
+                                  flash('Cannot set an occupied table to maintenance. Force Clear it first if necessary.', 'error');
+                                  return;
+                                }
+                                setMaintenanceModal({ tableId: t.id, tableName: t.name, targetActive: false });
+                                setSelectedReason(COMMON_MAINTENANCE_REASONS[0]);
+                                setCustomReason('');
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-xs text-orange-400 hover:bg-orange-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
+                            >
+                              <PowerOff size={13} />
+                              <span>Set Maintenance</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleReactivateTable(t)}
+                              className="w-full px-4 py-2.5 text-left text-xs text-emerald-400 hover:bg-emerald-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
+                            >
+                              <Power size={13} />
+                              <span>Reactivate Table</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Card Middle: Table Name & Edit State */}
+                <div className="flex items-center gap-3 mb-6">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center border flex-shrink-0 ${isOccupied ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+                    <Table2 size={20} />
                   </div>
-                )}
+                  
+                  {editingId === t.id ? (
+                    <div className="flex-1 flex flex-col gap-2 relative z-10">
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={e => setEditName(e.target.value)}
+                        maxLength={15}
+                        onKeyDown={e => { if (e.key === 'Enter') handleUpdateName(t.id); if (e.key === 'Escape') setEditingId(null); }}
+                        autoFocus
+                        className="w-full bg-neutral-900 border border-amber-600/50 rounded-lg px-3 py-1.5 text-sm text-neutral-200 focus:outline-none"
+                      />
+                      <div className="flex gap-1.5">
+                        <button onClick={() => handleUpdateName(t.id)} className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[10px] font-bold py-1 rounded">Save</button>
+                        <button onClick={() => setEditingId(null)} className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 text-[10px] font-bold py-1 rounded">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-black text-white truncate">{t.name}</h3>
+                      {!t.isActive && t.status !== 'maintenance' && (
+                        <p className="text-[10px] text-neutral-500 font-semibold mt-0.5">DISABLED</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Card Footer: Contextual Information */}
+                <div className="mt-auto pt-4 border-t border-neutral-800/60">
+                  {isOccupied ? (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <div className="w-6 h-6 rounded bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0">
+                          <Users size={12} className="text-neutral-400" />
+                        </div>
+                        <p className="text-xs font-bold text-neutral-300 truncate">{t.session.customerName}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-[10px] text-neutral-500 font-medium">Started</p>
+                        <p className="text-xs font-mono text-neutral-300">{format(new Date(t.session.startTime), 'h:mm a')}</p>
+                      </div>
+                    </div>
+                  ) : isMaintenance ? (
+                    <div className="flex items-start gap-2">
+                      <Wrench size={14} className="text-orange-500/70 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs text-orange-400/80 leading-relaxed line-clamp-2">
+                        {t.maintenanceReason || "Offline for routine maintenance."}
+                      </p>
+                    </div>
+                  ) : t.status === 'event' ? (
+                     <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                      <p className="text-xs text-purple-400 font-semibold truncate">{t.maintenanceReason || "Reserved for Event"}</p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-neutral-500 font-medium flex items-center gap-1.5">
+                      <CheckCircle size={12} className="text-emerald-500/50" /> Ready for next guest
+                    </p>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
-      </div>
+      )}
 
       {/* Unified Maintenance / Disable Modal */}
       {maintenanceModal && (
@@ -436,7 +502,7 @@ export function AdminTableManagement() {
                   <Wrench size={16} className="text-orange-400" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-neutral-100">Set Maintenance / Disable</h2>
+                  <h2 className="text-base font-bold text-neutral-100">Set Maintenance</h2>
                   <p className="text-xs text-neutral-500">{maintenanceModal.tableName}</p>
                 </div>
               </div>

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
 import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert } from 'lucide-react';
-import { PageLoader } from '../components/PageLoader';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
   { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
@@ -185,9 +184,19 @@ export function AdminUsers() {
 
   const roleConfig = (role: StaffUser['role']) => ROLES.find(r => r.value === role) ?? ROLES[0];
 
-  return (
-    <div className="relative space-y-5">
-      <PageLoader isLoading={isLoading} message={loadingMsg} />
+ return (
+    <div className="relative space-y-6">
+      {/* 🟢 FULL SCREEN SPINNER TO BLOCK INPUTS */}
+      {isLoading && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="flex flex-col items-center gap-4 bg-neutral-950 p-8 rounded-2xl border border-neutral-800 shadow-2xl">
+            <div className="w-12 h-12 border-4 border-sky-500/20 border-t-sky-500 rounded-full animate-spin"></div>
+            <p className="text-xs font-bold text-sky-400 uppercase tracking-widest animate-pulse">
+              {loadingMsg || "Syncing Changes..."}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[

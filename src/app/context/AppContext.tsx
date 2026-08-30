@@ -115,8 +115,8 @@ export type ReservationTerms = {
 export type AnnouncementType = 'info' | 'warning' | 'promo' | 'event';
 export type Announcement = {
   id: string; title: string; content: string; type: AnnouncementType; isActive: boolean; createdAt: Date; expiresAt?: Date;
+  startDate?: Date | string; // 🟢 ADDED TO FIX CONTEXT ERRORS
 };
-
 export type ClosedDate = {
   id: string; date: string; reason: string; isFullDay: boolean; openTime?: string; closeTime?: string; type?: 'specific' | 'weekly'; dayOfWeek?: number; 
 };
@@ -416,7 +416,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     fetchHolidays();
   }, []);
+  // 🟢 DEBOUNCED CLOUD SYNC: Prevents duplicate records from concurrent race conditions
   const cloudSyncTimeout = useRef<NodeJS.Timeout | null>(null);
+
   const runCloudBackup = () => {
     if (cloudSyncTimeout.current) clearTimeout(cloudSyncTimeout.current);
     cloudSyncTimeout.current = setTimeout(() => {
@@ -794,11 +796,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
+    // 1. Update Memory (React State & Session Storage)
     setStaffProfile(prev => {
       const updated = { ...prev, ...p };
       sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(updated));
       return updated;
     });
+
+    // 2. 🟢 FIX: Persist changes directly to the local SQLite database
+    const targetId = p.id || staffProfile.id;
+    if (targetId) {
+      const dbPayload: Partial<StaffUser> = {};
+      
+      if (p.username !== undefined) dbPayload.username = p.username;
+      if (p.password !== undefined) dbPayload.password = p.password;
+      if (p.fullName !== undefined) dbPayload.fullName = p.fullName;
+      if (p.phone !== undefined) dbPayload.phone = p.phone;
+      if (p.avatarImg !== undefined) dbPayload.avatarImg = p.avatarImg;
+
+      if (Object.keys(dbPayload).length > 0) {
+        // Instantly update the global staff list so the new login credentials work without a refresh
+        setStaffUsers(prev => prev.map(u => u.id === targetId ? { ...u, ...dbPayload } : u));
+        
+        // Push the new credentials to the Local Edge Server
+        fetch(`http://localhost:3001/api/staff/${targetId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dbPayload)
+        }).catch(() => {});
+      }
+    }
   };
 
   const addTable = (name: string) => {

@@ -1,69 +1,202 @@
 import { useState, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Package, Search, Plus, UploadCloud, Archive, CheckCircle, Clock, Check } from 'lucide-react';
+import { Package, Search, Plus, UploadCloud, Archive, CheckCircle, Clock, Check, X, AlertTriangle, RefreshCw, History } from 'lucide-react';
 import { format } from 'date-fns';
 
 export function LostAndFound() {
-  const { lostItems, addLostItem, updateLostItem, deleteLostItem } = useAppContext();
+  const { lostItems, addLostItem, updateLostItem, deleteLostItem } = useAppContext() as any;
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'found' | 'claimed' | 'archived' | 'all'>('all');
+  const [filter, setFilter] = useState<'found' | 'claimed' | 'archived' | 'all'>('found');
   
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ itemName: '', description: '', image: '' });
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [claimModalId, setClaimModalId] = useState<string | null>(null);
   const [claimName, setClaimName] = useState('');
 
-  const filtered = lostItems.filter(item => {
+  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
+  const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' | 'loading' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToastState({ msg, type });
+    if (type !== 'loading') {
+      toastTimeout.current = setTimeout(() => setToastState(null), 5000);
+    }
+  };
+
+  const CharCount = ({ current, max }: { current?: string, max: number }) => {
+    const len = current?.length || 0;
+    return (
+      <span className={`text-[10px] ${len >= max ? 'text-rose-400 font-bold' : 'text-neutral-600'}`}>
+        {len}/{max}
+      </span>
+    );
+  };
+
+  const filtered = lostItems.filter((item: any) => {
     const matchSearch = item.itemName.toLowerCase().includes(search.toLowerCase()) || item.description.toLowerCase().includes(search.toLowerCase());
-    if (filter === 'archived') return matchSearch && item.isArchived;
-    if (item.isArchived && filter !== 'all') return false;
-    if (filter === 'all') return matchSearch && !item.isArchived;
-    return matchSearch && item.status === filter && !item.isArchived;
+    if (!matchSearch) return false;
+
+    if (filter === 'all') return true;
+    if (filter === 'found') return item.status === 'found' && !item.isArchived;
+    if (filter === 'claimed') return item.status === 'claimed'; // Show claimed regardless of isArchived flag
+    if (filter === 'archived') return item.isArchived && item.status !== 'claimed'; // Manually archived records
+    return true;
   });
 
   const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setForm({ ...form, image: URL.createObjectURL(file) });
+    if (file) {
+      setForm({ ...form, image: URL.createObjectURL(file) });
+      setImageFile(file);
+    }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.itemName) return;
-    addLostItem({ itemName: form.itemName, description: form.description, image: form.image, foundDate: new Date(), status: 'found' });
-    setShowModal(false);
-    setForm({ itemName: '', description: '', image: '' });
+    if (!form.itemName.trim() || !form.description.trim()) {
+      flash("Item name and description are required.", "error");
+      return;
+    }
+
+    setIsSubmitting(true);
+    let finalImageUrl = form.image;
+
+    try {
+      // 🟢 Physically upload the image to the local SQLite edge server
+      if (imageFile) {
+        const formData = new FormData();
+        formData.append('image', imageFile);
+        const res = await fetch('http://localhost:3001/api/images', {
+          method: 'POST',
+          body: formData,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          finalImageUrl = data.url; // Permanent local URL
+        } else {
+          flash("Failed to upload image. Saving without photo.", "error");
+        }
+      }
+
+      addLostItem({ 
+        itemName: form.itemName.trim(), 
+        description: form.description.trim(), 
+        image: finalImageUrl, 
+        foundDate: new Date(), 
+        status: 'found' 
+      });
+      
+      flash("Lost item successfully recorded.", "success");
+      setShowModal(false);
+      setForm({ itemName: '', description: '', image: '' });
+      setImageFile(null);
+    } catch (error) {
+      flash("An error occurred while saving.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleClaim = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!claimName || !claimModalId) return;
-    updateLostItem(claimModalId, { status: 'claimed', claimedBy: claimName, claimedDate: new Date() });
+    if (!claimName.trim() || !claimModalId) {
+      flash("Claimant name or ID is required.", "error");
+      return;
+    }
+    // 🟢 Automatically archive when claimed
+    updateLostItem(claimModalId, { status: 'claimed', claimedBy: claimName.trim(), claimedDate: new Date(), isArchived: true });
+    flash(`Item successfully marked as claimed by ${claimName.trim()}.`, "success");
     setClaimModalId(null);
     setClaimName('');
   };
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-neutral-950 p-6 rounded-2xl border border-neutral-800">
-        <div>
-          <h2 className="text-2xl font-black text-white flex items-center gap-2"><Package className="text-emerald-500" /> Lost & Found</h2>
-          <p className="text-sm text-neutral-500 mt-1">Manage items left behind by customers.</p>
-        </div>
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          <div className="relative flex-1 md:w-64">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-            <input type="text" placeholder="Search items..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:border-emerald-500 outline-none" />
+    <div className="space-y-6 max-w-6xl mx-auto relative">
+      
+      {/* 🟢 TOP-RIGHT FLOATING TOAST */}
+      {toastState && (
+        <div 
+          className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toastState.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : toastState.type === 'loading'
+              ? 'bg-sky-950/90 border-sky-900/50 text-sky-400'
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
+            {toastState.type !== 'loading' && (
+              <button 
+                onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+            {toastState.type !== 'loading' && (
+              <div 
+                className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                style={{ animation: 'toast-shrink 5s linear forwards' }}
+              />
+            )}
           </div>
-          <select value={filter} onChange={e => setFilter(e.target.value as any)} className="bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none">
-            <option value="all">All Active</option>
-            <option value="found">Unclaimed</option>
-            <option value="claimed">Claimed</option>
-            <option value="archived">History (Archived)</option>
-          </select>
-          <button onClick={() => setShowModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors">
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* 🟢 NEW: Detailed Segmented Header */}
+      <div className="flex flex-col gap-5 bg-neutral-950 p-6 rounded-2xl border border-neutral-800 relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
+          <div>
+            <h2 className="text-2xl font-black text-white flex items-center gap-2"><Package className="text-emerald-500" /> Lost & Found</h2>
+            <p className="text-sm text-neutral-500 mt-1">Manage items left behind by customers.</p>
+          </div>
+          <button onClick={() => setShowModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors flex-shrink-0 w-full md:w-auto justify-center">
             <Plus size={16} /> Log Item
           </button>
+        </div>
+        
+        <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3 relative z-10">
+          <div className="flex bg-neutral-900 border border-neutral-800 rounded-xl p-1 overflow-x-auto w-full lg:w-auto hide-scrollbar">
+            {[
+              { id: 'found', label: 'Unclaimed Items' },
+              { id: 'claimed', label: 'Claimed Items' },
+              { id: 'archived', label: 'Archived / Misc' },
+              { id: 'all', label: 'All Records' },
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id as any)}
+                className={`flex-1 lg:flex-none px-4 py-2 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${filter === f.id ? 'bg-neutral-800 text-emerald-400 shadow-sm' : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800/50'}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          
+          <div className="relative w-full lg:w-72 flex-shrink-0">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+            <input type="text" placeholder="Search items..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:border-emerald-500 outline-none transition-colors" />
+          </div>
         </div>
       </div>
 
@@ -73,7 +206,7 @@ export function LostAndFound() {
             <Package size={32} className="mx-auto text-neutral-600 mb-3" />
             <p className="text-neutral-400 font-medium">No items found in the registry.</p>
           </div>
-        ) : filtered.map(item => (
+        ) : filtered.map((item: any) => (
           <div key={item.id} className={`bg-neutral-950 border rounded-2xl overflow-hidden flex flex-col transition-all ${item.status === 'claimed' || item.isArchived ? 'border-neutral-800 opacity-70' : 'border-emerald-900/50 hover:border-emerald-500/50'}`}>
             <div className="h-48 bg-neutral-900 relative">
               {item.image ? (
@@ -82,11 +215,12 @@ export function LostAndFound() {
                  <div className="w-full h-full flex items-center justify-center text-neutral-700"><Package size={48} /></div>
               )}
               <div className="absolute top-3 right-3 flex gap-1.5">
-                {item.isArchived && <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border bg-neutral-800 text-neutral-400 border-neutral-700">Archived</span>}
-                {!item.isArchived && (
-                  <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${item.status === 'claimed' ? 'bg-neutral-800 text-neutral-400 border-neutral-700' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-lg'}`}>
-                    {item.status}
-                  </span>
+                {item.isArchived && item.status !== 'claimed' && <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border bg-neutral-800 text-neutral-400 border-neutral-700 shadow-lg">Archived</span>}
+                {item.status === 'claimed' && (
+                  <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border bg-neutral-800 text-neutral-400 border-neutral-700 shadow-lg">Claimed</span>
+                )}
+                {item.status === 'found' && !item.isArchived && (
+                  <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-lg">Found</span>
                 )}
               </div>
             </div>
@@ -101,32 +235,40 @@ export function LostAndFound() {
                 )}
               </div>
             </div>
-            {!item.isArchived && (
+            {!item.isArchived && item.status !== 'claimed' && (
               <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
-                {item.status === 'found' ? (
-                  <button onClick={() => setClaimModalId(item.id)} className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors">Mark as Claimed</button>
-                ) : (
-                  <button onClick={() => updateLostItem(item.id, { status: 'found', claimedBy: '', claimedDate: undefined })} className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors">Revert to Unclaimed</button>
-                )}
-                <button onClick={() => deleteLostItem(item.id)} className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-500 hover:text-rose-500 rounded-lg transition-colors" title="Move to History/Archive"><Archive size={14}/></button>
+                <button onClick={() => setClaimModalId(item.id)} className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors">Mark as Claimed</button>
+                <button onClick={() => { deleteLostItem(item.id); flash("Item moved to archives.", "success"); }} className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-500 hover:text-rose-500 rounded-lg transition-colors" title="Move to History/Archive"><Archive size={14}/></button>
+              </div>
+            )}
+            {item.status === 'claimed' && (
+              <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
+                <button onClick={() => { updateLostItem(item.id, { status: 'found', claimedBy: null, claimedDate: null, isArchived: false }); flash("Reverted to unclaimed status.", "success"); }} className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors">Revert to Unclaimed</button>
               </div>
             )}
           </div>
         ))}
       </div>
 
+      {/* MODALS */}
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-white mb-4">Log Found Item</h3>
             <form onSubmit={handleSave} className="space-y-4">
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5">Item Name *</label>
-                <input required type="text" value={form.itemName} onChange={e => setForm({...form, itemName: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" placeholder="e.g. Black Wallet" />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-xs text-neutral-400">Item Name *</label>
+                  <CharCount current={form.itemName} max={50} />
+                </div>
+                <input required maxLength={50} type="text" value={form.itemName} onChange={e => setForm({...form, itemName: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" placeholder="e.g. Black Wallet" />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5">Description *</label>
-                <textarea required value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 resize-none h-20" placeholder="Contents, color, brand..." />
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-xs text-neutral-400">Description *</label>
+                  <CharCount current={form.description} max={400} />
+                </div>
+                <textarea required maxLength={400} value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 resize-none h-20" placeholder="Contents, color, brand..." />
               </div>
               <div>
                 <label className="block text-xs text-neutral-400 mb-1.5">Photo</label>
@@ -136,8 +278,10 @@ export function LostAndFound() {
                 </label>
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
-                <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-semibold">Save Item</button>
+                <button type="button" onClick={() => { setShowModal(false); setImageFile(null); setForm({ itemName: '', description: '', image: '' }); }} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors">
+                  {isSubmitting ? 'Saving...' : 'Save Item'}
+                </button>
               </div>
             </form>
           </div>
@@ -145,15 +289,21 @@ export function LostAndFound() {
       )}
 
       {claimModalId && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
              <h3 className="text-lg font-bold text-white mb-2">Claim Item</h3>
              <p className="text-xs text-neutral-400 mb-4">Record the name or details of the person claiming this item for security purposes.</p>
              <form onSubmit={handleClaim} className="space-y-4">
-               <input required type="text" value={claimName} onChange={e => setClaimName(e.target.value)} autoFocus className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500" placeholder="Customer Name or ID..." />
+               <div>
+                 <div className="flex justify-between items-center mb-1.5">
+                   <label className="text-xs text-neutral-400">Claimant Name / ID *</label>
+                   <CharCount current={claimName} max={50} />
+                 </div>
+                 <input required maxLength={50} type="text" value={claimName} onChange={e => setClaimName(e.target.value)} autoFocus className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500" placeholder="Customer Name or ID..." />
+               </div>
                <div className="flex gap-2">
-                 <button type="button" onClick={() => setClaimModalId(null)} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
-                 <button type="submit" className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold">Confirm Claim</button>
+                 <button type="button" onClick={() => { setClaimModalId(null); setClaimName(''); }} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
+                 <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-semibold">Confirm Claim</button>
                </div>
              </form>
           </div>

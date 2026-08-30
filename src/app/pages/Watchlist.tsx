@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { ShieldAlert, Search, Plus, X, AlertTriangle, Scale, Archive, Link as LinkIcon } from 'lucide-react';
+import { ShieldAlert, Search, Plus, X, AlertTriangle, Scale, Archive, Link as LinkIcon, CheckCircle, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 
 const REASON_CFG = {
@@ -11,12 +11,25 @@ const REASON_CFG = {
 };
 
 export function Watchlist() {
-  const { watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem } = useAppContext();
+  const { watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem } = useAppContext() as any;
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'active' | 'resolved' | 'archived' | 'all'>('active');
   
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', reason: 'debt', description: '', evidenceLink: '' });
+  const [confirmResolveId, setConfirmResolveId] = useState<string | null>(null);
+
+  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
+  const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' | 'loading' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToastState({ msg, type });
+    if (type !== 'loading') {
+      toastTimeout.current = setTimeout(() => setToastState(null), 5000);
+    }
+  };
 
   const CharCount = ({ current, max }: { current?: string, max: number }) => {
     const len = current?.length || 0;
@@ -26,44 +39,113 @@ export function Watchlist() {
       </span>
     );
   };
-  const filtered = watchlist.filter(item => {
+
+  const filtered = watchlist.filter((item: any) => {
     const matchSearch = item.name.toLowerCase().includes(search.toLowerCase()) || item.description.toLowerCase().includes(search.toLowerCase());
-    if (filter === 'archived') return matchSearch && item.isArchived;
-    if (item.isArchived && filter !== 'all') return false; 
-    if (filter === 'all') return matchSearch && !item.isArchived;
-    return matchSearch && item.status === filter && !item.isArchived;
+    if (!matchSearch) return false;
+
+    if (filter === 'all') return true;
+    if (filter === 'active') return item.status === 'active' && !item.isArchived;
+    if (filter === 'resolved') return item.status === 'resolved'; // Show resolved regardless of isArchived flag
+    if (filter === 'archived') return item.isArchived && item.status !== 'resolved'; // Manually archived records
+    return true;
   });
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name) return;
-    addWatchlistItem({ name: form.name, reason: form.reason as any, description: form.description, evidenceLink: form.evidenceLink, dateAdded: new Date(), status: 'active' });
+    if (!form.name.trim() || !form.description.trim()) {
+      flash("Name and description are required.", "error");
+      return;
+    }
+    addWatchlistItem({ name: form.name.trim(), reason: form.reason as any, description: form.description.trim(), evidenceLink: form.evidenceLink, dateAdded: new Date(), status: 'active' });
+    flash("New entry added to the security watchlist.", "success");
     setShowModal(false);
     setForm({ name: '', reason: 'debt', description: '', evidenceLink: '' });
   };
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-neutral-950 p-6 rounded-2xl border border-rose-900/30 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/5 blur-[100px] pointer-events-none" />
-        <div className="relative z-10">
-          <h2 className="text-2xl font-black text-white flex items-center gap-2"><ShieldAlert className="text-rose-500" /> Security Watchlist</h2>
-          <p className="text-sm text-neutral-500 mt-1">Confidential internal registry for security and debt tracking.</p>
-        </div>
-        <div className="flex items-center gap-3 w-full md:w-auto relative z-10">
-          <div className="relative flex-1 md:w-64">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-            <input type="text" placeholder="Search individuals..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:border-rose-500 outline-none" />
+    <div className="space-y-6 max-w-6xl mx-auto relative">
+      
+      {/* 🟢 TOP-RIGHT FLOATING TOAST */}
+      {toastState && (
+        <div 
+          className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toastState.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : toastState.type === 'loading'
+              ? 'bg-sky-950/90 border-sky-900/50 text-sky-400'
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
+            {toastState.type !== 'loading' && (
+              <button 
+                onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+            {toastState.type !== 'loading' && (
+              <div 
+                className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                style={{ animation: 'toast-shrink 5s linear forwards' }}
+              />
+            )}
           </div>
-          <select value={filter} onChange={e => setFilter(e.target.value as any)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white outline-none">
-            <option value="active">Active Alerts</option>
-            <option value="resolved">Resolved</option>
-            <option value="all">All Active & Resolved</option>
-            <option value="archived">History (Archived)</option>
-          </select>
-          <button onClick={() => setShowModal(true)} className="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors">
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* 🟢 NEW: Detailed Segmented Header */}
+      <div className="flex flex-col gap-5 bg-neutral-950 p-6 rounded-2xl border border-rose-900/30 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/5 blur-[100px] pointer-events-none" />
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
+          <div>
+            <h2 className="text-2xl font-black text-white flex items-center gap-2"><ShieldAlert className="text-rose-500" /> Security Watchlist</h2>
+            <p className="text-sm text-neutral-500 mt-1">Confidential internal registry for security and debt tracking.</p>
+          </div>
+          <button onClick={() => setShowModal(true)} className="bg-rose-600 hover:bg-rose-500 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors flex-shrink-0 w-full md:w-auto justify-center">
             <Plus size={16} /> Add Entry
           </button>
+        </div>
+        
+        <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3 relative z-10">
+          <div className="flex bg-neutral-900 border border-neutral-800 rounded-xl p-1 overflow-x-auto w-full lg:w-auto hide-scrollbar">
+            {[
+              { id: 'active', label: 'Active Alerts' },
+              { id: 'resolved', label: 'Resolved Cases' },
+              { id: 'archived', label: 'Archived / Misc' },
+              { id: 'all', label: 'All Records' },
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id as any)}
+                className={`flex-1 lg:flex-none px-4 py-2 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${filter === f.id ? 'bg-neutral-800 text-rose-400 shadow-sm' : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800/50'}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          
+          <div className="relative w-full lg:w-72 flex-shrink-0">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+            <input type="text" placeholder="Search individuals..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:border-rose-500 outline-none transition-colors" />
+          </div>
         </div>
       </div>
 
@@ -73,7 +155,7 @@ export function Watchlist() {
             <ShieldAlert size={32} className="mx-auto text-neutral-600 mb-3" />
             <p className="text-neutral-400 font-medium">No watchlist records found.</p>
           </div>
-        ) : filtered.map(item => {
+        ) : filtered.map((item: any) => {
           const cfg = REASON_CFG[item.reason as keyof typeof REASON_CFG] || REASON_CFG.other;
           return (
           <div key={item.id} className={`bg-neutral-950 border rounded-2xl overflow-hidden flex flex-col transition-all ${item.status === 'resolved' || item.isArchived ? 'border-neutral-800 opacity-60' : `border-${cfg.color.split('-')[1]}-900/50`}`}>
@@ -81,14 +163,12 @@ export function Watchlist() {
               <div className="flex justify-between items-start mb-2 gap-2">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2 min-w-0">
                   <span className="truncate" title={item.name}>{item.name}</span>
-                  {item.isArchived && <span className="text-[10px] bg-neutral-800 text-neutral-500 px-2 py-0.5 rounded uppercase font-black tracking-widest border border-neutral-700 flex-shrink-0">Archived</span>}
+                  {item.isArchived && item.status !== 'resolved' && <span className="text-[10px] bg-neutral-800 text-neutral-500 px-2 py-0.5 rounded uppercase font-black tracking-widest border border-neutral-700 flex-shrink-0 shadow-lg">Archived</span>}
                 </h3>
-                {!item.isArchived && (
-                  item.status === 'resolved' ? (
-                    <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border bg-neutral-800 text-neutral-400 border-neutral-700">Resolved</span>
-                  ) : (
-                    <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${cfg.bg} ${cfg.color} ${cfg.border}`}>{cfg.label}</span>
-                  )
+                {item.status === 'resolved' ? (
+                  <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border bg-neutral-800 text-neutral-400 border-neutral-700 shadow-lg">Resolved</span>
+                ) : (
+                  !item.isArchived && <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${cfg.bg} ${cfg.color} ${cfg.border}`}>{cfg.label}</span>
                 )}
               </div>
               <p className="text-xs text-neutral-400 leading-relaxed mb-4 line-clamp-4" title={item.description}>{item.description}</p>
@@ -104,14 +184,51 @@ export function Watchlist() {
                   <span>Added: {format(new Date(item.dateAdded), 'MMM d, yyyy')}</span>
                   {item.resolvedDate && <span className="text-emerald-500">Resolved: {format(new Date(item.resolvedDate), 'MMM d, yyyy')}</span>}
                 </div>
-                {!item.isArchived && (
+                {!item.isArchived && item.status !== 'resolved' && (
                   <div className="flex gap-2">
-                    {item.status === 'active' ? (
-                      <button onClick={() => updateWatchlistItem(item.id, { status: 'resolved', resolvedDate: new Date() })} className="flex-1 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 text-xs font-semibold py-2 rounded-lg transition-colors flex justify-center items-center gap-1.5"><Scale size={14}/> Resolve Case</button>
+                    {confirmResolveId === item.id ? (
+                      <button 
+                        onClick={() => {
+                          // 🟢 Automatically archive when resolved
+                          updateWatchlistItem(item.id, { status: 'resolved', resolvedDate: new Date(), isArchived: true });
+                          setConfirmResolveId(null);
+                          flash("Case marked as resolved and moved to archives.", "success");
+                        }} 
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 text-xs font-bold py-2 rounded-lg transition-colors flex justify-center items-center gap-1.5 shadow-lg shadow-emerald-900/40"
+                      >
+                        <CheckCircle size={14}/> Sure to Resolve?
+                      </button>
                     ) : (
-                      <button onClick={() => updateWatchlistItem(item.id, { status: 'active', resolvedDate: undefined })} className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors">Re-open Case</button>
+                      <button 
+                        onClick={() => setConfirmResolveId(item.id)} 
+                        className="flex-1 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 text-xs font-semibold py-2 rounded-lg transition-colors flex justify-center items-center gap-1.5"
+                      >
+                        <Scale size={14}/> Resolve Case
+                      </button>
                     )}
-                    <button onClick={() => deleteWatchlistItem(item.id)} className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-400 hover:text-rose-500 rounded-lg transition-colors" title="Move to History/Archive"><Archive size={14}/></button>
+                    <button 
+                      onClick={() => {
+                        deleteWatchlistItem(item.id);
+                        flash("Case manually archived.", "success");
+                      }} 
+                      className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-400 hover:text-rose-500 rounded-lg transition-colors" 
+                      title="Move to History/Archive"
+                    >
+                      <Archive size={14}/>
+                    </button>
+                  </div>
+                )}
+                {item.status === 'resolved' && (
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        updateWatchlistItem(item.id, { status: 'active', resolvedDate: null, isArchived: false });
+                        flash("Case re-opened.", "success");
+                      }} 
+                      className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors"
+                    >
+                      Re-open Case
+                    </button>
                   </div>
                 )}
               </div>
@@ -121,11 +238,10 @@ export function Watchlist() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-rose-900/30 rounded-2xl w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-rose-500 flex items-center gap-2 mb-4"><AlertTriangle size={18}/> New Watchlist Entry</h3>
             <form onSubmit={handleSave} className="space-y-4">
-              {/* 🟢 FIXED: Capped Name */}
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs text-neutral-400">Individual Name / Alias *</label>
@@ -144,7 +260,6 @@ export function Watchlist() {
                 </select>
               </div>
 
-              {/* 🟢 FIXED: Capped Description */}
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs text-neutral-400">Description & Evidence *</label>

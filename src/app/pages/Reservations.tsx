@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect} from 'react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reservation, Event, PromoCode } from '../context/AppContext';
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
-  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert
+  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert, RefreshCw
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
@@ -40,7 +40,6 @@ export function Reservations() {
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [viewMonth, setViewMonth] = useState(new Date());
   const [dayViewDate, setDayViewDate] = useState<Date | null>(null);
-  const [emailToast, setEmailToast] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | ReservationStatus>('all');
@@ -48,6 +47,18 @@ export function Reservations() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+
+  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
+  const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' | 'loading' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToastState({ msg, type });
+    if (type !== 'loading') {
+      toastTimeout.current = setTimeout(() => setToastState(null), 5000);
+    }
+  };
   
   // 🟢 NEW: Enhanced Admin Authorized Void Modal State
   const [voidModal, setVoidModal] = useState<{
@@ -70,34 +81,30 @@ export function Reservations() {
   const [settleModal, setSettleModal] = useState<{ id: string; customerName: string; balanceDue: number } | null>(null);
   const [tenderedAmount, setTenderedAmount] = useState('');
 
-  // GCash Receipt State (browser memory)
-  const [gcashReceipts, setGcashReceipts] = useState<Record<string, { refNo: string; imageUrl: string }>>(() => {
-    if (typeof window !== 'undefined' && localStorage) {
-      const saved = localStorage.getItem('gcashReceipts');
-      return saved ? JSON.parse(saved) : {};
-    }
-    return {};
-  });
-
+  useEffect(() => {
+    return () => {
+      fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+    };
+  }, []);
+  
   // Form state
   const [form, setForm] = useState({
     customerName: '', contactNumber: '', email: '', date: '',
-    timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: ''
+    timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: '',
+    paymentMethod: 'gcash' as 'gcash' | 'cash'
   });
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 🟢 NEW: Check if reservation has a completed table session in database (Local & Online)
+  // Check if reservation has a completed table session in database
   const hasCompletedSession = (res: any) => {
     if (!res) return false;
-    // 1. Must not currently be actively seated on an occupied table
     const isCurrentlyOccupying = tables.some(
       (t: any) => t.status === 'occupied' && t.session?.customerName?.trim().toLowerCase() === res.customerName?.trim().toLowerCase()
     );
     if (isCurrentlyOccupying) return false;
 
-    // 2. Must have a completed session record in sessionHistory (local & online DB syncs to sessionHistory)
     const hasHistoryRecord = sessionHistory?.some(
       (sh: any) =>
         sh.customerName?.trim().toLowerCase() === res.customerName?.trim().toLowerCase() &&
@@ -107,8 +114,7 @@ export function Reservations() {
     return !!hasHistoryRecord;
   };
 
-  // 🟢 NEW: Admin Password Authorization Helper for Voiding
-  // 🟢 NEW: Admin Password Authorization Helper for All Voids
+  // Admin Password Authorization Helper for All Voids
   const handleConfirmVoid = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!voidModal) return;
@@ -156,6 +162,7 @@ export function Reservations() {
       setVoidModal(null);
       setVoidPassword('');
       setVoidReason('');
+      flash("Action voided successfully.", "success");
     } catch (err) {
       setVoidError('An error occurred during verification.');
     } finally {
@@ -198,10 +205,15 @@ export function Reservations() {
   })();
 
   const maxAllowedPartySize = (() => {
-    if (!form.date) return 20;
+    const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
+    const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 20;
+    
+    // Default to the higher of the two limits if no date is picked yet
+    if (!form.date) return Math.max(wDayMax, wEndMax);
+    
     const d = new Date(form.date);
     const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-    return isWeekend ? (reservationTerms?.weekendMaxPartySize || 20) : (reservationTerms?.weekdayMaxPartySize || 20);
+    return isWeekend ? wEndMax : wDayMax;
   })();
 
   // Strict Time Slot Validator based on Store Hours
@@ -328,16 +340,15 @@ export function Reservations() {
   }, {} as Record<string, PromoCode[]>);
 
   const handleSendEmail = (resId: string) => {
-    setEmailToast(`Reschedule email sent to Reservation #${resId.toUpperCase()}`);
-    setTimeout(() => setEmailToast(null), 3000);
+    flash(`Reschedule email sent to Reservation #${resId.toUpperCase()}`, "success");
   };
 
-  // 🟢 NEW: Strict Check-in Measure (WITHIN THE DAY ONLY)
+  // 🟢 Strict Check-in Measure (WITHIN THE DAY ONLY)
   const handleCheckIn = (res: any) => {
     const resDate = new Date(res.date);
     
     if (!isToday(resDate)) {
-      alert(`Strict Check-In Policy: Check-ins are ONLY allowed on the exact date of the reservation (${format(resDate, 'MMM d, yyyy')}).`);
+      flash(`Strict Check-In Policy: Check-ins are ONLY allowed on the exact date of the reservation (${format(resDate, 'MMM d, yyyy')}).`, "error");
       return;
     }
 
@@ -362,7 +373,7 @@ export function Reservations() {
       if (firstAvail) {
         targetTableId = firstAvail.id;
       } else {
-        alert("There are no available tables right now. Please add them to the Waiting Queue.");
+        flash("There are no available tables right now. Please add them to the Waiting Queue.", "error");
         navigate('/staff/queue');
         return;
       }
@@ -410,11 +421,25 @@ export function Reservations() {
     e.preventDefault();
     
     if (!advanceCheck.valid) {
-      alert(advanceCheck.message);
+      flash(advanceCheck.message, "error");
       return;
     }
     if (!capacityCheck.valid) {
-      alert(capacityCheck.message);
+      flash(capacityCheck.message, "error");
+      return;
+    }
+
+    // 🟢 Strict Validation: Email Address (ends with .com)
+    if (form.email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(form.email) || !form.email.toLowerCase().endsWith('.com')) {
+        flash("Email address must be valid and end with a .com domain (e.g., @gmail.com).", "error");
+        return;
+      }
+    }
+
+    if (form.paymentMethod === 'gcash' && (!receiptFile || form.paymentRef.length < 13)) {
+      flash("GCash Reference Number and Receipt Image are required.", "error");
       return;
     }
 
@@ -430,7 +455,7 @@ export function Reservations() {
     );
 
     if (isDuplicate) {
-      alert("Duplicate Booking Detected!\n\nThis customer already has a reservation for this exact time. To book an additional table for the same group ('libre'), please use the name of the friend who will physically occupy the other table.");
+      flash("Duplicate Booking Detected!\n\nThis customer already has a reservation for this exact time. To book an additional table for the same group ('libre'), please use the name of the friend who will physically occupy the other table.", "error");
       return;
     }
 
@@ -438,7 +463,7 @@ export function Reservations() {
     let finalReceiptUrl = null;
 
     try {
-      if (receiptFile) {
+      if (form.paymentMethod === 'gcash' && receiptFile) {
         const fileExt = receiptFile.name.split('.').pop();
         const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
         
@@ -464,22 +489,24 @@ export function Reservations() {
         durationHours: form.durationHours,
         partySize: form.partySize,
         tableId: form.tableId || undefined,
-        status: 'pending',
+        status: form.paymentMethod === 'cash' ? 'confirmed' : 'pending', // 🟢 Auto-verifies cash payments
         totalAmount,
         downPaymentAmount: downPayment,
-        downPaymentPaid: !!finalReceiptUrl,
+        downPaymentPaid: form.paymentMethod === 'cash' ? true : !!finalReceiptUrl,
         balancePaid: false,
-        paymentRef: form.paymentRef || undefined,
+        paymentRef: form.paymentMethod === 'cash' ? 'CASH' : (form.paymentRef || undefined),
         receiptImg: finalReceiptUrl || undefined
+        // 🟢 REMOVED 'paymentMethod' to permanently fix the Supabase 400 crash
       });
 
+      flash("Reservation successfully created!", "success");
       setShowForm(false);
-      setForm({ customerName: '', contactNumber: '', email: '', date: '', timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: '' });
+      setForm({ customerName: '', contactNumber: '', email: '', date: '', timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: '', paymentMethod: 'gcash' });
       setReceiptFile(null);
       setReceiptPreview(null);
     } catch (err) {
       console.error("Upload error", err);
-      alert("Failed to upload receipt. Please check your connection.");
+      flash("Failed to upload receipt. Please check your connection.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -581,7 +608,53 @@ export function Reservations() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 relative">
+      
+      {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
+      {toastState && (
+        <div 
+          className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toastState.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : toastState.type === 'loading'
+              ? 'bg-sky-950/90 border-sky-900/50 text-sky-400'
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
+            {toastState.type !== 'loading' && (
+              <button 
+                onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+            {toastState.type !== 'loading' && (
+              <div 
+                className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                style={{ animation: 'toast-shrink 5s linear forwards' }}
+              />
+            )}
+          </div>
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
@@ -596,13 +669,6 @@ export function Reservations() {
           </div>
         ))}
       </div>
-
-      {/* Email Toast */}
-      {emailToast && (
-        <div className="flex items-center gap-2 bg-sky-950/40 border border-sky-700/40 text-sky-400 text-sm px-4 py-3 rounded-xl mb-4">
-          <CheckCircle size={14} /> {emailToast}
-        </div>
-      )}
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -790,7 +856,7 @@ export function Reservations() {
 
       {/* Day View Modal (Calendar click) */}
       {dayViewDate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
               <h3 className="font-bold text-neutral-200">{format(dayViewDate, 'MMMM d, yyyy')}</h3>
@@ -874,7 +940,7 @@ export function Reservations() {
 
       {/* Detail Panel */}
       {selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl">
             <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center">
               <div>
@@ -937,16 +1003,18 @@ export function Reservations() {
 
                 {/* GCash Receipt Area (Enlarged) */}
                 <div className="space-y-2.5 border-t border-neutral-800 pt-4">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">GCash Receipt</label>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">GCash Receipt / Note</label>
                   {selected.paymentRef ? (
                     <div className="flex items-center justify-between bg-neutral-950 p-3.5 rounded-xl border border-neutral-800 shadow-inner">
-                      <span className="text-xl font-mono text-white font-black tracking-widest">Ref: {selected.paymentRef}</span>
+                      <span className="text-xl font-mono text-white font-black tracking-widest">
+                        {selected.paymentRef === 'CASH' ? 'PAID VIA CASH' : `Ref: ${selected.paymentRef}`}
+                      </span>
                       {selected.receiptImg ? (
                         <button onClick={() => setViewImage(selected.receiptImg!)} className="text-blue-400 hover:text-white bg-blue-950/30 hover:bg-blue-600/40 rounded-lg transition-all p-2 flex items-center gap-2 font-bold text-xs border border-blue-900/50" title="View Receipt Image">
                           <ImageIcon size={18} /> View
                         </button>
                       ) : (
-                        <span className="text-xs text-neutral-600 italic px-1 font-medium">No Image</span>
+                        <span className="text-xs text-neutral-600 italic px-1 font-medium">{selected.paymentRef === 'CASH' ? 'Verified manually' : 'No Image'}</span>
                       )}
                     </div>
                   ) : (
@@ -1125,16 +1193,27 @@ export function Reservations() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Date *</label>
-                  <input required type="date" min={format(new Date(), 'yyyy-MM-dd')} value={form.date} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  <input required type="date" min={format(new Date(), 'yyyy-MM-dd')} value={form.date} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => {
+                    const newDate = e.target.value;
+                    const d = new Date(newDate);
+                    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+                    
+                    const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
+                    const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 20;
+                    const newMax = isWeekend ? wEndMax : wDayMax;
+                    
+                    setForm(f => ({ 
+                      ...f, 
+                      date: newDate,
+                      partySize: Math.min(f.partySize, newMax)
+                    }));
+                  }}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Time Slot *</label>
                   <input required type="time" value={form.timeSlot} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => {
                     setForm(f => ({ ...f, timeSlot: e.target.value }));
-                    if (form.durationHours > maxAllowedDuration) {
-                      setForm(f => ({ ...f, durationHours: maxAllowedDuration }));
-                    }
                   }}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
                 </div>
@@ -1159,9 +1238,8 @@ export function Reservations() {
                 </div>
 
                 <div className="sm:col-span-2 space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Table Preference *</label>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Table Preference</label>
                   <select
-                    required
                     value={form.tableId}
                     onChange={e => setForm(f => ({ ...f, tableId: e.target.value }))}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
@@ -1177,33 +1255,67 @@ export function Reservations() {
                   </select>
                 </div>
                 
+                {/* 🟢 NEW: Down Payment Method Switch (GCash / Cash) */}
                 <div className="sm:col-span-2 space-y-3 border-t border-neutral-800 pt-4 mt-2">
-                  <p className="text-xs text-amber-500 uppercase tracking-wider font-bold flex items-center gap-1.5"><DollarSign size={14}/> Down Payment Info (Required)</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">GCash Ref No. *</label>
-                      <input required type="text" value={form.paymentRef} onChange={e => setForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono tracking-widest" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image *</label>
-                      <div className="flex items-center gap-3">
-                        <label className="flex-1 cursor-pointer bg-neutral-900 border border-dashed border-neutral-700 hover:border-emerald-500 rounded-lg px-3 py-2 text-center transition-colors flex flex-col items-center justify-center h-[42px]">
-                          <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { 
-                            const file = e.target.files?.[0]; 
-                            if (file) {
-                              if (!file.type.startsWith('image/')) { alert('Please upload JPG or PNG only.'); return; }
-                              setReceiptPreview(URL.createObjectURL(file)); 
-                              setReceiptFile(file);
-                            } 
-                          }} />
-                          <div className="flex items-center gap-1 text-[10px] text-neutral-400">
-                            <Upload size={12} /> {receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}
-                          </div>
-                        </label>
-                        {receiptPreview && <img src={receiptPreview} alt="Receipt" className="w-10 h-10 object-cover rounded-md border border-neutral-700 shadow-sm" />}
-                      </div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-amber-500 uppercase tracking-wider font-bold flex items-center gap-1.5">
+                      <DollarSign size={14}/> Down Payment Info (Required)
+                    </p>
+                    <div className="flex bg-neutral-900 border border-neutral-800 rounded-lg p-1">
+                      <button 
+                        type="button" 
+                        onClick={() => setForm(f => ({...f, paymentMethod: 'gcash'}))} 
+                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${form.paymentMethod === 'gcash' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}
+                      >
+                        GCash
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => setForm(f => ({...f, paymentMethod: 'cash'}))} 
+                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${form.paymentMethod === 'cash' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}
+                      >
+                        Cash
+                      </button>
                     </div>
                   </div>
+
+                  {form.paymentMethod === 'gcash' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in">
+                      <div className="space-y-1.5">
+                        <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">GCash Ref No. *</label>
+                        <input required type="text" value={form.paymentRef} onChange={e => setForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono tracking-widest" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image *</label>
+                        <div className="flex items-center gap-3">
+                          <label className="flex-1 cursor-pointer bg-neutral-900 border border-dashed border-neutral-700 hover:border-emerald-500 rounded-lg px-3 py-2 text-center transition-colors flex flex-col items-center justify-center h-[42px]">
+                            <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { 
+                              const file = e.target.files?.[0]; 
+                              if (file) {
+                                if (!file.type.startsWith('image/')) { flash('Please upload JPG or PNG only.', 'error'); return; }
+                                setReceiptPreview(URL.createObjectURL(file)); 
+                                setReceiptFile(file);
+                              } 
+                            }} />
+                            <div className="flex items-center gap-1 text-[10px] text-neutral-400">
+                              <Upload size={12} /> {receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}
+                            </div>
+                          </label>
+                          {receiptPreview && <img src={receiptPreview} alt="Receipt" className="w-10 h-10 object-cover rounded-md border border-neutral-700 shadow-sm" />}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-4 animate-in fade-in flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                        <CheckCircle size={18} className="text-emerald-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-emerald-400">Cash Payment Selected</p>
+                        <p className="text-xs text-neutral-400 mt-0.5">The down payment will instantly be marked as verified and paid via Cash.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1225,16 +1337,6 @@ export function Reservations() {
                   <AlertTriangle size={12} /> The selected time slot falls outside operating hours.
                 </p>
               )}
-              {!advanceCheck.valid && form.date && form.timeSlot && (
-                <p className="text-[10px] text-rose-400 font-bold bg-rose-950/20 p-2 rounded border border-rose-900/50 flex items-center gap-1">
-                  <AlertTriangle size={12} /> {advanceCheck.message}
-                </p>
-              )}
-              {!capacityCheck.valid && form.date && form.timeSlot && (
-                <p className="text-[10px] text-amber-400 font-bold bg-amber-950/20 p-2 rounded border border-amber-900/50 flex items-center gap-1">
-                  <AlertTriangle size={12} /> {capacityCheck.message}
-                </p>
-              )}
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
@@ -1245,10 +1347,7 @@ export function Reservations() {
                   disabled={
                     isSubmitting ||
                     !isTimeSlotValid ||
-                    !advanceCheck.valid ||
-                    !capacityCheck.valid ||
-                    !receiptFile ||
-                    form.paymentRef.length < 13
+                    (form.paymentMethod === 'gcash' && (!receiptFile || form.paymentRef.length < 13))
                   }
                   className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2"
                 >
@@ -1262,7 +1361,7 @@ export function Reservations() {
 
       {/* Cancel Reservation Dialog */}
       {showCancelDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl">
             <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center">
               <div>
@@ -1291,6 +1390,7 @@ export function Reservations() {
                     if (cancelTarget) {
                       cancelReservation(cancelTarget, cancelReason);
                       setShowCancelDialog(false);
+                      flash("Reservation cancelled successfully.", "success");
                     }
                   }}
                   className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2"
@@ -1363,6 +1463,7 @@ export function Reservations() {
                     updateBalance(settleModal.id, true);
                     setSettleModal(null);
                     setTenderedAmount('');
+                    flash("Balance settled successfully.", "success");
                   }}
                   className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30"
                 >
@@ -1374,7 +1475,7 @@ export function Reservations() {
         </div>
       )}
 
-      {/* 🟢 NEW: Admin Authorized Void Modal (Down Payment / Balance / Verified Status) */}
+      {/* 🟢 Admin Authorized Void Modal (Down Payment / Balance / Verified Status) */}
       {voidModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
@@ -1409,7 +1510,6 @@ export function Reservations() {
                 <strong className="text-white">{voidModal.customerName}</strong>.
               </p>
 
-              {/* 🟢 FIXED: Reason text box is now required for ALL void mechanisms */}
               <div className="space-y-1.5">
                 <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Reason for Voiding *</label>
                 <textarea

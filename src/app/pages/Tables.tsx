@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppContext, HOURLY_RATE, SessionOrder } from '../context/AppContext';
 import { TableCard } from '../components/TableCard';
-import { toast } from 'sonner';
 import {
   Search, Play, Zap, X, UserPlus, Clock,
   Calendar, Users, CheckCircle, ChevronRight,
   CreditCard, Banknote, AlertTriangle, CircleCheck,
-  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History, Info
+  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History, Info, RefreshCw
 } from 'lucide-react';
 import { isToday, differenceInSeconds, addMinutes } from 'date-fns';
 
@@ -43,15 +42,27 @@ export function Tables() {
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
   
   const [useProrated,      setUseProrated]      = useState(false);
+  
+  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
+  const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // 🟢 NEW: Admin Authorization Modal States for Session Voids
+  const flash = (msg: string, type: 'success' | 'error' | 'loading' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToastState({ msg, type });
+    if (type !== 'loading') {
+      toastTimeout.current = setTimeout(() => setToastState(null), 5000);
+    }
+  };
+
+  // 🟢 Admin Authorization Modal States for Session Voids
   const [showVoidModal,       setShowVoidModal]       = useState(false);
   const [sessionVoidPassword, setSessionVoidPassword] = useState('');
   const [voidReason,          setVoidReason]          = useState('Accidental booking / under 5 mins');
   const [voidError,           setVoidError]           = useState('');
 
   // Menu Editing States
-  const isAdmin = staffProfile?.role?.toLowerCase() === 'manager' || staffProfile?.username === 'admin';
+  const isAdmin = staffProfile?.isAdmin || staffProfile?.role?.toLowerCase() === 'manager' || staffProfile?.role?.toLowerCase() === 'super admin' || staffProfile?.username === 'superadmin' || staffProfile?.username === 'admin';
   const [isEditingMenu, setIsEditingMenu] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', price: 0, stock: 0 });
@@ -178,7 +189,7 @@ export function Tables() {
 
     if (!isValidAdmin) {
       setVoidError("Unauthorized: Incorrect Admin Password or PIN.");
-      toast.error("Unauthorized: Incorrect Admin Password or PIN.");
+      flash("Unauthorized: Incorrect Admin Password or PIN.", "error");
       setSessionVoidPassword('');
       return;
     }
@@ -205,7 +216,7 @@ export function Tables() {
       addActivity('admin_action', `VOIDED session for ${endingTable.session.customerName} at ${endingTable.name} (${endInfo?.elapsedMins || 0}m played). Reason: ${voidReason}.`);
     }
 
-    toast.success(`Session at ${endingTable.name} voided successfully.`);
+    flash(`Session at ${endingTable.name} voided successfully.`, "success");
     freeTable(endingTableId);
     setShowVoidModal(false);
     setSessionVoidPassword('');
@@ -316,9 +327,9 @@ export function Tables() {
     setDurationMinutes(60);
     setAmountPaid('');
     setPaymentOption('payNow');
+    flash("Table session started successfully!", "success");
   };
 
-  // 🟢 ENHANCED: Normal Checkout with Status and Closure Reason Metadata
   const handleConfirmEnd = () => {
     if (!endingTableId || !endInfo || !endingTable?.session) return;
     
@@ -369,9 +380,9 @@ export function Tables() {
 
     freeTable(endingTableId);
     setEndingTableId(null);
+    flash("Table checked out successfully.", "success");
   };
 
-  // 🟢 ENHANCED: Walkout Checkout with Explicit Walkout Status
   const handleWalkout = () => {
     if (!endingTableId || !endInfo || !endingTable?.session) return;
     const customer = endingTable.session.customerName;
@@ -406,6 +417,7 @@ export function Tables() {
 
     freeTable(endingTableId);
     setEndingTableId(null);
+    flash("Walkout recorded. Customer flagged on watchlist.", "error");
   };
 
   const handleConfirmExtend = (e: React.FormEvent) => {
@@ -425,6 +437,7 @@ export function Tables() {
     }
     
     setExtendingTableId(null);
+    flash("Table session extended successfully.", "success");
   };
 
   const handleAddToCart = (item: any) => {
@@ -453,9 +466,9 @@ export function Tables() {
     if (!posTableId || posCart.length === 0) return;
     submitTableOrders(posTableId, posCart);
     setPosCart([]);
+    flash("Orders confirmed and added to bill.", "success");
   };
 
-  // 🟢 ENHANCED: Enforce Admin Authorization on Order Item Voids
   const handleVoidSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!posTableId || !voidItem) return;
@@ -471,9 +484,9 @@ export function Tables() {
       voidTableOrder(posTableId, voidItem.index, voidItem.order);
       setVoidItem(null);
       setVoidPassword('');
-      toast.success("Order item voided with Admin authorization.");
+      flash("Order item voided with Admin authorization.", "success");
     } else {
-      toast.error("Unauthorized: Incorrect Admin Password or PIN.");
+      flash("Unauthorized: Incorrect Admin Password or PIN.", "error");
       setVoidPassword('');
     }
   };
@@ -491,6 +504,7 @@ export function Tables() {
     setEditingItem(null);
     setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 });
     setIsEditingMenu(false);
+    flash(editingItem ? "Menu item updated successfully." : "New menu item added.", "success");
   };
 
   const startEditItem = (item: any) => {
@@ -641,6 +655,51 @@ export function Tables() {
   return (
     <div className="space-y-5 flex h-[calc(100vh-140px)] relative overflow-hidden">
       
+      {/* 🟢 TOP-RIGHT FLOATING TOAST */}
+      {toastState && (
+        <div 
+          className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toastState.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : toastState.type === 'loading'
+              ? 'bg-sky-950/90 border-sky-900/50 text-sky-400'
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
+            {toastState.type !== 'loading' && (
+              <button 
+                onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+            {toastState.type !== 'loading' && (
+              <div 
+                className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                style={{ animation: 'toast-shrink 5s linear forwards' }}
+              />
+            )}
+          </div>
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* MAIN CONTENT AREA */}
       <div className={`flex-1 space-y-5 overflow-y-auto pr-2 transition-all duration-300 ${posTableId ? 'mr-[380px]' : ''}`}>
         <div className="grid grid-cols-4 gap-3">
@@ -716,7 +775,7 @@ export function Tables() {
 
       {/* POS SIDEBAR */}
       {posTableId && posTable && (
-        <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-40 animate-in slide-in-from-right-10 duration-300">
+        <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-10 animate-in slide-in-from-right-10 duration-300">
           <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 flex-none">
             <div>
               <h3 className="font-bold text-neutral-100 flex items-center gap-2"><ShoppingCart size={15} className="text-emerald-400"/> Table Billing & Extras</h3>
@@ -869,7 +928,16 @@ export function Tables() {
                           <p className={`text-sm font-black mr-2 ${showArchivedMenu ? 'text-neutral-600' : 'text-amber-400'}`}>{formatPHP(item.price)}</p>
                           
                           {showArchivedMenu ? (
-                            <button onClick={() => updateInventoryItem(item.id, { isActive: true })} className="p-1.5 text-emerald-500 hover:text-emerald-400 bg-emerald-950/20 hover:bg-emerald-950/40 rounded-md transition-colors" title='Restore Item'><History size={12} /></button>
+                            <button 
+                              onClick={() => {
+                                updateInventoryItem(item.id, { isActive: true });
+                                flash("Menu item restored.", "success");
+                              }} 
+                              className="p-1.5 text-emerald-500 hover:text-emerald-400 bg-emerald-950/20 hover:bg-emerald-950/40 rounded-md transition-colors" 
+                              title='Restore Item'
+                            >
+                              <History size={12} />
+                            </button>
                           ) : (
                             <>
                               <button onClick={() => startEditItem(item)} className="p-1.5 text-neutral-500 hover:text-white bg-neutral-800 rounded-md transition-colors"><Edit2 size={12} /></button>
@@ -878,6 +946,7 @@ export function Tables() {
                                   onClick={() => {
                                     updateInventoryItem(item.id, { isActive: false });
                                     setConfirmArchiveId(null);
+                                    flash("Menu item archived.", "success");
                                   }} 
                                   className="px-2 py-1.5 text-white bg-rose-600 hover:bg-rose-500 rounded-md transition-colors text-[10px] font-bold" 
                                   title="Confirm Archive"
@@ -1129,8 +1198,9 @@ export function Tables() {
                     <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Amount Paid (PHP)</label>
                     <input
                       type="number"
+                      max="999999"
                       value={amountPaid}
-                      onChange={e => setAmountPaid(e.target.value)}
+                      onChange={e => { if (e.target.value.length <= 7) setAmountPaid(e.target.value); }}
                       className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                       placeholder={`₱${(((durationMinutes as number) / 60) * effectiveHourly).toFixed(2)}`}
                       step="0.01"
@@ -1279,7 +1349,7 @@ export function Tables() {
                       ) : endPayStatus === 'paid' ? (
                         <div>
                           <label className="text-xs text-neutral-400 mb-1.5 block">Cash Tendered *</label>
-                          <input type="number" value={endCashTendered} onChange={e => setEndCashTendered(e.target.value)} placeholder={`e.g. ${endInfo.balance + 100}`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
+                          <input type="number" max="999999" value={endCashTendered} onChange={e => { if (e.target.value.length <= 7) setEndCashTendered(e.target.value); }} placeholder={`e.g. ${endInfo.balance + 100}`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
                           
                           {parseFloat(endCashTendered) > endInfo.balance && (
                             <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(endCashTendered) - endInfo.balance)}</p>
@@ -1294,7 +1364,7 @@ export function Tables() {
                       {endPayStatus === 'partial' && (
                         <div className="pt-2 border-t border-neutral-800">
                           <label className="text-xs text-neutral-400 mb-1.5 block">Exact Amount Collected Today (PHP) *</label>
-                          <input type="number" value={endPartialAmount} onChange={e => setEndPartialAmount(e.target.value)} placeholder={`Amount collected`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40" />
+                          <input type="number" max="999999" value={endPartialAmount} onChange={e => { if (e.target.value.length <= 7) setEndPartialAmount(e.target.value); }} placeholder={`Amount collected`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40" />
                         </div>
                       )}
                     </div>
@@ -1364,7 +1434,7 @@ export function Tables() {
         </div>
       )}
 
-      {/* 🟢 NEW: ADMIN AUTHORIZATION MODAL FOR SESSION VOIDS */}
+      {/* 🟢 ADMIN AUTHORIZATION MODAL FOR SESSION VOIDS */}
       {showVoidModal && endingTable?.session && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-neutral-950 border border-rose-800/60 rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4">
@@ -1497,7 +1567,7 @@ export function Tables() {
                     <input type="text" value={extendGcashRef} onChange={e => setExtendGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit GCash Ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-blue-500/40 font-mono" />
                   ) : extendPayStatus === 'paid' ? (
                     <div>
-                      <input type="number" value={extendCashTendered} onChange={e => setExtendCashTendered(e.target.value)} placeholder="Amount Tendered" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-emerald-500/40" />
+                      <input type="number" max="999999" value={extendCashTendered} onChange={e => { if (e.target.value.length <= 7) setExtendCashTendered(e.target.value); }} placeholder="Amount Tendered" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-emerald-500/40" />
                       {parseFloat(extendCashTendered) > extendCharge && (
                         <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(extendCashTendered) - extendCharge)}</p>
                       )}
@@ -1507,7 +1577,10 @@ export function Tables() {
                     </div>
                   ) : null}
                   {extendPayStatus === 'partial' && (
-                    <input type="number" value={extendPartialAmount} onChange={e => setExtendPartialAmount(e.target.value)} placeholder={`Exact amount collected today`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-amber-500/40" />
+                    <div className="pt-2 border-t border-neutral-800">
+                      <label className="text-xs text-neutral-400 mb-1.5 block">Exact Amount Collected Today (PHP) *</label>
+                      <input type="number" max="999999" value={extendPartialAmount} onChange={e => { if (e.target.value.length <= 7) setExtendPartialAmount(e.target.value); }} placeholder={`Amount collected`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40" />
+                    </div>
                   )}
                 </div>
               )}
@@ -1526,7 +1599,7 @@ export function Tables() {
                 }
 
                 return (
-                  <div className="flex gap-3 pt-2">
+                  <div className="flex gap-3 pt-2 border-t border-neutral-800">
                     <button type="button" onClick={() => setExtendingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
                       Cancel
                     </button>

@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, 
-  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Info, Plus, Minus 
+  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Info, Plus, Minus,
+  RefreshCw, AlertTriangle
 } from 'lucide-react';
 import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, addMinutes, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
 
 export function Queue() {
-  // 🟢 FIXED: Extracted reservationTerms to enforce Admin constraints
   const { queue, addToQueue, removeFromQueue, callQueueItem, tables, reservations, cancelReservation, reservationTerms } = useAppContext() as any;
   const navigate = useNavigate();
   
@@ -25,6 +25,18 @@ export function Queue() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+
+  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
+  const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' | 'loading' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToastState({ msg, type });
+    if (type !== 'loading') {
+      toastTimeout.current = setTimeout(() => setToastState(null), 5000);
+    }
+  };
 
   // Live clock for AI calculation
   const [now, setNow] = useState(new Date());
@@ -89,15 +101,20 @@ export function Queue() {
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name) return;
-    
-    // 🟢 FIXED: Hard stop if party size violates admin policy
-    if (partySize > maxAllowedPartySize) {
-      alert(`The maximum walk-in party size allowed today is ${maxAllowedPartySize} based on store policy.`);
+    if (!name.trim()) {
+      flash("Customer Name is required.", "error");
       return;
     }
     
-    addToQueue({ customerName: name, contactNumber: contact, partySize, notes });
+    // 🟢 ENHANCED: Hard stop if party size violates admin policy
+    if (partySize > maxAllowedPartySize) {
+      flash(`The maximum walk-in party size allowed today is ${maxAllowedPartySize} based on store policy.`, "error");
+      return;
+    }
+    
+    addToQueue({ customerName: name.trim(), contactNumber: contact, partySize, notes });
+    flash(`${name.trim()} added to the waiting queue.`, "success");
+    
     setName('');
     setContact('');
     setPartySize(2);
@@ -107,6 +124,7 @@ export function Queue() {
 
   const handleCallCustomer = (customerId: string, customerName: string) => {
     callQueueItem(customerId);
+    flash(`Called ${customerName} from the queue.`, "success");
     
     // Voice generation using Web Speech API
     if ('speechSynthesis' in window) {
@@ -123,7 +141,53 @@ export function Queue() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 relative">
+
+      {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
+      {toastState && (
+        <div 
+          className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toastState.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : toastState.type === 'loading'
+              ? 'bg-sky-950/90 border-sky-900/50 text-sky-400'
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
+            {toastState.type !== 'loading' && (
+              <button 
+                onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+            {toastState.type !== 'loading' && (
+              <div 
+                className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                style={{ animation: 'toast-shrink 5s linear forwards' }}
+              />
+            )}
+          </div>
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* Header Actions */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -154,7 +218,6 @@ export function Queue() {
             <UserPlus size={15} className="text-emerald-500" /> Register Walk-in Customer (FCFS)
           </h3>
           <form onSubmit={handleAdd} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* 🟢 FIXED: Capped Customer Name with Char Counter */}
             <div className="space-y-1.5">
               <div className="flex justify-between items-center">
                 <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Full Name *</label>
@@ -170,7 +233,6 @@ export function Queue() {
               <input type="tel" value={contact} maxLength={11} onChange={e => setContact(e.target.value.replace(/\D/g, ''))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600" placeholder="09xx-xxx-xxxx" />
             </div>
 
-            {/* 🟢 FIXED: Capped UI counter and displayed the dynamic Admin limit */}
             <div className="space-y-1.5">
               <div className="flex justify-between items-center">
                 <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Party Size</label>
@@ -183,7 +245,6 @@ export function Queue() {
               </div>
             </div>
 
-            {/* 🟢 FIXED: Capped Notes with Char Counter */}
             <div className="space-y-1.5">
               <div className="flex justify-between items-center">
                 <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Notes (optional)</label>
@@ -340,7 +401,10 @@ export function Queue() {
                       <Bell size={14} />
                     </button>
                     <button
-                      onClick={() => removeFromQueue(item.id)}
+                      onClick={() => {
+                        removeFromQueue(item.id);
+                        flash("Customer removed from queue.", "success");
+                      }}
                       title="Remove from queue"
                       className="p-2 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 rounded-lg transition-colors border border-rose-700/30"
                     >
@@ -372,7 +436,10 @@ export function Queue() {
                     Assign Table
                   </button>
                   <button
-                    onClick={() => removeFromQueue(item.id)}
+                    onClick={() => {
+                      removeFromQueue(item.id);
+                      flash("Customer removed from queue.", "success");
+                    }}
                     className="p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors flex-none"
                     title="Remove"
                   >
@@ -520,7 +587,7 @@ export function Queue() {
 
       {/* Cancel Reservation Dialog */}
       {showCancelDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl">
             <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center">
               <div>
@@ -560,6 +627,7 @@ export function Queue() {
                       setShowCancelDialog(false);
                       setCancelReason('');
                       setCancelTarget(null);
+                      flash("Reservation cancelled successfully.", "success");
                     }
                   }}
                   className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2"

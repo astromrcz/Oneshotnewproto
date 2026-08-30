@@ -599,6 +599,85 @@ app.post('/api/queue', (req, res) => {
   });
 });
 
+// 🟢 MISSING QUEUE ROUTES
+app.put('/api/queue/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => updates[k]);
+  values.push(req.params.id);
+
+  db.run(`UPDATE queue SET ${setClause} WHERE id = ?`, values, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Queue updated." });
+  });
+});
+
+app.delete('/api/queue/:id', (req, res) => {
+  db.run(`DELETE FROM queue WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Queue item deleted." });
+  });
+});
+
+// 🟢 MISSING WATCHLIST ROUTES
+app.put('/api/watchlist/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE watchlist SET ${setClause} WHERE id = ?`, values, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Watchlist updated." });
+  });
+});
+
+app.delete('/api/watchlist/:id', (req, res) => {
+  // Watchlist delete acts as an archive to retain history on Supabase
+  db.run(`UPDATE watchlist SET isArchived = 1 WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Watchlist item archived." });
+  });
+});
+
+// 🟢 MISSING LOST & FOUND ROUTES
+app.put('/api/lost-and-found/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE lost_and_found SET ${setClause} WHERE id = ?`, values, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Lost and found updated." });
+  });
+});
+
+app.delete('/api/lost-and-found/:id', (req, res) => {
+  // Lost & Found delete acts as an archive to retain history on Supabase
+  db.run(`UPDATE lost_and_found SET isArchived = 1 WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Lost and found item archived." });
+  });
+});
+
 app.post('/api/reservations', (req, res) => {
   const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
   const createdAt = new Date().toISOString();

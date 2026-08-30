@@ -1,14 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router';
-import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'motion/react';
 import {
   TableProperties, Users, Calendar, 
   AlertTriangle, Clock, ChevronRight, CheckCircle2, ShieldAlert,
-  Wifi, WifiOff, RefreshCw, Database, Download, Copy, KeyRound
+  Wifi, RefreshCw, Database, Download, X
 } from 'lucide-react';
-import { addMinutes, differenceInSeconds, differenceInMinutes, format, isToday, isFuture } from 'date-fns';
+import { addMinutes, differenceInSeconds, differenceInMinutes, format } from 'date-fns';
 
 const formatPHP = (amount: number) =>
   `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
@@ -38,7 +36,7 @@ export function OverviewDashboard() {
   const { 
     tables, queue, reservations, watchlist, 
     staffUsers, promoCodes, announcements, closedDates, rates, 
-    isSystemOffline, refreshLiveMonitor, staffProfile
+    isSystemOffline, refreshLiveMonitor
   } = useAppContext() as any;
   const navigate = useNavigate();
 
@@ -49,21 +47,18 @@ export function OverviewDashboard() {
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupSuccess, setBackupSuccess] = useState(false);
   const [offlineSince, setOfflineSince] = useState<Date | null>(null);
-  
-  // ── Dashboard Recovery PIN State ──────────────────────────────
-  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-  const [pinCopied, setPinCopied] = useState(false);
-  const [hasInteractedWithPin, setHasInteractedWithPin] = useState(false);
-  const [pinSaved, setPinSaved] = useState(false);
 
-  useEffect(() => {
-    if (staffProfile?.username) {
-      const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
-      if (!isBackedUp) {
-        setShowRecoveryModal(true);
-      }
+  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
+  const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
+  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' | 'loading' = 'success') => {
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    setToastState({ msg, type });
+    if (type !== 'loading') {
+      toastTimeout.current = setTimeout(() => setToastState(null), 5000);
     }
-  }, [staffProfile]);
+  };
 
   useEffect(() => {
     const handleOnline = () => { setIsBrowserOffline(false); setOfflineSince(null); };
@@ -111,12 +106,12 @@ export function OverviewDashboard() {
 
   const handleManualSync = async () => {
     if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-      toast.error("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", { duration: 6000 });
+      flash("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", "error");
       return;
     }
 
     setIsSyncing(true);
-    toast.loading("Uploading local data to cloud...", { id: 'cloud-sync' });
+    flash("Uploading local data to cloud...", "loading");
     try {
       const res = await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
       const data = await res.json();
@@ -125,38 +120,12 @@ export function OverviewDashboard() {
 
       if (refreshLiveMonitor) await refreshLiveMonitor();
       setLastSync(new Date());
-      toast.success("Database successfully backed up to Cloud.", { id: 'cloud-sync' });
+      flash("Database successfully backed up to Cloud.", "success");
       
     } catch (e: any) {
-      toast.error(`Sync Failed: ${e.message}`, { id: 'cloud-sync', duration: 6000 });
+      flash(`Sync Failed: ${e.message}`, "error");
     } finally {
       setIsSyncing(false);
-    }
-  };
-
-  const handleDownloadPin = () => {
-    const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
-    if (!targetUser?.recoveryPin) return;
-    
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    toast.success("Recovery PIN downloaded successfully!");
-    setHasInteractedWithPin(true);
-  };
-
-  const handleAcknowledgePin = () => {
-    if (staffProfile?.username) {
-      localStorage.setItem(`oneshot_pin_backed_up_${staffProfile.username}`, 'true');
-      setShowRecoveryModal(false);
-      toast.success("Recovery PIN safely backed up.");
     }
   };
 
@@ -224,9 +193,54 @@ export function OverviewDashboard() {
     }
   };
 
-  return (
+ return (
     <div className="space-y-6 relative">
       
+      {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
+      {toastState && (
+        <div 
+          className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
+        >
+          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
+            toastState.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+              : toastState.type === 'loading'
+              ? 'bg-sky-950/90 border-sky-900/50 text-sky-400'
+              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
+          }`}>
+            <div className="mt-0.5 flex-shrink-0">
+              {toastState.type === 'success' ? <CheckCircle2 size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
+            </div>
+            <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
+            {toastState.type !== 'loading' && (
+              <button 
+                onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+            {toastState.type !== 'loading' && (
+              <div 
+                className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                style={{ animation: 'toast-shrink 5s linear forwards' }}
+              />
+            )}
+          </div>
+          <style>{`
+            @keyframes toast-shrink {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            @keyframes toast-fade-out {
+              0%, 90% { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(-10px); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* ── System Connectivity & Database Backup Banner ── */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
@@ -357,7 +371,7 @@ export function OverviewDashboard() {
                 key={t.id}
                 onClick={() => navigate('/staff/tables')}
                 title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''} (${t.status})`}
-                className={`aspect-square rounded-lg flex flex-col items-center justify-center cursor-pointer border transition-all text-[10px] font-bold
+                className={`aspect-square rounded-lg flex flex-col items-center justify-center text-center px-1 leading-tight cursor-pointer border transition-all text-[10px] font-bold
                   ${t.status === 'maintenance' ? 'bg-neutral-800/80 border-neutral-700 text-neutral-400 opacity-70' :
                     isOvertime ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' :
                     isOpenTime ? 'bg-blue-950/40 border-blue-800/40 text-blue-400' :
@@ -367,7 +381,7 @@ export function OverviewDashboard() {
                     'bg-emerald-950/20 border-emerald-800/30 text-emerald-400'}
                 `}
               >
-                {t.id.replace('t', '')}
+                {t.name.replace(/table\s*/i, '')}
               </div>
             );
           })}
@@ -541,83 +555,6 @@ export function OverviewDashboard() {
           </div>
         </div>
       )}
-
-      {/* ── First-Time Recovery PIN Modal ── */}
-      <AnimatePresence>
-        {showRecoveryModal && (() => {
-          const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
-          return (
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }} 
-              className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4"
-            >
-              <motion.div 
-                initial={{ scale: 0.95, y: 20 }} 
-                animate={{ scale: 1, y: 0 }} 
-                className="bg-neutral-950 border border-amber-900/50 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden p-8 text-center"
-              >
-                <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4 text-amber-500">
-                  <KeyRound size={28} />
-                </div>
-                <h2 className="text-2xl font-black text-amber-400 tracking-wide uppercase mb-3">Save Your Recovery PIN</h2>
-                <p className="text-sm text-neutral-400 leading-relaxed mb-6">
-                  You haven't backed up your emergency access PIN. Because this system is designed to operate completely offline, this 4-digit PIN is the <strong>ONLY</strong> way to recover your account if you forget your password.
-                </p>
-                
-                <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
-                  <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
-                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
-                </div>
-                
-                <div className="flex gap-3 mb-6">
-                  <button 
-                    onClick={() => { 
-                      navigator.clipboard.writeText(targetUser?.recoveryPin || '0000'); 
-                      setPinCopied(true); 
-                      setHasInteractedWithPin(true);
-                      setTimeout(()=>setPinCopied(false), 2000); 
-                    }} 
-                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
-                  >
-                    {pinCopied ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Copy size={16} />} {pinCopied ? 'Copied!' : 'Copy PIN'}
-                  </button>
-                  <button 
-                    onClick={handleDownloadPin} 
-                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
-                  >
-                    <Download size={16} /> Save as .txt
-                  </button>
-                </div>
-                
-                <label className={`flex items-start gap-3 p-4 rounded-xl border transition-colors mb-6 text-left ${hasInteractedWithPin ? 'border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 cursor-pointer' : 'border-rose-900/50 bg-rose-950/10 cursor-not-allowed opacity-80'}`}>
-                  <input 
-                    type="checkbox" 
-                    checked={pinSaved} 
-                    disabled={!hasInteractedWithPin}
-                    onChange={() => setPinSaved(!pinSaved)} 
-                    className={`mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 ${!hasInteractedWithPin ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
-                  />
-                  <span className="text-xs text-neutral-400 leading-relaxed">
-                    {hasInteractedWithPin 
-                      ? "I confirm that I have safely copied or downloaded my recovery PIN." 
-                      : "⚠️ Action Required: You must Copy or Download your PIN to proceed."}
-                  </span>
-                </label>
-
-                <button 
-                  onClick={handleAcknowledgePin} 
-                  disabled={!pinSaved}
-                  className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-900 disabled:text-neutral-600 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
-                >
-                  Enter System
-                </button>
-              </motion.div>
-            </motion.div>
-          );
-        })()}
-      </AnimatePresence>
 
     </div>
   );

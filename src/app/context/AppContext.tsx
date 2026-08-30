@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
+import { motion, AnimatePresence } from 'motion/react';
+import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -115,7 +117,7 @@ export type ReservationTerms = {
 export type AnnouncementType = 'info' | 'warning' | 'promo' | 'event';
 export type Announcement = {
   id: string; title: string; content: string; type: AnnouncementType; isActive: boolean; createdAt: Date; expiresAt?: Date;
-  startDate?: Date | string; // 🟢 ADDED TO FIX CONTEXT ERRORS
+  startDate?: Date | string;
 };
 export type ClosedDate = {
   id: string; date: string; reason: string; isFullDay: boolean; openTime?: string; closeTime?: string; type?: 'specific' | 'weekly'; dayOfWeek?: number; 
@@ -195,16 +197,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
 
+  // 🟢 Global Recovery PIN State
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [pinCopied, setPinCopied] = useState(false);
+  const [hasInteractedWithPin, setHasInteractedWithPin] = useState(false);
+  const [pinSaved, setPinSaved] = useState(false);
+
   const [staffLoggedIn, setStaffLoggedIn] = useState(() => sessionStorage.getItem('oneshot_staff_auth') === 'true');
   const [adminLoggedIn, setAdminLoggedIn] = useState(() => sessionStorage.getItem('oneshot_admin_auth') === 'true');
   
-  // 🟢 NEW: Logout loader states
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutStep, setLogoutStep] = useState('');
 
   // 🎨 Global Theme State
   const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('oneshot_theme') as 'dark' | 'light') || 'dark');
   const [primaryColor, setPrimaryColor] = useState(() => localStorage.getItem('oneshot_color') || 'emerald');
+
+  const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
+    const saved = sessionStorage.getItem('oneshot_staff_profile');
+    return saved ? JSON.parse(saved) : { 
+      id: '', username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
+    };
+  });
+
+  useEffect(() => {
+    if ((staffLoggedIn || adminLoggedIn) && staffProfile?.username) {
+      const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
+      if (!isBackedUp) {
+        setShowRecoveryModal(true);
+      }
+    }
+  }, [staffLoggedIn, adminLoggedIn, staffProfile]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -221,14 +244,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPrimaryColor(color);
     localStorage.setItem('oneshot_color', color);
   };
-
- const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
-    const saved = sessionStorage.getItem('oneshot_staff_profile');
-    return saved ? JSON.parse(saved) : { 
-      id: '', username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
-    };
-  });
   
+  const handleDownloadPin = () => {
+    const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+    if (!targetUser?.recoveryPin) return;
+    
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Recovery PIN downloaded successfully!");
+    setHasInteractedWithPin(true);
+  };
+
+  const handleAcknowledgePin = () => {
+    if (staffProfile?.username) {
+      localStorage.setItem(`oneshot_pin_backed_up_${staffProfile.username}`, 'true');
+      setShowRecoveryModal(false);
+      toast.success("Recovery PIN safely backed up.");
+    }
+  };
+
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
@@ -416,7 +458,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     fetchHolidays();
   }, []);
-  // 🟢 DEBOUNCED CLOUD SYNC: Prevents duplicate records from concurrent race conditions
+  
   const cloudSyncTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const runCloudBackup = () => {
@@ -436,7 +478,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) { throw e; }
   };
 
-  // 🟢 NEW: Sync-on-Login Helper (Fetches online bookings & pushes pending local actions)
   const performLoginSync = async () => {
     try {
       const [resLocal, resCloud] = await Promise.all([
@@ -444,7 +485,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         supabase.from('reservations').select('*').then(res => res.data || []).catch(() => [])
       ]);
 
-      // Merge cloud reservations into local SQLite without overwriting staff edits
       if (resCloud.length > 0) {
         setReservations(prev => {
           const merged = [...prev];
@@ -475,7 +515,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      // Push any locally made POS/refunds up to online database
       await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
     } catch (e) {
       console.log('Login sync fallback: local state preserved.');
@@ -497,9 +536,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/activities', 'POST', newActivity, "Activity logged").then(runCloudBackup).catch(()=>{});
   };
 
-  // 🟢 =========================================================================
-  // 🟢 DIRECT CLOUD SYNC MUTATORS (Dual-writes to SQLite & Supabase for TV sync)
-  // 🟢 =========================================================================
 
   const assignTable = (tableId: string, session: Session) => {
     const updatedSession = { ...session, orders: [] };
@@ -633,9 +669,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     supabase.from('queue').update({ status: 'called' }).eq('id', id).then();
   };
 
-  // 🟢 =========================================================================
-  // 🟢 STANDARD MUTATORS
-  // 🟢 =========================================================================
 
   const addLostItem = (i: Omit<LostItem, 'id'>) => {
     const newItem = { ...i, id: `lf${Date.now()}` };
@@ -672,7 +705,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSessionHistory(prev => [newItem, ...prev]);
     syncToDB('/api/session-history', 'POST', newItem, `Logged session history`).then(runCloudBackup).catch(()=>{});
     
-    // 🟢 SAFE CONVERSION: Prevents "toISOString is not a function" whether passed as a Date or an SQLite ISO string
     const startTimeStr = newItem.startTime ? new Date(newItem.startTime).toISOString() : new Date().toISOString();
     const endTimeStr = newItem.endTime ? new Date(newItem.endTime).toISOString() : new Date().toISOString();
 
@@ -702,7 +734,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessionStorage.removeItem('oneshot_is_locked'); 
       updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
       
-      // 🟢 Automatically sync online customer bookings & push offline POS data on Login
       await performLoginSync();
       return true; 
     }
@@ -720,14 +751,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessionStorage.removeItem('oneshot_is_locked');
       updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
       
-      // 🟢 Automatically sync online customer bookings & push offline POS data on Login
       await performLoginSync();
       return true;
     }
     return false; 
   };
 
-  // 🟢 NEW: Safe Logout with Loading Screen & Dual Database Backup
   const staffLogout = async () => {
     setIsLoggingOut(true);
     setLogoutStep('Saving local SQLite records...');
@@ -796,14 +825,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
-    // 1. Update Memory (React State & Session Storage)
     setStaffProfile(prev => {
       const updated = { ...prev, ...p };
       sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(updated));
       return updated;
     });
 
-    // 2. 🟢 FIX: Persist changes directly to the local SQLite database
     const targetId = p.id || staffProfile.id;
     if (targetId) {
       const dbPayload: Partial<StaffUser> = {};
@@ -815,10 +842,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (p.avatarImg !== undefined) dbPayload.avatarImg = p.avatarImg;
 
       if (Object.keys(dbPayload).length > 0) {
-        // Instantly update the global staff list so the new login credentials work without a refresh
         setStaffUsers(prev => prev.map(u => u.id === targetId ? { ...u, ...dbPayload } : u));
         
-        // Push the new credentials to the Local Edge Server
         fetch(`http://localhost:3001/api/staff/${targetId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1153,7 +1178,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep
     }}>
-      {/* 🟢 NEW: Global Fullscreen Logout Overlay with Thread Loader */}
+      {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (
         <div className="fixed inset-0 z-[99999] bg-neutral-950/90 backdrop-blur-md flex flex-col items-center justify-center animate-fade-in">
           <div className="relative w-16 h-16 mb-5">
@@ -1169,8 +1194,87 @@ export function AppProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
+      {/* 🟢 Global First-Time Recovery PIN Modal */}
+      <AnimatePresence>
+        {showRecoveryModal && (() => {
+          const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+          return (
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, y: 20 }} 
+                animate={{ scale: 1, y: 0 }} 
+                className="bg-neutral-950 border border-amber-900/50 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden p-8 text-center"
+              >
+                <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4 text-amber-500">
+                  <KeyRound size={28} />
+                </div>
+                <h2 className="text-2xl font-black text-amber-400 tracking-wide uppercase mb-3">Save Your Recovery PIN</h2>
+                <p className="text-sm text-neutral-400 leading-relaxed mb-6">
+                  You haven't backed up your emergency access PIN. Because this system is designed to operate completely offline, this 4-digit PIN is the <strong>ONLY</strong> way to recover your account if you forget your password.
+                </p>
+                
+                <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
+                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                </div>
+                
+                <div className="flex gap-3 mb-6">
+                  <button 
+                    onClick={() => { 
+                      navigator.clipboard.writeText(targetUser?.recoveryPin || '0000'); 
+                      setPinCopied(true); 
+                      setHasInteractedWithPin(true);
+                      setTimeout(()=>setPinCopied(false), 2000); 
+                    }} 
+                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
+                  >
+                    {pinCopied ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Copy size={16} />} {pinCopied ? 'Copied!' : 'Copy PIN'}
+                  </button>
+                  <button 
+                    onClick={handleDownloadPin} 
+                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
+                  >
+                    <Download size={16} /> Save as .txt
+                  </button>
+                </div>
+                
+                <label className={`flex items-start gap-3 p-4 rounded-xl border transition-colors mb-6 text-left ${hasInteractedWithPin ? 'border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 cursor-pointer' : 'border-rose-900/50 bg-rose-950/10 cursor-not-allowed opacity-80'}`}>
+                  <input 
+                    type="checkbox" 
+                    checked={pinSaved} 
+                    disabled={!hasInteractedWithPin}
+                    onChange={() => setPinSaved(!pinSaved)} 
+                    className={`mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 ${!hasInteractedWithPin ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
+                  />
+                  <span className="text-xs text-neutral-400 leading-relaxed">
+                    {hasInteractedWithPin 
+                      ? "I confirm that I have safely copied or downloaded my recovery PIN." 
+                      : "⚠️ Action Required: You must Copy or Download your PIN to proceed."}
+                  </span>
+                </label>
+
+                <button 
+                  onClick={handleAcknowledgePin} 
+                  disabled={!pinSaved}
+                  className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-900 disabled:text-neutral-600 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
+                >
+                  Enter System
+                </button>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+        
       {children}
+      
     </AppContext.Provider>
+    
   );
 }
 

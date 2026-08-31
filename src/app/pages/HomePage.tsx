@@ -120,7 +120,7 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund } = useAppContext() as any;
+  const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund, validateBookingPreflight } = useAppContext() as any;
 
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
@@ -226,7 +226,6 @@ export function HomePage() {
   const [rescheduleData, setRescheduleData] = useState<{ date: Date | null; timeSlot: string }>({ date: null, timeSlot: '' });
 
   const [confirmingPayment, setConfirmingPayment] = useState(false);
-  const [paymentRef, setPaymentRef] = useState('');
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [promoCodeInput, setPromoCodeInput] = useState('');
@@ -596,6 +595,15 @@ export function HomePage() {
     
     setIsVerifying(true);
     try {
+      // 1. PRE-FLIGHT CHECK
+      const isStillAvailable = await validateBookingPreflight(selectedDate, resForm.timeSlot, resForm.duration);
+      if (!isStillAvailable) {
+        alert("We're sorry! Someone just booked the last available table for this exact time slot. Please select a different time.");
+        setIsVerifying(false);
+        return;
+      }
+
+      // 2. RECAPTCHA VERIFICATION
       const token = await recaptchaRef.current?.executeAsync();
       if (!token) {
         alert("reCAPTCHA verification failed. Please try again.");
@@ -605,19 +613,15 @@ export function HomePage() {
       setCaptchaToken(token);
       setReservationStep(2);
     } catch (err) {
-      alert("reCAPTCHA verification error.");
+      alert("Verification error. Please check your connection.");
     } finally {
       setIsVerifying(false);
     }
   };
 
   // 🟢 FIXED: Converted to async to handle the cloud upload before saving the reservation
+  // 🟢 FIXED: Converted to async to handle the cloud upload before saving the reservation
   const handlePaymentConfirm = async () => {
-    if (reservations.some((r: any) => r.paymentRef === paymentRef)) {
-      alert("This GCash reference number has already been recorded in our system. Please verify your transaction and enter a valid, unique reference number.");
-      return;
-    }
-
     setConfirmingPayment(true);
     
     try {
@@ -662,8 +666,7 @@ export function HomePage() {
         balancePaid: false,
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
-        paymentRef: paymentRef,
-        receiptImg: finalReceiptUrl, // 🟢 FIXED: Passes the live Supabase URL
+        receiptImg: finalReceiptUrl, // 🟢 Passes the live Supabase URL
       });
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
@@ -683,7 +686,6 @@ export function HomePage() {
     setReservationStep(0);
     setAgreedToTerms(false);
     setGeneratedResId('');
-    setPaymentRef(''); 
     setReceiptImg(null); 
     setCaptchaToken(null);
     if (recaptchaRef.current) recaptchaRef.current.reset();
@@ -1911,8 +1913,11 @@ export function HomePage() {
 
         {reservationStep === 2 && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[95vh] overflow-y-auto">
-              <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex items-center justify-between"><div><h3 className="text-base font-bold text-white">Down Payment</h3></div><button onClick={closeReservation} className="text-neutral-600 hover:text-white"><X size={18} /></button></div>
+            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[95vh] overflow-y-auto hide-scrollbar">
+              <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex items-center justify-between">
+                <div><h3 className="text-base font-bold text-white">Down Payment</h3></div>
+                <button onClick={closeReservation} className="text-neutral-600 hover:text-white transition-colors"><X size={18} /></button>
+              </div>
               <div className="p-6">
                <div className="bg-amber-950/30 border border-amber-800/30 rounded-xl p-4 mb-5 text-center">
                   <p className="text-xs text-amber-500 mb-1">Amount Due ({rates?.downPaymentPercent ?? 25}% Down Payment)</p>
@@ -1922,57 +1927,69 @@ export function HomePage() {
                 
                 <div className="flex flex-col items-center gap-4">
                   <QRDisplay pattern={QR_GCASH} color="#1d4ed8" />
-                  <div className="text-center"><p className="text-sm font-bold text-blue-400">GCash</p><p className="text-xs text-neutral-300 font-semibold">ONE SHOT BAR & BILLIARDS</p><p className="text-xs text-neutral-500">+63 917-123-4567</p></div>
-                  <div className="w-full space-y-3 mt-2 text-left">
-                    <div>
-                      <label className="block text-xs text-neutral-400 mb-1.5">GCash Reference Number <span className="text-rose-500">*</span></label>
-                      <input type="text" value={paymentRef} onChange={e => setPaymentRef(e.target.value.replace(/\D/g, '').slice(0, 13))} placeholder="13-digit ref no." className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 font-mono" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-neutral-400 mb-1.5">Upload Receipt Screenshot <span className="text-rose-500">*</span></label>
-                      <div className="flex items-center gap-3">
-                        <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 hover:border-blue-500 rounded-lg px-3 py-3 text-center transition-colors flex flex-col items-center justify-center gap-1">
-                          <input type="file" accept="image/*" className="hidden" onChange={e => { 
-                            const file = e.target.files?.[0]; 
-                            if (file) {
-                              setReceiptImg(URL.createObjectURL(file)); 
-                              setReceiptFile(file);
-                            } 
-                          }} />
-                            <Upload size={14} className="text-neutral-500" />
-                          <span className="text-[10px] text-neutral-400">{receiptImg ? 'Change Image' : 'Tap to upload'}</span>
-                        </label>
-                        {receiptImg && <div className="w-14 h-14 rounded-lg border border-neutral-700 overflow-hidden flex-shrink-0 bg-neutral-900"><img src={receiptImg} alt="Receipt" className="w-full h-full object-cover" /></div>}
-                      </div>
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-blue-400">GCash</p>
+                    <p className="text-xs text-neutral-300 font-semibold">ONE SHOT BAR & BILLIARDS</p>
+                    <p className="text-xs text-neutral-500">+63 917-123-4567</p>
+                  </div>
+                  
+                  <div className="w-full mt-2 text-left">
+                    <label className="block text-xs text-neutral-400 mb-1.5">Upload Receipt Screenshot <span className="text-rose-500">*</span></label>
+                    <div className="flex items-center gap-3">
+                      <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 hover:border-blue-500 rounded-lg px-3 py-3 text-center transition-colors flex flex-col items-center justify-center gap-1">
+                        <input type="file" accept="image/*" className="hidden" onChange={e => { 
+                          const file = e.target.files?.[0]; 
+                          if (file) {
+                            setReceiptImg(URL.createObjectURL(file)); 
+                            setReceiptFile(file);
+                          } 
+                        }} />
+                          <Upload size={14} className="text-neutral-500" />
+                        <span className="text-[10px] text-neutral-400">{receiptImg ? 'Change Image' : 'Tap to upload'}</span>
+                      </label>
+                      {receiptImg && (
+                        <div className="w-14 h-14 rounded-lg border border-neutral-700 overflow-hidden flex-shrink-0 bg-neutral-900">
+                          <img src={receiptImg} alt="Receipt" className="w-full h-full object-cover" />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mt-2 mb-5 max-h-44 overflow-y-auto">
-                    <p className="text-xs font-bold text-white mb-3 flex items-center gap-1.5">
-                      <BookOpen size={12} className="text-emerald-500" /> Reservation Terms & Conditions
-                    </p>
-                    <ul className="space-y-2 text-[10px] text-neutral-400 leading-relaxed">
-                      <li>• Minimum booking duration is {reservationTerms.minHours || 1} hour(s).</li>
-                      <li>• Maximum booking duration (based on cut-off) is {maxAllowedDuration} hour(s).</li>
-                      <li>• Online booking window: {fmt12(rates?.reservationStartTime || '12:00')} to {fmt12(((() => { const e = rates?.reservationEndTime || '02:00'; const [hh, mm] = e.split(':').map(Number); let em = hh*60 + (mm||0); const sm = (rates?.reservationStartTime||'12:00').split(':').map(Number); let smm = sm[0]*60 + (sm[1]||0); if (em <= smm) em += 24*60; return em - 60; })()))} (cutoff 1 hour before close)</li>
-                      <li>• Store hours: {fmt12(rates?.reservationStartTime || '12:00')} — {fmt12(rates?.reservationEndTime || '02:00')}</li>
-                      <li>• A {rates?.downPaymentPercent ?? 25}% down payment is required to secure your slot.</li>
-                      <li>• Remaining balance must be settled after your session.</li>
-                      <li>• Online capacity limit: {rates?.onlineCapacityLimit ?? 70}% of tables (admin-configured)</li>
-                      <li>• {reservationTerms.cancellationPolicy}</li>
-                      <li>• {reservationTerms.termsAndConditions}</li>
-                    </ul>
-                  </div>
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mt-5 mb-5 max-h-44 overflow-y-auto">
+                  <p className="text-xs font-bold text-white mb-3 flex items-center gap-1.5">
+                    <BookOpen size={12} className="text-emerald-500" /> Reservation Terms & Conditions
+                  </p>
+                  <ul className="space-y-2 text-[10px] text-neutral-400 leading-relaxed">
+                    <li>• Minimum booking duration is {reservationTerms.minHours || 1} hour(s).</li>
+                    <li>• Maximum booking duration (based on cut-off) is {maxAllowedDuration} hour(s).</li>
+                    <li>• Online booking window: {fmt12(rates?.reservationStartTime || '12:00')} to {fmt12(((() => { const e = rates?.reservationEndTime || '02:00'; const [hh, mm] = e.split(':').map(Number); let em = hh*60 + (mm||0); const sm = (rates?.reservationStartTime||'12:00').split(':').map(Number); let smm = sm[0]*60 + (sm[1]||0); if (em <= smm) em += 24*60; return em - 60; })()))} (cutoff 1 hour before close)</li>
+                    <li>• Store hours: {fmt12(rates?.reservationStartTime || '12:00')} — {fmt12(rates?.reservationEndTime || '02:00')}</li>
+                    <li>• A {rates?.downPaymentPercent ?? 25}% down payment is required to secure your slot.</li>
+                    <li>• Remaining balance must be settled after your session.</li>
+                    <li>• Online capacity limit: {rates?.onlineCapacityLimit ?? 70}% of tables (admin-configured)</li>
+                    <li>• {reservationTerms.cancellationPolicy}</li>
+                    <li>• {reservationTerms.termsAndConditions}</li>
+                  </ul>
+                </div>
 
-                  <label className="flex items-start gap-2 text-[11px] text-neutral-400 cursor-pointer">
-                    <input type="checkbox" checked={agreedToTerms} onChange={() => setAgreedToTerms(prev => !prev)} className="mt-0.5 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500" />
-                    <span>I have read and agree to the reservation terms and conditions.</span>
-                  </label>
+                <label className="flex items-start gap-2 text-[11px] text-neutral-400 cursor-pointer mb-5">
+                  <input type="checkbox" checked={agreedToTerms} onChange={() => setAgreedToTerms(prev => !prev)} className="mt-0.5 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500" />
+                  <span>I have read and agree to the reservation terms and conditions.</span>
+                </label>
 
-                <button onClick={handlePaymentConfirm} disabled={confirmingPayment || !paymentRef || paymentRef.length < 13 || !receiptImg || !agreedToTerms} className="w-full mt-5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
+                <button 
+                  onClick={handlePaymentConfirm} 
+                  disabled={confirmingPayment || !receiptImg || !agreedToTerms || !captchaToken} 
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30"
+                >
                   {confirmingPayment ? 'Processing...' : <><CheckCircle size={15} /> I've Sent the Payment</>}
                 </button>
+                
+                {/* 🟢 RECAPTCHA LEGAL DISCLAIMER */}
+                <p className="text-[10px] text-neutral-500 text-center leading-relaxed mt-4 px-2">
+                  This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Privacy Policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Terms of Service</a> apply.
+                </p>
               </div>
             </motion.div>
           </motion.div>

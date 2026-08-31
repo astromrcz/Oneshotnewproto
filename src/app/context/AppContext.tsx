@@ -115,6 +115,7 @@ type AppContextType = {
   applyPromoCode: (c: string) => PromoCode | null;
   refreshLiveMonitor: () => Promise<void>;
   acknowledgeRefund: (id: string) => void;
+  validateBookingPreflight: (date: Date, timeSlot: string, durationHours: number) => Promise<boolean>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -171,13 +172,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // 🟢 NEW: Auto-refresh loop so the customer website stays in sync
+  // 🟢 SMART POLLING: Checks Supabase only when tab is active, every 45s (Saves massive bandwidth)
   useEffect(() => {
     if (isInitializing) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshLiveMonitor();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     const interval = setInterval(() => {
-      refreshLiveMonitor();
-    }, 5000); // Check Supabase every 5 seconds
-    return () => clearInterval(interval);
+      if (document.visibilityState === 'visible') refreshLiveMonitor();
+    }, 45000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
+    };
   }, [isInitializing]);
+
+  // 🟢 PRE-FLIGHT CHECK: Prevents simultaneous double-booking deadlocks
+  const validateBookingPreflight = async (date: Date, timeSlot: string, durationHours: number): Promise<boolean> => {
+    const requestedStart = new Date(date);
+    const [h, m] = timeSlot.split(':').map(Number);
+    requestedStart.setHours(h, m, 0, 0);
+    const requestedEnd = addMinutes(requestedStart, durationHours * 60);
+
+    try {
+      const { data } = await supabase
+        .from('reservations')
+        .select('date, durationHours')
+        .in('status', ['pending', 'confirmed', 'checked-in']);
+
+      if (!data) return true; 
+
+      let overlapCount = 0;
+      data.forEach((r: any) => {
+        if (isSameDay(new Date(r.date), requestedStart)) {
+           const rStart = new Date(r.date);
+           const rEnd = addMinutes(rStart, r.durationHours * 60);
+           if (requestedStart < rEnd && requestedEnd > rStart) overlapCount++;
+        }
+      });
+
+      const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
+      const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
+
+      return overlapCount < maxOnlineCapacity;
+    } catch (err) {
+      return true; // Failsafe fallback
+    }
+  };
 
   useEffect(() => {
     const fetchSupabaseData = async () => {
@@ -377,7 +423,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       tables, queue, reservations, promoCodes, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement, siteConfig, events,
       addReservation, addFeedback, applyPromoCode, refreshLiveMonitor,
-      acknowledgeRefund
+      acknowledgeRefund, validateBookingPreflight
     }}>
       {children}
     </AppContext.Provider>

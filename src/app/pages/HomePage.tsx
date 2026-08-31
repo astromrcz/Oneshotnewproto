@@ -190,9 +190,9 @@ export function HomePage() {
   const [now, setNow] = useState(new Date());
   const [activeSection, setActiveSection] = useState<Section>('home');
 
-  const [setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [showRegisterModal, setShowRegisterModal] = useState(false);
+ const [setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState<'options' | 'login' | 'register'>('options');
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showRegPromoModal, setShowRegPromoModal] = useState(false);
 
@@ -743,8 +743,6 @@ export function HomePage() {
     { id: 'reservations', label: 'Reservations' },
     { id: 'rates', label: 'Rates' },
     { id: 'events', label: 'Events' },
-    { id: 'about', label: 'About Us' },
-    { id: 'feedback', label: 'Feedback' },
   ];
 
   return (
@@ -811,7 +809,15 @@ export function HomePage() {
                         return (
                           <div key={n.id} className={`p-4 rounded-xl mb-1 transition-colors ${isUnread ? 'bg-emerald-950/20 border border-emerald-900/40' : 'hover:bg-neutral-900/50 border border-transparent'}`}>
                             <div className="flex items-center justify-between mb-2">
-                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${isRes ? 'text-sky-400 bg-sky-500/10' : 'text-emerald-500 bg-emerald-500/10'}`}>{n.type}</span>
+                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded flex-shrink-0 ${
+                                isRes ? 'text-sky-400 bg-sky-500/10' : 
+                                n.type?.toLowerCase() === 'holiday' ? 'text-rose-400 bg-rose-500/10' : 
+                                n.type?.toLowerCase() === 'event' ? 'text-amber-400 bg-amber-500/10' : 
+                                n.type?.toLowerCase() === 'promo' ? 'text-violet-400 bg-violet-500/10' : 
+                                'text-emerald-500 bg-emerald-500/10'
+                              }`}>
+                                {n.type}
+                              </span>
                               <div className="flex items-center gap-3">
                                 <span className="text-[10px] text-neutral-500">{format(new Date(n.createdAt), 'MMM d')}</span>
                                 {isUnread && (
@@ -849,14 +855,9 @@ export function HomePage() {
               <button onClick={() => { setCurrentUser(null); setTrackedReservations(null); }} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-2 py-1.5 transition-colors">Logout</button>
             </div>
           ) : (
-            <>
-              <button onClick={() => setShowLoginModal(true)} className="flex items-center gap-1.5 text-xs text-neutral-300 hover:text-white bg-neutral-800/60 hover:bg-neutral-800 border border-neutral-700/50 px-3 py-1.5 rounded-full transition-all">
-                <LogIn size={12} /> <span className="hidden sm:inline">Login</span>
-              </button>
-              <button onClick={() => setShowRegisterModal(true)} className="flex items-center gap-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-full transition-all">
-                <UserPlus size={12} /> <span className="hidden sm:inline">Register</span>
-              </button>
-            </>
+            <button onClick={() => { setAuthMode('options'); setShowAuthModal(true); }} className="flex items-center gap-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 px-5 py-2 rounded-full transition-all font-bold shadow-lg shadow-emerald-900/30">
+              <LogIn size={14} /> <span className="hidden sm:inline">Sign In</span>
+            </button>
           )}
         </div>
       </header>
@@ -917,7 +918,7 @@ export function HomePage() {
                       <button onClick={() => setActiveSection('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-900/40 hover:shadow-emerald-800/60">
                         <Calendar size={15} /> Book a Table
                       </button>
-                      <button onClick={() => setActiveSection('about')} className="flex items-center gap-2 bg-neutral-900/80 backdrop-blur-sm hover:bg-neutral-800 text-neutral-100 px-6 py-3 rounded-full text-sm font-semibold transition-all border border-neutral-700/50 hover:border-neutral-600">
+                      <button onClick={() => document.getElementById('home-about-section')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center gap-2 bg-neutral-900/80 backdrop-blur-sm hover:bg-neutral-800 text-neutral-100 px-6 py-3 rounded-full text-sm font-semibold transition-all border border-neutral-700/50 hover:border-neutral-600">
                         <Info size={15} /> Learn More
                       </button>
                     </div>
@@ -974,6 +975,100 @@ export function HomePage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* ════ MOVED ABOUT SECTION CONTENT ════ */}
+              <div id="home-about-section" className="max-w-5xl mx-auto px-6 py-16 border-t border-neutral-800">
+                <div className="text-center mb-10"><h2 className="text-3xl font-black text-white mb-2">{cms.aboutTitle}</h2><p className="text-neutral-400 text-sm">The story behind your favorite billiards destination</p></div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-12">
+                  <div>
+                    <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold mb-3">Our Story</p><h3 className="text-2xl font-bold text-white mb-4">A Passion for the Game</h3>
+                    <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP1}</p>
+                    <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
+                    <p className="text-neutral-400 text-sm leading-relaxed">{cms.aboutP3}</p>
+                  </div>
+                  <div className="rounded-2xl overflow-hidden h-72">
+                     <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover" />
+                  </div>
+                </div>
+                <div className="mb-12">
+                  <h3 className="text-center text-xl font-bold text-white mb-6">Our Location</h3>
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-64 flex items-center justify-center relative">
+                    <div className="absolute inset-0 bg-neutral-800/50" />
+                    <div className="relative z-10 text-center"><MapPin size={32} className="text-emerald-500 mx-auto mb-2" /><p className="text-white font-semibold text-sm">One Shot Bar & Billiards</p><p className="text-neutral-400 text-xs">{cms.address}</p><a href="https://www.google.com/maps/place/One+Shot+Bar+and+Billiards/@14.5813335,121.1249395,808m/data=!3m2!1e3!4b1!4m6!3m5!1s0x3397c70049cd2efb:0x4b8fd5634abcd6cc!8m2!3d14.5813335!4d121.1275144!16s%2Fg%2F11wwhbc6y5?entry=ttu&g_ep=EgoyMDI2MDgyNi4wIKXMDSoASAFQAw%3D%3D" target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-xs bg-emerald-600 text-white px-4 py-2 rounded-full hover:bg-emerald-500 transition-colors">Open in Google Maps</a></div>
+                  </div>
+                </div>
+                <div className="border-t border-neutral-800 pt-10">
+                  <div className="text-center mb-8"><h3 className="text-xl font-bold text-white mb-1">Contact Us</h3><p className="text-neutral-400 text-sm">We'd love to hear from you. Get in touch!</p></div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                      <div className="bg-neutral-900 border border-neutral-800 hover:border-emerald-600/30 rounded-xl p-5 transition-all flex gap-4">
+                         <div className="w-10 h-10 rounded-xl bg-emerald-600/10 border border-emerald-600/20 flex items-center justify-center flex-shrink-0"><MapPin size={16} className="text-emerald-400" /></div>
+                         <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Address</p><p className="text-sm text-neutral-200 whitespace-pre-line break-words line-clamp-3">{cms.address}</p></div>
+                      </div>
+                      <div className="bg-neutral-900 border border-neutral-800 hover:border-sky-600/30 rounded-xl p-5 transition-all flex gap-4">
+                         <div className="w-10 h-10 rounded-xl bg-sky-600/10 border border-sky-600/20 flex items-center justify-center flex-shrink-0"><Phone size={16} className="text-sky-400" /></div>
+                         <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Phone / Viber</p><p className="text-sm text-neutral-200 whitespace-pre-line break-words line-clamp-2">{cms.phone}</p></div>
+                      </div>
+                      <div className="bg-neutral-900 border border-neutral-800 hover:border-violet-600/30 rounded-xl p-5 transition-all flex gap-4">
+                         <div className="w-10 h-10 rounded-xl bg-violet-600/10 border border-violet-600/20 flex items-center justify-center flex-shrink-0"><Mail size={16} className="text-violet-400" /></div>
+                         <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Email</p><p className="text-sm text-neutral-200 truncate">{cms.email}</p></div>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5">
+                        <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-3">Follow Us</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { platform: 'Facebook', handle: cms.facebook, icon: '📘' }, 
+                            { platform: 'Instagram', handle: cms.instagram, icon: '📸' }, 
+                            { platform: 'TikTok', handle: cms.tiktok, icon: '🎵' }
+                          ].map(({ platform, handle, icon }) => (
+                            <div key={platform} className="flex items-center gap-2.5 bg-neutral-800/60 rounded-lg p-3">
+                              <span className="text-lg">{icon}</span>
+                              <div>
+                                <p className="text-[10px] text-neutral-500">{platform}</p>
+                                <p className="text-xs text-neutral-300 truncate">{handle}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ════ MOVED FEEDBACK SECTION CONTENT ════ */}
+              <div id="home-feedback-section" className="max-w-2xl mx-auto px-6 py-16 border-t border-neutral-800">
+                <div className="text-center mb-8"><h2 className="text-3xl font-black text-white mb-2">Send us Feedback</h2><p className="text-neutral-400 text-sm">We value your experience. Let us know how we can improve!</p></div>
+                {feedbackSent ? (
+                  <div className="bg-sky-600/10 border border-sky-600/30 rounded-2xl p-10 text-center"><CheckCircle size={40} className="text-sky-400 mx-auto mb-3" /><p className="text-sky-300 font-semibold text-lg mb-1">Message Sent!</p><p className="text-neutral-500 text-sm">Our management team will review your message shortly. Thank you!</p></div>
+                ) : (
+                  <form onSubmit={handleFeedbackSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-5">
+                    <div className="flex items-center gap-2 mb-1"><Mail className="text-sky-400" size={18} /><p className="text-sm font-semibold text-white">Direct Message to Management</p></div>
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label><input type="text" value={feedbackForm.name} onChange={e => setFeedbackForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div><label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label><input type="tel" inputMode="numeric" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="e.g. 09123456789" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
+                      <div><label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label><input type="text" value={feedbackForm.reservationId} onChange={e => setFeedbackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 font-mono tracking-widest uppercase" /></div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1.5">Type of Feedback <span className="text-rose-500">*</span></label>
+                      <div className="relative"><select value={feedbackForm.type} onChange={e => setFeedbackForm(f => ({ ...f, type: e.target.value }))} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 appearance-none"><option value="" disabled>Select a category...</option><option value="compliment">Compliment</option><option value="suggestion">Suggestion</option><option value="complaint">Concern / Complaint</option><option value="lost_item">Lost Item</option><option value="other">Other</option></select><ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" /></div>
+                    </div>
+
+                    {feedbackForm.type === 'other' && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden">
+                        <label className="block text-xs text-neutral-400 mb-1.5">Please Specify <span className="text-rose-500">*</span></label>
+                        <input type="text" value={feedbackForm.customType} onChange={e => setFeedbackForm(f => ({ ...f, customType: e.target.value }))} placeholder="e.g. Partnership Inquiry" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" />
+                      </motion.div>
+                    )}
+
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label><textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none" /></div>
+                    <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 text-white py-3 rounded-xl text-sm font-semibold">Submit Feedback</button>
+                  </form>
+                )}
               </div>
             </motion.div>
           )}
@@ -1274,7 +1369,7 @@ export function HomePage() {
                       <div className="text-center mb-6">
                         <Search size={32} className="text-emerald-500 mx-auto mb-3" />
                         <h3 className="text-lg font-bold text-white mb-1">Track Reservation</h3>
-                        <p className="text-xs text-neutral-400">Enter your 6-character Reservation ID below or <button onClick={() => setShowLoginModal(true)} className="text-emerald-400 hover:underline font-semibold">log in</button>.</p>
+                        <p className="text-xs text-neutral-400">Enter your 6-character Reservation ID below or <button type="button" onClick={() => { setAuthMode('options'); setShowAuthModal(true); }} className="text-emerald-400 hover:underline font-semibold">log in</button>.</p>
                       </div>
                       <form onSubmit={(e) => {
                         e.preventDefault();
@@ -1612,119 +1707,17 @@ export function HomePage() {
 
             </motion.div>
           )}
-
-          {/* ════ ABOUT SECTION ════ */}
-          {activeSection === 'about' && (
-            <motion.div key="about" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-5xl mx-auto px-6 py-10">
-              <div className="text-center mb-10"><h2 className="text-3xl font-black text-white mb-2">{cms.aboutTitle}</h2><p className="text-neutral-400 text-sm">The story behind your favorite billiards destination</p></div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-12">
-                <div>
-                  <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold mb-3">Our Story</p><h3 className="text-2xl font-bold text-white mb-4">A Passion for the Game</h3>
-                  <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP1}</p>
-                  <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
-                  <p className="text-neutral-400 text-sm leading-relaxed">{cms.aboutP3}</p>
-                </div>
-                <div className="rounded-2xl overflow-hidden h-72">
-                   <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover" />
-                </div>
-              </div>
-              <div className="mb-12">
-                <h3 className="text-center text-xl font-bold text-white mb-6">Our Location</h3>
-                <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-64 flex items-center justify-center relative">
-                  <div className="absolute inset-0 bg-neutral-800/50" />
-                  <div className="relative z-10 text-center"><MapPin size={32} className="text-emerald-500 mx-auto mb-2" /><p className="text-white font-semibold text-sm">One Shot Bar & Billiards</p><p className="text-neutral-400 text-xs">{cms.address}</p><a href="https://maps.google.com" target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-xs bg-emerald-600 text-white px-4 py-2 rounded-full hover:bg-emerald-500 transition-colors">Open in Google Maps</a></div>
-                </div>
-              </div>
-              <div className="border-t border-neutral-800 pt-10">
-                <div className="text-center mb-8"><h3 className="text-xl font-bold text-white mb-1">Contact Us</h3><p className="text-neutral-400 text-sm">We'd love to hear from you. Get in touch!</p></div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-4">
-                    <div className="bg-neutral-900 border border-neutral-800 hover:border-emerald-600/30 rounded-xl p-5 transition-all flex gap-4">
-                       <div className="w-10 h-10 rounded-xl bg-emerald-600/10 border border-emerald-600/20 flex items-center justify-center flex-shrink-0"><MapPin size={16} className="text-emerald-400" /></div>
-                       <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Address</p><p className="text-sm text-neutral-200 whitespace-pre-line break-words line-clamp-3">{cms.address}</p></div>
-                    </div>
-                    <div className="bg-neutral-900 border border-neutral-800 hover:border-sky-600/30 rounded-xl p-5 transition-all flex gap-4">
-                       <div className="w-10 h-10 rounded-xl bg-sky-600/10 border border-sky-600/20 flex items-center justify-center flex-shrink-0"><Phone size={16} className="text-sky-400" /></div>
-                       <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Phone / Viber</p><p className="text-sm text-neutral-200 whitespace-pre-line break-words line-clamp-2">{cms.phone}</p></div>
-                    </div>
-                    <div className="bg-neutral-900 border border-neutral-800 hover:border-violet-600/30 rounded-xl p-5 transition-all flex gap-4">
-                       <div className="w-10 h-10 rounded-xl bg-violet-600/10 border border-violet-600/20 flex items-center justify-center flex-shrink-0"><Mail size={16} className="text-violet-400" /></div>
-                       <div className="min-w-0 flex-1"><p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">Email</p><p className="text-sm text-neutral-200 truncate">{cms.email}</p></div>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5">
-                      <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-3">Follow Us</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        {[
-                          { platform: 'Facebook', handle: cms.facebook, icon: '📘' }, 
-                          { platform: 'Instagram', handle: cms.instagram, icon: '📸' }, 
-                          { platform: 'TikTok', handle: cms.tiktok, icon: '🎵' }
-                        ].map(({ platform, handle, icon }) => (
-                          <div key={platform} className="flex items-center gap-2.5 bg-neutral-800/60 rounded-lg p-3">
-                            <span className="text-lg">{icon}</span>
-                            <div>
-                              <p className="text-[10px] text-neutral-500">{platform}</p>
-                              <p className="text-xs text-neutral-300 truncate">{handle}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {/* ════ FEEDBACK SECTION ════ */}
-          {activeSection === 'feedback' && (
-            <motion.div key="feedback" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-2xl mx-auto px-6 py-10">
-              <div className="text-center mb-8"><h2 className="text-3xl font-black text-white mb-2">Send us Feedback</h2><p className="text-neutral-400 text-sm">We value your experience. Let us know how we can improve!</p></div>
-              {feedbackSent ? (
-                <div className="bg-sky-600/10 border border-sky-600/30 rounded-2xl p-10 text-center"><CheckCircle size={40} className="text-sky-400 mx-auto mb-3" /><p className="text-sky-300 font-semibold text-lg mb-1">Message Sent!</p><p className="text-neutral-500 text-sm">Our management team will review your message shortly. Thank you!</p></div>
-              ) : (
-                <form onSubmit={handleFeedbackSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-5">
-                  <div className="flex items-center gap-2 mb-1"><Mail className="text-sky-400" size={18} /><p className="text-sm font-semibold text-white">Direct Message to Management</p></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label><input type="text" value={feedbackForm.name} onChange={e => setFeedbackForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* 🟢 FIXED: Contact number is strictly digits and limited to 13 characters */}
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label><input type="tel" inputMode="numeric" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="e.g. 09123456789" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" /></div>
-                    
-                    {/* 🟢 NEW: Optional Reservation ID input */}
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label><input type="text" value={feedbackForm.reservationId} onChange={e => setFeedbackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 font-mono tracking-widest uppercase" /></div>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-neutral-400 mb-1.5">Type of Feedback <span className="text-rose-500">*</span></label>
-                    <div className="relative"><select value={feedbackForm.type} onChange={e => setFeedbackForm(f => ({ ...f, type: e.target.value }))} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 appearance-none"><option value="" disabled>Select a category...</option><option value="compliment">Compliment</option><option value="suggestion">Suggestion</option><option value="complaint">Concern / Complaint</option><option value="lost_item">Lost Item</option><option value="other">Other</option></select><ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" /></div>
-                  </div>
-
-                  {/* 🟢 FIXED: Drops down a mandatory text input when "Other" is selected */}
-                  {feedbackForm.type === 'other' && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden">
-                      <label className="block text-xs text-neutral-400 mb-1.5">Please Specify <span className="text-rose-500">*</span></label>
-                      <input type="text" value={feedbackForm.customType} onChange={e => setFeedbackForm(f => ({ ...f, customType: e.target.value }))} placeholder="e.g. Partnership Inquiry" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500" />
-                    </motion.div>
-                  )}
-
-                  <div><label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label><textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none" /></div>
-                  <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 text-white py-3 rounded-xl text-sm font-semibold">Submit Feedback</button>
-                </form>
-              )}
-            </motion.div>
-          )}
         </AnimatePresence>
 
         <footer className="bg-neutral-900 border-t border-neutral-800 mt-10 py-8 px-6 text-center">
           <div className="max-w-4xl mx-auto space-y-4">
-            <div className="flex items-center justify-center gap-2.5 mb-3"><img src={logoImg} alt="One Shot Bar & Billiards" className="h-8 w-8 object-contain" /><span className="text-white font-bold text-sm">One Shot Bar & Billiards</span></div>
-            
+            <div className="flex items-center justify-center gap-2.5 mb-3">
+              <img src={logoImg} alt="One Shot Bar & Billiards" className="h-8 w-8 object-contain" />
+              <span className="text-white font-bold text-sm">One Shot Bar & Billiards</span>
+            </div>
             <p className="text-neutral-600 text-xs">
               {cms.address} · Mon–Thu {fmt12(rates?.weekdayStartTime || '12:00')}–{fmt12(rates?.weekdayEndTime || '02:00')} · Fri–Sun {fmt12(rates?.weekendStartTime || '12:00')}–{fmt12(rates?.weekendEndTime || '02:00')}
             </p>
-
-            
             <p className="text-neutral-700 text-[10px]">© 2026 One Shot Bar & Billiards. All rights reserved.</p>
           </div>
         </footer>
@@ -1732,36 +1725,119 @@ export function HomePage() {
 
       {/* ════ MODALS ════ */}
       <AnimatePresence>
-        {showLoginModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowLoginModal(false)}>
-            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} onClick={e => e.stopPropagation()} className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-              <div className="flex items-center justify-between mb-5"><div><h3 className="text-lg font-bold text-white">Customer Login</h3><p className="text-xs text-neutral-500">Welcome back!</p></div><button onClick={() => setShowLoginModal(false)} className="text-neutral-600 hover:text-white"><X size={18} /></button></div>
-              {loginForm.error && <div className="bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-3 py-2 rounded-lg mb-4">{loginForm.error}</div>}
-              <div className="space-y-3">
-                <div><label className="block text-xs text-neutral-400 mb-1.5">Email</label><input type="email" value={loginForm.email} onChange={e => setLoginForm(f => ({ ...f, email: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /></div>
-                <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={loginForm.showPw ? 'text' : 'password'} value={loginForm.password} onChange={e => setLoginForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 pr-10 text-sm text-neutral-100" /><button onClick={() => setLoginForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600">{loginForm.showPw ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></div>
-              </div>
-              <button onClick={handleLoginSubmit} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold">Login</button>
-              <p className="text-center text-xs text-neutral-600 mt-4">Don't have an account? <button onClick={() => { setShowLoginModal(false); setShowRegisterModal(true); }} className="text-emerald-400 font-semibold">Register</button></p>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        {showAuthModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAuthModal(false)}>
+            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} onClick={e => e.stopPropagation()} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-7 w-full max-w-sm shadow-2xl overflow-hidden relative max-h-[90vh] overflow-y-auto hide-scrollbar">
+              
+              {authMode === 'options' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-2xl font-black text-white">Sign In</h3>
+                    <button onClick={() => setShowAuthModal(false)} className="text-neutral-500 hover:text-white transition-colors"><X size={20} /></button>
+                  </div>
+                  <p className="text-xs text-neutral-400 mb-5">Enter your email to sign in or create a new account.</p>
+                  
+                  <div className="space-y-3">
+                    <input 
+                      type="email" 
+                      placeholder="Email Address" 
+                      value={loginForm.email} 
+                      onChange={e => {
+                        setLoginForm(f => ({ ...f, email: e.target.value, error: '' }));
+                        setRegisterForm(f => ({ ...f, email: e.target.value, error: '' }));
+                      }} 
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3.5 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
+                    />
+                    <button 
+                      onClick={() => setAuthMode('login')} 
+                      disabled={!loginForm.email.includes('@')}
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3.5 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors"
+                    >
+                      Continue with Email
+                    </button>
+                  </div>
 
-      <AnimatePresence>
-        {showRegisterModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowRegisterModal(false)}>
-            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} onClick={e => e.stopPropagation()} className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-5"><div><h3 className="text-lg font-bold text-white">Create Account</h3></div><button onClick={() => setShowRegisterModal(false)} className="text-neutral-600"><X size={18} /></button></div>
-              {registerForm.error && <div className="bg-rose-950/40 text-rose-400 text-xs px-3 py-2 rounded-lg mb-4">{registerForm.error}</div>}
-              <div className="space-y-3">
-                {[ { key: 'name', label: 'Full Name', type: 'text' }, { key: 'email', label: 'Email', type: 'email' }, { key: 'phone', label: 'Contact Number', type: 'tel' }].map(({ key, label, type }) => (
-                  <div key={key}><label className="block text-xs text-neutral-400 mb-1.5">{label}</label><input type={type} inputMode={key === 'phone' ? 'numeric' : undefined} value={(registerForm as any)[key]} onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 13) : e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /></div>
-                ))}
-                <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600">{registerForm.showPw ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></div>
-                <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100" /></div>
-              </div>
-              <button onClick={handleRegisterSubmit} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold">Create Account</button>
+                  <div className="flex items-center gap-3 py-3 mt-2">
+                    <div className="flex-1 h-px bg-neutral-800" />
+                    <span className="text-[10px] text-neutral-500 uppercase font-semibold tracking-wider">or continue with</span>
+                    <div className="flex-1 h-px bg-neutral-800" />
+                  </div>
+
+                  <div className="space-y-3">
+                    {/* 🟢 GOOGLE SIGN IN BUTTON */}
+                    <button className="w-full flex items-center justify-center gap-3 bg-white hover:bg-neutral-200 text-black py-2.5 rounded-xl text-sm font-bold transition-colors">
+                      {/* REPLACE THIS DIV WITH YOUR GOOGLE LOGO IMG TAG */}
+                      <div className="w-5 h-5 bg-neutral-200 rounded-full flex items-center justify-center text-[10px] text-neutral-500 font-black">G</div>
+                      Google
+                    </button>
+
+                    {/* 🟢 FACEBOOK SIGN IN BUTTON */}
+                    <button className="w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#1865D0] text-white py-2.5 rounded-xl text-sm font-bold transition-colors">
+                      {/* REPLACE THIS DIV WITH YOUR FACEBOOK LOGO IMG TAG */}
+                      <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center text-[10px] font-black">f</div>
+                      Facebook
+                    </button>
+
+                    {/* 🟢 APPLE SIGN IN BUTTON */}
+                    <button className="w-full flex items-center justify-center gap-3 bg-black hover:bg-neutral-900 border border-neutral-700 text-white py-2.5 rounded-xl text-sm font-bold transition-colors">
+                      {/* REPLACE THIS DIV WITH YOUR APPLE LOGO IMG TAG */}
+                      <div className="w-5 h-5 bg-neutral-800 rounded-full flex items-center justify-center text-[10px] font-black text-white"></div>
+                      Apple
+                    </button>
+                  </div>
+
+                  <p className="text-center text-xs text-neutral-500 mt-6">
+                    Don't have an account? <button onClick={() => setAuthMode('register')} className="text-emerald-400 hover:underline font-bold">Register</button>
+                  </p>
+                </div>
+              )}
+
+              {authMode === 'login' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 mb-2 border-b border-neutral-800/60 pb-4">
+                    <button onClick={() => setAuthMode('options')} className="text-neutral-500 hover:text-white transition-colors"><ChevronLeft size={20} /></button>
+                    <h3 className="text-lg font-bold text-white flex-1">Enter Password</h3>
+                    <button onClick={() => setShowAuthModal(false)} className="text-neutral-600 hover:text-white"><X size={18} /></button>
+                  </div>
+                  {loginForm.error && <div className="bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-3 py-2 rounded-lg">{loginForm.error}</div>}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1.5">Email Address</label>
+                      <input type="email" disabled value={loginForm.email} className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-500 outline-none cursor-not-allowed" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1.5">Password</label>
+                      <div className="relative">
+                        <input type={loginForm.showPw ? 'text' : 'password'} autoFocus placeholder="Enter your password" value={loginForm.password} onChange={e => setLoginForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" />
+                        <button onClick={() => setLoginForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{loginForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => { handleLoginSubmit(); if(loginForm.email && loginForm.password) setShowAuthModal(false); }} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">Sign In securely</button>
+                  <p className="text-center text-xs text-neutral-500 mt-4">
+                    Forgot your password? <button className="text-emerald-400 hover:underline font-bold">Reset it</button>
+                  </p>
+                </div>
+              )}
+
+              {authMode === 'register' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 mb-2 border-b border-neutral-800/60 pb-4">
+                    <button onClick={() => setAuthMode('options')} className="text-neutral-500 hover:text-white transition-colors"><ChevronLeft size={20} /></button>
+                    <h3 className="text-lg font-bold text-white flex-1">Create Account</h3>
+                    <button onClick={() => setShowAuthModal(false)} className="text-neutral-600 hover:text-white"><X size={18} /></button>
+                  </div>
+                  {registerForm.error && <div className="bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-3 py-2 rounded-lg">{registerForm.error}</div>}
+                  <div className="space-y-3">
+                    {[ { key: 'name', label: 'Full Name', type: 'text' }, { key: 'email', label: 'Email Address', type: 'email' }, { key: 'phone', label: 'Contact Number', type: 'tel' }].map(({ key, label, type }) => (
+                      <div key={key}><label className="block text-xs text-neutral-400 mb-1.5">{label}</label><input type={type} inputMode={key === 'phone' ? 'numeric' : undefined} value={(registerForm as any)[key]} onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 13) : e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
+                    ))}
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
+                  </div>
+                  <button onClick={() => { handleRegisterSubmit(); if(registerForm.name && registerForm.email && registerForm.phone && registerForm.password && registerForm.password === registerForm.confirm) setShowAuthModal(false); }} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">Register Account</button>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -1797,7 +1873,7 @@ export function HomePage() {
               </div>
               
               <div className="flex flex-col gap-3">
-                <button onClick={() => { setShowRegPromoModal(false); setShowRegisterModal(true); }} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-emerald-900/30">Create an Account</button>
+                <button onClick={() => { setShowRegPromoModal(false); setAuthMode('email_register'); setShowAuthModal(true); }} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-emerald-900/30">Create an Account</button>
                 <button onClick={() => setShowRegPromoModal(false)} className="w-full bg-neutral-900 hover:bg-neutral-800 text-neutral-400 font-semibold py-3.5 rounded-xl border border-neutral-800 transition-colors">Continue as Guest</button>
               </div>
             </motion.div>

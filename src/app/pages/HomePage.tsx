@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../utils/supabase';
+import ReCAPTCHA from 'react-google-recaptcha';
 import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay, isSameDay } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle, XCircle, Bell
+  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle, XCircle, Bell, RefreshCw
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -586,9 +587,28 @@ export function HomePage() {
   
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
 
-  const handleReservationSubmit = () => {
+  const recaptchaRef = useRef<ReCAPTCHA>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  const handleReservationSubmit = async () => {
     if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
-    setReservationStep(2);
+    
+    setIsVerifying(true);
+    try {
+      const token = await recaptchaRef.current?.executeAsync();
+      if (!token) {
+        alert("reCAPTCHA verification failed. Please try again.");
+        setIsVerifying(false);
+        return;
+      }
+      setCaptchaToken(token);
+      setReservationStep(2);
+    } catch (err) {
+      alert("reCAPTCHA verification error.");
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   // 🟢 FIXED: Converted to async to handle the cloud upload before saving the reservation
@@ -665,6 +685,8 @@ export function HomePage() {
     setGeneratedResId('');
     setPaymentRef(''); 
     setReceiptImg(null); 
+    setCaptchaToken(null);
+    if (recaptchaRef.current) recaptchaRef.current.reset();
     if (currentUser) setResTab('track');
   };
 
@@ -1341,18 +1363,25 @@ export function HomePage() {
                                 </div>
                               </div>
                             </div>
+
                             <button 
                               onClick={handleReservationSubmit} 
                               disabled={
                                 !resForm.name.trim() || 
                                 !resForm.phone.trim() || 
                                 !resForm.timeSlot || 
-                                timeValidation !== 'valid'
+                                timeValidation !== 'valid' ||
+                                isVerifying
                               } 
-                              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mt-2"
                             >
-                              Proceed to Payment <ArrowRight size={14} />
+                              {isVerifying ? <><RefreshCw size={14} className="animate-spin" /> Verifying...</> : <>Proceed to Payment <ArrowRight size={14} /></>}
                             </button>
+                            
+                            {/* 🟢 RECAPTCHA LEGAL DISCLAIMER (Kept in Modal) */}
+                            <p className="text-[10px] text-neutral-500 text-center leading-relaxed mt-3 px-2">
+                              This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Privacy Policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Terms of Service</a> apply.
+                            </p>
                           </div>
                         </div>
                       )}
@@ -1971,6 +2000,13 @@ export function HomePage() {
         )}
       </AnimatePresence>
 
+      {/* 🟢 GLOBAL INVISIBLE RECAPTCHA (Bottom Right Badge) */}
+      <ReCAPTCHA
+        ref={recaptchaRef}
+        size="invisible"
+        badge="bottomright"
+        sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY || "6Lcg9I4tAAAAADU4f_xcNh2_awMqHzoytxBo4dnc"}
+      />
     </div>
   );
 }

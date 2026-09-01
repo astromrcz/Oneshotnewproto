@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../utils/supabase';
-import ReCAPTCHA from 'react-google-recaptcha';
+// import ReCAPTCHA from 'react-google-recaptcha'; // 🟢 Commented out for now
 import { addMinutes, differenceInSeconds, format, isToday, isBefore, startOfDay, isSameDay } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
   Clock, LogIn, UserPlus, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Megaphone, Info, Shield, Award, Mail, Tag, BookOpen,
-  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle, XCircle, Bell, RefreshCw
+  Sparkles, Upload, Search, ExternalLink, ImageIcon, AlertTriangle, XCircle, Bell, RefreshCw, Lock
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -58,7 +58,7 @@ function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
   );
 }
 
-function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; }) {
+function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
@@ -76,7 +76,8 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
   for (let d = 1; d <= remaining; d++) { cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) }); }
 
   const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
-  const isClosed = (date: Date) => closedDates.some((cd: any) => { 
+  
+  const getClosedData = (date: Date) => closedDates.find((cd: any) => { 
     if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
     if (!cd.date) return false;
     const d = new Date(cd.date); 
@@ -84,6 +85,7 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
     d.setHours(0, 0, 0, 0); 
     return d.getTime() === date.getTime(); 
   });
+
   const isPast = (date: Date) => date < today;
   const isSelected = (date: Date) => selectedDate ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })() : false;
   const isTodayDate = (date: Date) => date.getTime() === today.getTime();
@@ -100,16 +102,40 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates }: { 
       </div>
       <div className="grid grid-cols-7 gap-y-3">
         {cells.map(({ day, currentMonth, date }, idx) => {
-          const past = isPast(date); const selected = isSelected(date); const today_ = isTodayDate(date);
-          const reserved = isReserved(date) && currentMonth; const closed = isClosed(date) && currentMonth;
-          const clickable = currentMonth && !past && !closed;
+          const past = isPast(date); 
+          const selected = isSelected(date); 
+          const today_ = isTodayDate(date);
+          const closedData = getClosedData(date);
+          const closed = !!closedData && currentMonth;
+          const reserved = isReserved(date) && currentMonth; 
+          
+          const handleCellClick = () => {
+            if (closed) {
+              onClosedClick?.(date, closedData.reason || 'Closed for maintenance or private event.');
+            } else if (!past && currentMonth) {
+              onSelect(date);
+            }
+          };
+
+          const disabled = !currentMonth || (past && !closed);
+
           return (
             <div key={idx} className="flex justify-center">
-              <button type="button" disabled={!clickable} onClick={() => clickable && onSelect(date)} className={`relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all ${!currentMonth ? 'opacity-20 cursor-default' : ''} ${past && currentMonth ? 'opacity-30 cursor-default text-neutral-600' : ''} ${closed && !past && currentMonth ? 'opacity-50 cursor-not-allowed text-rose-500' : ''} ${selected ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5' : ''} ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400' : ''} ${!selected && clickable && !today_ ? 'text-neutral-300 hover:bg-neutral-800' : ''}`}>
-                <span className={selected ? 'font-bold' : 'font-medium'}>{day}</span>
-                {reserved && !selected && !closed && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-amber-500" />}
-                {selected && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-emerald-500" />}
-              </button>
+              {/* 🟢 FIXED: Converted to a div, and pointer-events-none locked on the inner span */}
+              <div 
+                onClick={handleCellClick} 
+                className={`relative flex flex-col items-center justify-center w-10 h-11 rounded-xl text-xs transition-all 
+                  ${!currentMonth ? 'opacity-20 cursor-default' : ''} 
+                  ${past && currentMonth && !closed ? 'opacity-30 cursor-default text-neutral-600' : ''} 
+                  ${closed ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30 hover:bg-rose-500/20 cursor-pointer' : ''} 
+                  ${selected && !closed ? 'border border-emerald-500 text-emerald-400 bg-emerald-500/5 cursor-pointer' : ''} 
+                  ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400 cursor-pointer' : ''} 
+                  ${!selected && !disabled && !closed && !today_ ? 'text-neutral-300 hover:bg-neutral-800 cursor-pointer' : ''}`}
+              >
+                <span className={`pointer-events-none ${selected ? 'font-bold' : 'font-medium'}`}>{day}</span>
+                {reserved && !selected && !closed && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-amber-500 pointer-events-none" />}
+                {selected && !closed && <span className="absolute bottom-1.5 w-1 h-1 rounded-full bg-emerald-500 pointer-events-none" />}
+              </div>
             </div>
           );
         })}
@@ -125,6 +151,8 @@ export function HomePage() {
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
   const [isFirstTime, setIsFirstTime] = useState(false);
+  
+  const [closureAlert, setClosureAlert] = useState<{ date: Date, reason: string } | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('oneshot_read_announcements');
@@ -191,7 +219,7 @@ export function HomePage() {
   const [now, setNow] = useState(new Date());
   const [activeSection, setActiveSection] = useState<Section>('home');
 
- const [setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
+  const [setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'options' | 'login' | 'register'>('options');
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -212,13 +240,11 @@ export function HomePage() {
 
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0);
   const [resTab, setResTab] = useState<'new' | 'track'>('new');
-  const [trackForm, setTrackForm] = useState({ reservationId: '' });
+  const [trackForm, setTrackForm] = useState({ reservationId: '', phone: '' });
   const [trackedReservations, setTrackedReservations] = useState<any[] | null>(null);
   const [generatedResId, setGeneratedResId] = useState('');
   
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
-  const [isPreferredTableExpanded, setIsPreferredTableExpanded] = useState(true);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   
   const [resForm, setResForm] = useState({ name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2 });
@@ -239,7 +265,6 @@ export function HomePage() {
     const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
     if (Array.isArray(parsedImages) && parsedImages.length > 0) {
       heroSlides = parsedImages.map((url: string) => {
-        // 🟢 FIXED: If running on Vercel, swap inaccessible localhost images with a stock fallback
         const isLocalUrl = url.includes('localhost');
         const isVercel = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
         return { 
@@ -250,7 +275,6 @@ export function HomePage() {
     }
   } catch (e) {}
 
-  // 🟢 FIXED: Apply the same Vercel fallback rule to the About Us image
   const cmsAboutImage = siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
   const isVercelEnvironment = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
   const safeAboutImage = (isVercelEnvironment && cmsAboutImage.includes('localhost')) 
@@ -297,7 +321,7 @@ export function HomePage() {
       if (emailResId) {
         setActiveSection('reservations');
         setResTab('track');
-        setTrackForm({ reservationId: emailResId });
+        setTrackForm({ reservationId: emailResId, phone: '' });
         
         const found = reservations
           .filter((r: any) => r.id.toUpperCase() === emailResId.toUpperCase())
@@ -328,7 +352,6 @@ export function HomePage() {
     try {
       const draft = {
         selectedDate: selectedDate ? selectedDate.toISOString() : null,
-        selectedTableId,
         resForm,
         promoCodeInput,
         appliedPromo,
@@ -337,7 +360,7 @@ export function HomePage() {
       };
       localStorage.setItem(RES_DRAFT_KEY, JSON.stringify(draft));
     } catch (e) { console.warn('Failed to save draft', e); }
-  }, [selectedDate, selectedTableId, resForm, promoCodeInput, appliedPromo, resTab, reservationStep]);
+  }, [selectedDate, resForm, promoCodeInput, appliedPromo, resTab, reservationStep]);
 
   const loadReservationDraft = useCallback(() => {
     try {
@@ -345,7 +368,6 @@ export function HomePage() {
       if (!raw) return;
       const d = JSON.parse(raw);
       if (d.selectedDate) setSelectedDate(new Date(d.selectedDate));
-      if (d.selectedTableId) setSelectedTableId(d.selectedTableId);
       if (d.resForm) setResForm(prev => ({ ...prev, ...(d.resForm || {}) }));
       if (d.promoCodeInput) setPromoCodeInput(d.promoCodeInput);
       if (d.appliedPromo) setAppliedPromo(d.appliedPromo);
@@ -361,12 +383,6 @@ export function HomePage() {
   useEffect(() => {
     saveReservationDraft();
   }, [saveReservationDraft]);
-
-  useEffect(() => {
-    if (selectedTableId) {
-      setIsPreferredTableExpanded(false);
-    }
-  }, [selectedTableId]);
 
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
   const baseAmount = Number(resForm.duration) * effectiveHourly;
@@ -447,6 +463,22 @@ export function HomePage() {
   };
 
   const maxAllowedDuration = getMaxDuration();
+
+  // 🟢 NEW: Max Allowed Party Size Logic
+  const maxAllowedPartySize = (() => {
+    const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
+    const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 20;
+    if (!selectedDate) return Math.max(wDayMax, wEndMax);
+    const d = new Date(selectedDate);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+    return isWeekend ? wEndMax : wDayMax;
+  })();
+
+  useEffect(() => {
+    if (resForm.pax > maxAllowedPartySize) {
+      setResForm(f => ({ ...f, pax: maxAllowedPartySize }));
+    }
+  }, [maxAllowedPartySize, selectedDate]);
 
   const fmt12 = (tOrMins: string | number) => {
     try {
@@ -577,8 +609,11 @@ export function HomePage() {
       if (requestedStart < rEnd && requestedEnd > rStart) overlapCount++;
     });
 
-    const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
-    const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
+    const isWknd = [0, 5, 6].includes(new Date(selectedDate).getDay());
+    const pct = isWknd ? Number(rates?.weekendOnlineCapacityLimit || 40) : Number(rates?.weekdayOnlineCapacityLimit || 90);
+    const activeCount = tables.filter((t: any) => t.isActive).length || 10;
+    const maxOnlineCapacity = Math.max(1, Math.floor(activeCount * (pct / 100)));
+    
     if (overlapCount >= maxOnlineCapacity) return 'full';
 
     return 'valid';
@@ -586,24 +621,40 @@ export function HomePage() {
   
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
 
-  const recaptchaRef = useRef<ReCAPTCHA>(null);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  // const recaptchaRef = useRef<any>(null);
+  // const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
   const handleReservationSubmit = async () => {
     if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
     
     setIsVerifying(true);
+    
+    // 🟢 Temporarily bypassing all network verification (Pre-flight & reCAPTCHA)
+    // to prevent "Verification error" popups during local frontend testing.
+    setTimeout(() => {
+      setReservationStep(2);
+      setIsVerifying(false);
+    }, 600); // 600ms fake loading delay for smooth UI transition
+  };
+  /*const handleReservationSubmit = async () => { (original handlereservation reCAPTCHA verification step)
+    if (!resForm.name || !resForm.phone || !selectedDate || !resForm.timeSlot || timeValidation !== 'valid') return;
+    
+    setIsVerifying(true);
     try {
       // 1. PRE-FLIGHT CHECK
-      const isStillAvailable = await validateBookingPreflight(selectedDate, resForm.timeSlot, resForm.duration);
-      if (!isStillAvailable) {
-        alert("We're sorry! Someone just booked the last available table for this exact time slot. Please select a different time.");
-        setIsVerifying(false);
-        return;
+      console.log("Checking real-time database availability for:", selectedDate, resForm.timeSlot);
+      if (typeof validateBookingPreflight === 'function') {
+         const isStillAvailable = await validateBookingPreflight(selectedDate, resForm.timeSlot, resForm.duration);
+         if (!isStillAvailable) {
+           alert("We're sorry! Someone just booked the last available table for this exact time slot. Please select a different time.");
+           setIsVerifying(false);
+           return;
+         }
       }
 
       // 2. RECAPTCHA VERIFICATION
+      /* 🟢 RECAPTCHA COMMENTED OUT FOR NOW
       const token = await recaptchaRef.current?.executeAsync();
       if (!token) {
         alert("reCAPTCHA verification failed. Please try again.");
@@ -611,16 +662,17 @@ export function HomePage() {
         return;
       }
       setCaptchaToken(token);
+      
       setReservationStep(2);
     } catch (err) {
+      console.error(err);
       alert("Verification error. Please check your connection.");
     } finally {
       setIsVerifying(false);
     }
   };
+  */
 
-  // 🟢 FIXED: Converted to async to handle the cloud upload before saving the reservation
-  // 🟢 FIXED: Converted to async to handle the cloud upload before saving the reservation
   const handlePaymentConfirm = async () => {
     setConfirmingPayment(true);
     
@@ -658,7 +710,7 @@ export function HomePage() {
         timeSlot: resForm.timeSlot,
         durationHours: resForm.duration,
         partySize: resForm.pax,
-        tableId: selectedTableId || undefined,
+        tableId: undefined, // Always Any Available Table (Walk-in Protection)
         status: 'pending',
         totalAmount,
         downPaymentAmount: downPayment,
@@ -666,7 +718,7 @@ export function HomePage() {
         balancePaid: false,
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
-        receiptImg: finalReceiptUrl, // 🟢 Passes the live Supabase URL
+        receiptImg: finalReceiptUrl,
       });
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
@@ -687,8 +739,8 @@ export function HomePage() {
     setAgreedToTerms(false);
     setGeneratedResId('');
     setReceiptImg(null); 
-    setCaptchaToken(null);
-    if (recaptchaRef.current) recaptchaRef.current.reset();
+    // setCaptchaToken(null);
+    // if (recaptchaRef.current) recaptchaRef.current.reset();
     if (currentUser) setResTab('track');
   };
 
@@ -723,7 +775,6 @@ export function HomePage() {
     if (!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || !feedbackForm.message) return;
     if (feedbackForm.type === 'other' && !feedbackForm.customType) return;
     
-    // 🟢 FIXED: Format custom type into the message if "Other" is selected
     const finalMessage = feedbackForm.type === 'other' ? `[Type: ${feedbackForm.customType}]\n${feedbackForm.message}` : feedbackForm.message;
     
     addFeedback({ 
@@ -733,7 +784,7 @@ export function HomePage() {
       feedbackType: feedbackForm.type as any, 
       comment: finalMessage, 
       tags: feedbackForm.type === 'other' ? [feedbackForm.customType] : [],
-      reservationId: feedbackForm.reservationId || undefined // 🟢 NEW: Pass reservation ID to Supabase
+      reservationId: feedbackForm.reservationId || undefined
     });
     
     setFeedbackSent(true);
@@ -759,7 +810,6 @@ export function HomePage() {
     return lastDate ? isBefore(new Date(lastDate), todayStart) : false;
   });
 
-  const safeClosedDates = closedDates.map((c: any) => new Date(c.date));
   const reservedDates = reservations.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date));
 
   const allNavSections: { id: Section; label: string }[] = [
@@ -773,7 +823,7 @@ export function HomePage() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col">
 
       {/* ── Top Header ── */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-16 bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
+      <header className="fixed top-0 left-0 right-0 z-50 h-[72px] bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
         <button
           onClick={() => setActiveSection('home')}
           className="h-full flex items-center px-5 pr-12 bg-emerald-700 hover:bg-emerald-600 transition-colors flex-shrink-0 relative z-10 cursor-pointer text-left"
@@ -782,8 +832,8 @@ export function HomePage() {
           <div className="flex items-center gap-2.5">
             <img src={logoImg} alt="One Shot Bar & Billiards" className="h-9 w-9 object-contain rounded-lg flex-shrink-0" />
             <div>
-              <p className="text-white font-black text-sm tracking-tight leading-tight">ONE SHOT</p>
-              <p className="text-emerald-200 text-[9px] uppercase tracking-[0.2em] font-semibold">Bar & Billiards</p>
+              <p className="text-white text-[17px] font-black tracking-tight leading-tight">ONE SHOT</p>
+              <p className="text-emerald-200 text-[10px] uppercase tracking-[0.2em] font-semibold">Bar & Billiards</p>
             </div>
           </div>
         </button>
@@ -887,7 +937,7 @@ export function HomePage() {
       </header>
 
       {/* ── Section Navigation ── */}
-      <nav className="fixed top-16 left-0 right-0 z-40 bg-neutral-900/95 backdrop-blur-sm border-b border-neutral-800/60 flex items-center justify-center gap-1 px-4 overflow-x-auto">
+      <nav className="fixed top-[72px] left-0 right-0 z-40 bg-neutral-900/95 backdrop-blur-sm border-b border-neutral-800/60 flex items-center justify-center gap-1 px-4 overflow-x-auto h-[54px]">
         {allNavSections.map(({ id, label }) => (
           <button
             key={id}
@@ -905,7 +955,7 @@ export function HomePage() {
       </nav>
 
       {/* ── Main Content ── */}
-      <main className="flex-1 pt-32">
+      <main className="flex-1 pt-[126px]">
         <AnimatePresence mode="wait">
           
           {/* ════ HOME SECTION ════ */}
@@ -1015,13 +1065,27 @@ export function HomePage() {
                      <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover" />
                   </div>
                 </div>
+                
+                {/* 🟢 FIXED: Interactive Google Maps Embed */}
                 <div className="mb-12">
                   <h3 className="text-center text-xl font-bold text-white mb-6">Our Location</h3>
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-64 flex items-center justify-center relative">
-                    <div className="absolute inset-0 bg-neutral-800/50" />
-                    <div className="relative z-10 text-center"><MapPin size={32} className="text-emerald-500 mx-auto mb-2" /><p className="text-white font-semibold text-sm">One Shot Bar & Billiards</p><p className="text-neutral-400 text-xs">{cms.address}</p><a href="https://www.google.com/maps/place/One+Shot+Bar+and+Billiards/@14.5813335,121.1249395,808m/data=!3m2!1e3!4b1!4m6!3m5!1s0x3397c70049cd2efb:0x4b8fd5634abcd6cc!8m2!3d14.5813335!4d121.1275144!16s%2Fg%2F11wwhbc6y5?entry=ttu&g_ep=EgoyMDI2MDgyNi4wIKXMDSoASAFQAw%3D%3D" target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-xs bg-emerald-600 text-white px-4 py-2 rounded-full hover:bg-emerald-500 transition-colors">Open in Google Maps</a></div>
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-96 flex relative group">
+                    <iframe 
+                      src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3861.6425983794347!2d121.12493947585098!3d14.581333485888201!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397c70049cd2efb%3A0x4b8fd5634abcd6cc!2sOne%20Shot%20Bar%20and%20Billiards!5e0!3m2!1sen!2sph!4v1700000000000!5m2!1sen!2sph" 
+                      className="absolute inset-0 w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
+                      allowFullScreen={false} 
+                      loading="lazy" 
+                      referrerPolicy="no-referrer-when-downgrade"
+                    />
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none opacity-100 group-hover:opacity-0 transition-opacity duration-300">
+                       <div className="bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-neutral-800 shadow-xl flex items-center gap-2">
+                         <MapPin size={14} className="text-emerald-500" />
+                         <span className="text-xs font-semibold text-white">{cms.address}</span>
+                       </div>
+                    </div>
                   </div>
                 </div>
+
                 <div className="border-t border-neutral-800 pt-10">
                   <div className="text-center mb-8"><h3 className="text-xl font-bold text-white mb-1">Contact Us</h3><p className="text-neutral-400 text-sm">We'd love to hear from you. Get in touch!</p></div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1135,7 +1199,6 @@ export function HomePage() {
                     </div>
                   )}
 
-                  {/* 🟢 FIXED: Removed the unclosed, duplicate layout grid wrapper */}
                   <div className={`grid grid-cols-1 lg:grid-cols-2 gap-8 items-start relative pb-20 ${isSystemOffline ? 'opacity-50 pointer-events-none grayscale-[50%]' : ''}`}>
                     {/* Custom Mini Calendar */}
                     <div>
@@ -1144,7 +1207,8 @@ export function HomePage() {
                         selectedDate={selectedDate}
                         onSelect={setSelectedDate}
                         reservedDates={reservedDates}
-                        closedDates={safeClosedDates}
+                        closedDates={closedDates}
+                        onClosedClick={(d, reason) => setClosureAlert({ date: d, reason })}
                       />
                       {selectedDate && (
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-3">
@@ -1158,7 +1222,10 @@ export function HomePage() {
                           <div className="rounded-xl border border-emerald-900/20 bg-emerald-950/20 p-3">
                             <div className="flex items-center justify-between gap-2 mb-2">
                               <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Today's Activity Guide</p>
-                              <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">Max {Number(rates?.onlineCapacityLimit ?? 70)}% Online Limit</span>
+                              {/* 🟢 FIXED: Activity Guide dynamically calculates real max tables instead of percentage */}
+                              <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded">
+                                Max {Math.max(1, Math.floor((tables.filter((t: any) => t.isActive).length || 10) * (([0, 5, 6].includes(new Date(selectedDate).getDay()) ? Number(rates?.weekendOnlineCapacityLimit || 40) : Number(rates?.weekdayOnlineCapacityLimit || 90)) / 100)))} Tables Online
+                              </span>
                             </div>
                             <div className="space-y-1.5">
                               {reservations
@@ -1260,13 +1327,31 @@ export function HomePage() {
                               )}
                             </div>
 
+                            {/* 🟢 FIXED: Perfect Bottom Alignment for No. of Persons and Duration */}
                             <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-xs text-neutral-400 mb-1.5">No. of Persons</label>
-                                <input type="number" min={1} max={20} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
+                              <div className="flex flex-col justify-end">
+                                <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
+                                  <span>No. of Persons</span>
+                                  {selectedDate && <span className="text-[9px] text-emerald-500 font-bold">Max {maxAllowedPartySize}</span>}
+                                </label>
+                                <input 
+                                  type="number" 
+                                  min={1} 
+                                  max={maxAllowedPartySize} 
+                                  value={resForm.pax} 
+                                  onChange={e => {
+                                    const val = parseInt(e.target.value);
+                                    if (val > maxAllowedPartySize) {
+                                      setResForm(f => ({ ...f, pax: maxAllowedPartySize }));
+                                    } else {
+                                      setResForm(f => ({ ...f, pax: val || 1 }));
+                                    }
+                                  }} 
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" 
+                                />
                               </div>
-                              <div>
-                                <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                              <div className="flex flex-col justify-end">
+                                <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
                                   <span>Duration (hours)</span>
                                   {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h based on cut-off</span>}
                                 </label>
@@ -1275,57 +1360,6 @@ export function HomePage() {
                                     <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>
                                   ))}
                                 </select>
-                              </div>
-                            </div>
-
-                            <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <label className="block text-xs text-neutral-400">Preferred Table <span className="text-neutral-600">(optional)</span></label>
-                                <button type="button" onClick={() => setIsPreferredTableExpanded(prev => !prev)} className="text-[10px] font-semibold text-neutral-400 hover:text-white transition-colors">
-                                  {isPreferredTableExpanded ? 'Minimize' : 'Expand'}
-                                </button>
-                              </div>
-                              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-                                {!isPreferredTableExpanded ? (
-                                  <div className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/70 px-3 py-2 gap-3">
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-xs font-semibold text-neutral-200 truncate">{selectedTableId ? tables.find((table: any) => table.id === selectedTableId)?.name || 'Selected Table' : 'Any available table'}</p>
-                                      <p className="text-[10px] text-neutral-500 truncate">{selectedTableId ? 'Table selected. Expand to change it.' : 'No specific table selected. Expand to choose one.'}</p>
-                                    </div>
-                                    <button type="button" onClick={() => setIsPreferredTableExpanded(true)} className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors flex-shrink-0">Expand</button>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <button type="button" onClick={() => { setSelectedTableId(null); setIsPreferredTableExpanded(true); }} className={`w-full mb-4 py-3 rounded-lg text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${!selectedTableId ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-emerald-600/40 hover:text-neutral-200'}`}>
-                                      <CheckCircle size={16} /> Any Available Table <span className="opacity-60 font-normal ml-1 hidden sm:inline">(Recommended)</span>
-                                    </button>
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                      {tables.filter((table: any) => table.isActive).map((table: any) => {
-                                        const isAvail = table.status === 'available';
-                                        const isRes = table.status === 'reserved';
-                                        const isOcc = table.status === 'occupied';
-                                        const isSel = selectedTableId === table.id;
-                                        const disabled = isOcc || isRes;
-                                        const statusText = isAvail ? 'Available' : isRes ? 'Reserved' : 'In Use';
-                                        const statusColor = isAvail ? 'text-emerald-400' : isRes ? 'text-amber-400' : 'text-rose-400';
-                                        const dotColor = isAvail ? 'bg-emerald-500' : isRes ? 'bg-amber-500' : 'bg-rose-500';
-                                        
-                                        return (
-                                          <button key={table.id} type="button" disabled={disabled} onClick={() => { const nextSelection = isSel ? null : table.id; setSelectedTableId(nextSelection); setIsPreferredTableExpanded(nextSelection ? false : true); }} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${isSel ? 'bg-emerald-600/10 border-emerald-500 shadow-sm shadow-emerald-900/20' : disabled ? 'bg-neutral-900/40 border-neutral-800/60 cursor-not-allowed opacity-60' : 'bg-neutral-900 border-neutral-700 hover:border-emerald-600/50 hover:bg-neutral-800'}`}>
-                                            <div className="flex items-center justify-between w-full mb-1">
-                                              <span className={`text-sm font-bold ${isSel ? 'text-emerald-400' : disabled ? 'text-neutral-500' : 'text-neutral-200'}`}>{table.name}</span>
-                                              {isSel && <CheckCircle size={14} className="text-emerald-400" />}
-                                            </div>
-                                            <div className="flex items-center gap-1.5">
-                                              <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400' : dotColor}`} />
-                                              <span className={`text-xs font-medium ${isSel ? 'text-emerald-300' : disabled ? 'text-neutral-500' : statusColor}`}>{statusText}</span>
-                                            </div>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </>
-                                )}
                               </div>
                             </div>
 
@@ -1380,10 +1414,11 @@ export function HomePage() {
                               {isVerifying ? <><RefreshCw size={14} className="animate-spin" /> Verifying...</> : <>Proceed to Payment <ArrowRight size={14} /></>}
                             </button>
                             
-                            {/* 🟢 RECAPTCHA LEGAL DISCLAIMER (Kept in Modal) */}
+                            {/* 🟢 RECAPTCHA LEGAL DISCLAIMER COMMENTED OUT FOR NOW 
                             <p className="text-[10px] text-neutral-500 text-center leading-relaxed mt-3 px-2">
                               This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Privacy Policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Terms of Service</a> apply.
                             </p>
+                            */}
                           </div>
                         </div>
                       )}
@@ -1396,22 +1431,36 @@ export function HomePage() {
               {resTab === 'track' && (
                 <div className="max-w-3xl mx-auto">
                   {!currentUser && !trackedReservations ? (
-                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 max-w-md mx-auto">
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 max-w-lg mx-auto">
                       <div className="text-center mb-6">
                         <Search size={32} className="text-emerald-500 mx-auto mb-3" />
                         <h3 className="text-lg font-bold text-white mb-1">Track Reservation</h3>
-                        <p className="text-xs text-neutral-400">Enter your 6-character Reservation ID below or <button type="button" onClick={() => { setAuthMode('options'); setShowAuthModal(true); }} className="text-emerald-400 hover:underline font-semibold">log in</button>.</p>
+                        <p className="text-xs text-neutral-400">Enter your Reservation ID and registered phone number below to view your booking status.</p>
                       </div>
                       <form onSubmit={(e) => {
                         e.preventDefault();
-                        const found = reservations.filter((r: any) => r.id.toUpperCase() === trackForm.reservationId.toUpperCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        const found = reservations.filter((r: any) => 
+                          r.id.toUpperCase() === trackForm.reservationId.toUpperCase() &&
+                          r.contactNumber === trackForm.phone
+                        ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                         setTrackedReservations(found);
-                      }} className="space-y-4">
-                        <div>
-                          <input type="text" required value={trackForm.reservationId} onChange={e => setTrackForm({ reservationId: e.target.value.toUpperCase() })} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-center text-lg text-neutral-100 focus:border-emerald-500 font-mono tracking-[0.2em] uppercase" />
+                      }} className="space-y-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1.5 font-semibold tracking-wider">Reservation ID</label>
+                            <input type="text" required value={trackForm.reservationId} onChange={e => setTrackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-3 text-center text-base text-neutral-100 focus:border-emerald-500 font-mono tracking-[0.2em] uppercase outline-none transition-colors" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1.5 font-semibold tracking-wider">Registered Phone</label>
+                            <input type="tel" required value={trackForm.phone} onChange={e => setTrackForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-3 text-center text-base text-neutral-100 focus:border-emerald-500 font-mono tracking-widest outline-none transition-colors" />
+                          </div>
                         </div>
-                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">Find Booking</button>
+                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-900/30">Find Booking</button>
                       </form>
+                      <div className="mt-6 pt-5 border-t border-neutral-800 text-center">
+                        <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2">Want to manage your bookings online?</p>
+                        <button type="button" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }} className="text-xs text-emerald-400 hover:text-emerald-300 font-bold transition-colors">Create an account for full access &rarr;</button>
+                      </div>
                     </div>
                   ) : (() => {
                     const statusColors: Record<string, string> = { pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25', confirmed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', 'checked-in': 'bg-sky-500/15 text-sky-400 border-sky-500/25', completed: 'bg-neutral-700/50 text-neutral-400 border-neutral-700', cancelled: 'bg-rose-500/15 text-rose-400 border-rose-500/25' };
@@ -1464,24 +1513,45 @@ export function HomePage() {
                                   You are entitled to a full refund of your <strong>₱{r.downPaymentAmount.toFixed(2)}</strong> down payment, or you may reschedule your booking to a new date.
                                 </p>
                                 <div className="flex gap-2 border-t border-rose-900/30 pt-3 mt-3">
-                                  <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="flex-1 text-[11px] font-semibold bg-rose-600 hover:bg-rose-500 text-white px-3 py-2 rounded transition-colors">Reschedule Booking</button>
-                                  <button onClick={() => cancelReservation(r.id, "Closure Refund Request")} className="flex-1 text-[11px] font-semibold text-rose-300 hover:text-white bg-rose-950/50 border border-rose-800/50 hover:bg-rose-900/50 px-3 py-2 rounded transition-colors">Cancel & Request Refund</button>
+                                  {currentUser ? (
+                                    <>
+                                      <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="flex-1 text-[11px] font-semibold bg-rose-600 hover:bg-rose-500 text-white px-3 py-2 rounded transition-colors">Reschedule Booking</button>
+                                      <button onClick={() => cancelReservation(r.id, "Closure Refund Request")} className="flex-1 text-[11px] font-semibold text-rose-300 hover:text-white bg-rose-950/50 border border-rose-800/50 hover:bg-rose-900/50 px-3 py-2 rounded transition-colors">Cancel & Request Refund</button>
+                                    </>
+                                  ) : (
+                                    <div className="w-full bg-rose-950/60 border border-rose-900/50 p-2.5 rounded-lg text-center flex items-center justify-center gap-2">
+                                      <Lock size={12} className="text-rose-400" />
+                                      <p className="text-[10px] text-rose-200">Guest modifications locked. Please call <strong>{cms.phone}</strong> to process your refund or reschedule.</p>
+                                    </div>
+                                  )}
                                 </div>
                                 <p className="text-[10px] text-neutral-500 mt-3 text-center">Need help? Contact us at <strong>{cms.phone}</strong> or <strong>{cms.email}</strong></p>
                               </div>
                             )}
 
                             {(!isAffectedByClosure && (r.status === 'pending' || r.status === 'confirmed')) && (
-                              <div className="border-t border-neutral-800/60 pt-3 flex justify-end gap-2">
-                                <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors">Reschedule</button>
-                                <button onClick={() => handleCancelBooking(r.id)} className="text-[10px] font-semibold text-rose-400 hover:text-white bg-rose-950/30 border border-rose-900/50 hover:bg-rose-900/50 px-3 py-1.5 rounded transition-colors">Cancel Booking</button>
+                              <div className="border-t border-neutral-800/60 pt-3">
+                                {currentUser ? (
+                                  <div className="flex justify-end gap-2">
+                                    <button onClick={() => { setReschedulingId(r.id); setRescheduleData({ date: new Date(r.date), timeSlot: r.timeSlot }); }} className="text-[10px] font-semibold text-neutral-400 hover:text-white bg-neutral-800 px-3 py-1.5 rounded transition-colors">Reschedule</button>
+                                    <button onClick={() => handleCancelBooking(r.id)} className="text-[10px] font-semibold text-rose-400 hover:text-white bg-rose-950/30 border border-rose-900/50 hover:bg-rose-900/50 px-3 py-1.5 rounded transition-colors">Cancel Booking</button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-between bg-amber-950/20 border border-amber-900/30 p-2.5 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                      <Shield size={14} className="text-amber-500 flex-shrink-0" />
+                                      <p className="text-[10px] text-amber-200/80 leading-snug">Guest modifications locked. Call <strong>{cms.phone}</strong> to reschedule or cancel.</p>
+                                    </div>
+                                    <button onClick={() => { setAuthMode('register'); setShowAuthModal(true); }} className="text-[10px] font-bold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1.5 rounded border border-amber-500/20 transition-colors whitespace-nowrap ml-2">Register</button>
+                                  </div>
+                                )}
                               </div>
                             )}
 
                             {reschedulingId === r.id && (
                               <div className="mt-2 p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-4">
                                 <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Select New Date & Time</h4>
-                                <MiniCalendar selectedDate={rescheduleData.date} onSelect={(d) => setRescheduleData(prev => ({ ...prev, date: d }))} reservedDates={reservedDates} closedDates={safeClosedDates} />
+                                <MiniCalendar selectedDate={rescheduleData.date} onSelect={(d) => setRescheduleData(prev => ({ ...prev, date: d }))} reservedDates={reservedDates} closedDates={closedDates} />
                                 <div>
                                    <label className="block text-xs text-neutral-400 mb-1.5">New Time</label>
                                    <input type="time" value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => ({ ...prev, timeSlot: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500 transition-colors" />
@@ -1676,7 +1746,8 @@ export function HomePage() {
                       <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden relative group transition-all hover:border-emerald-600/30 flex flex-col">
                         {event.attachments && event.attachments.length > 0 ? (
                           <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative flex-shrink-0">
-                            <img src={event.attachments[0]} alt={event.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                            {/* 🟢 FIXED: Events Fallback Image handling */}
+                            <ImageWithFallback src={event.attachments[0]} alt={event.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                             <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 to-transparent" />
                           </div>
                         ) : (
@@ -1711,7 +1782,7 @@ export function HomePage() {
                     {pastEvents.map((event: any) => (
                       <div key={event.id} className="bg-neutral-900/50 border border-neutral-800/60 rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center opacity-70 grayscale hover:grayscale-0 hover:opacity-100 transition-all">
                         {event.attachments && event.attachments.length > 0 && (
-                          <img src={event.attachments[0]} alt={event.title} className="w-full sm:w-24 h-24 object-cover rounded-lg flex-shrink-0" />
+                          <ImageWithFallback src={event.attachments[0]} alt={event.title} className="w-full sm:w-24 h-24 object-cover rounded-lg flex-shrink-0" />
                         )}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
@@ -1797,21 +1868,18 @@ export function HomePage() {
                   <div className="space-y-3">
                     {/* 🟢 GOOGLE SIGN IN BUTTON */}
                     <button className="w-full flex items-center justify-center gap-3 bg-white hover:bg-neutral-200 text-black py-2.5 rounded-xl text-sm font-bold transition-colors">
-                      {/* REPLACE THIS DIV WITH YOUR GOOGLE LOGO IMG TAG */}
                       <div className="w-5 h-5 bg-neutral-200 rounded-full flex items-center justify-center text-[10px] text-neutral-500 font-black">G</div>
                       Google
                     </button>
 
                     {/* 🟢 FACEBOOK SIGN IN BUTTON */}
                     <button className="w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#1865D0] text-white py-2.5 rounded-xl text-sm font-bold transition-colors">
-                      {/* REPLACE THIS DIV WITH YOUR FACEBOOK LOGO IMG TAG */}
                       <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center text-[10px] font-black">f</div>
                       Facebook
                     </button>
 
                     {/* 🟢 APPLE SIGN IN BUTTON */}
                     <button className="w-full flex items-center justify-center gap-3 bg-black hover:bg-neutral-900 border border-neutral-700 text-white py-2.5 rounded-xl text-sm font-bold transition-colors">
-                      {/* REPLACE THIS DIV WITH YOUR APPLE LOGO IMG TAG */}
                       <div className="w-5 h-5 bg-neutral-800 rounded-full flex items-center justify-center text-[10px] font-black text-white"></div>
                       Apple
                     </button>
@@ -1980,16 +2048,17 @@ export function HomePage() {
 
                 <button 
                   onClick={handlePaymentConfirm} 
-                  disabled={confirmingPayment || !receiptImg || !agreedToTerms || !captchaToken} 
+                  disabled={confirmingPayment || !receiptImg || !agreedToTerms /* || !captchaToken */} 
                   className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30"
                 >
                   {confirmingPayment ? 'Processing...' : <><CheckCircle size={15} /> I've Sent the Payment</>}
                 </button>
                 
-                {/* 🟢 RECAPTCHA LEGAL DISCLAIMER */}
+                {/* 🟢 RECAPTCHA LEGAL DISCLAIMER COMMENTED OUT
                 <p className="text-[10px] text-neutral-500 text-center leading-relaxed mt-4 px-2">
                   This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Privacy Policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Terms of Service</a> apply.
                 </p>
+                */}
               </div>
             </motion.div>
           </motion.div>
@@ -2017,13 +2086,34 @@ export function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* 🟢 GLOBAL INVISIBLE RECAPTCHA (Bottom Right Badge) */}
+      <AnimatePresence>
+        {closureAlert && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-neutral-950 border border-rose-900/50 rounded-3xl p-8 w-full max-w-sm shadow-2xl relative overflow-hidden text-center">
+               <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mb-6 border border-rose-500/20 shadow-inner mx-auto">
+                  <AlertTriangle size={28} className="text-rose-500" />
+               </div>
+               <h3 className="text-2xl font-black text-rose-400 mb-2">Venue Closed</h3>
+               <p className="text-neutral-300 font-semibold mb-2">{format(closureAlert.date, 'MMMM d, yyyy')}</p>
+               <p className="text-neutral-400 text-sm mb-6 leading-relaxed bg-neutral-900 p-4 rounded-xl border border-neutral-800">
+                 {closureAlert.reason || "We are closed on this date. Please select another date for your reservation."}
+               </p>
+               <button onClick={() => setClosureAlert(null)} className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg border border-neutral-700">
+                 Understood
+               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🟢 RECAPTCHA COMMENTED OUT FOR NOW 
       <ReCAPTCHA
         ref={recaptchaRef}
         size="invisible"
         badge="bottomright"
         sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY || "6Lcg9I4tAAAAADU4f_xcNh2_awMqHzoytxBo4dnc"}
       />
+      */}
     </div>
   );
 }

@@ -387,8 +387,13 @@ export function Tables() {
   const openEnd = (tableId: string) => {
     const table = tables.find((t: any) => t.id === tableId);
     setEndingTableId(tableId);
-    setEndPayStatus('paid'); setEndPayMethod('cash'); setEndPartialAmount(''); setEndCashTendered(''); setEndGcashRef('');
-    setDebtName(table?.session?.customerName || ''); setDebtContact('');
+    setEndPayStatus('paid'); 
+    setEndPayMethod('cash'); 
+    setEndPartialAmount(''); 
+    setEndCashTendered(''); // This will auto-fill in the UI if needed
+    setEndGcashRef('');
+    setDebtName(table?.session?.customerName || ''); 
+    setDebtContact('');
     setUseProrated(false);
     setShowVoidModal(false);
     setSessionVoidPassword('');
@@ -1432,19 +1437,19 @@ export function Tables() {
                 </div>
               )}
 
-              {endInfo.balance > 0 && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
-                    <div className="flex gap-2">
-                      <PayStatusBtn value="paid" current={endPayStatus} label="Fully Paid" onChange={setEndPayStatus} />
-                      <PayStatusBtn value="partial" current={endPayStatus} label="Partial" onChange={setEndPayStatus} />
-                      <PayStatusBtn value="unpaid" current={endPayStatus} label="Unpaid" onChange={setEndPayStatus} />
-                    </div>
+              {/* 🟢 NEW: Always show Payment Status, but lock it down if Balance is 0 */}
+              <>
+                <div className="space-y-2">
+                  <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
+                  <div className="flex gap-2">
+                    <PayStatusBtn value="paid" current={endPayStatus} label="Fully Paid" onChange={setEndPayStatus} />
+                    <PayStatusBtn disabled={endInfo.balance <= 0} value="partial" current={endPayStatus} label="Partial" onChange={setEndPayStatus} />
+                    <PayStatusBtn disabled={endInfo.balance <= 0} value="unpaid" current={endPayStatus} label="Unpaid" onChange={setEndPayStatus} />
                   </div>
+                </div>
 
-                  {endPayStatus !== 'unpaid' && (
-                    <div className="space-y-3">
+                {endInfo.balance > 0 && endPayStatus !== 'unpaid' && (
+                  <div className="space-y-3 mt-3">
                       <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold block">Payment Method</label>
                       <div className="flex gap-2 mb-3">
                         <PayMethodBtn value="cash" current={endPayMethod} icon={Banknote} label="Cash" onChange={setEndPayMethod} />
@@ -1459,15 +1464,26 @@ export function Tables() {
                       ) : endPayStatus === 'paid' ? (
                         <div>
                           <label className="text-xs text-neutral-400 mb-1.5 block">Cash Tendered *</label>
-                          <input type="number" max="999999" value={endCashTendered} onChange={e => { if (e.target.value.length <= 7) setEndCashTendered(e.target.value); }} placeholder={`e.g. ${endInfo.balance + 100}`} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
+                          <input 
+                            type="number" 
+                            max="999999" 
+                            step="0.01"
+                            value={endCashTendered !== '' ? endCashTendered : endInfo.balance > 0 ? endInfo.balance.toFixed(2) : ''} 
+                            onChange={e => { if (e.target.value.length <= 10) setEndCashTendered(e.target.value); }} 
+                            placeholder={`e.g. ${endInfo.balance + 100}`} 
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" 
+                          />
                           
-                          {parseFloat(endCashTendered) > endInfo.balance && (
-                            <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(parseFloat(endCashTendered) - endInfo.balance)}</p>
-                          )}
-                          
-                          {parseFloat(endCashTendered) >= 0 && parseFloat(endCashTendered) < endInfo.balance && (
-                            <p className="text-[11px] text-rose-400 mt-1 font-bold flex items-center gap-1"><AlertTriangle size={10} /> Insufficient cash tendered.</p>
-                          )}
+                          {(() => {
+                             const actualTendered = endCashTendered !== '' ? parseFloat(endCashTendered) : endInfo.balance;
+                             if (actualTendered > endInfo.balance) {
+                               return <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(actualTendered - endInfo.balance)}</p>;
+                             }
+                             if (actualTendered >= 0 && actualTendered < endInfo.balance) {
+                               return <p className="text-[11px] text-rose-400 mt-1 font-bold flex items-center gap-1"><AlertTriangle size={10} /> Insufficient cash tendered.</p>;
+                             }
+                             return null;
+                          })()}
                         </div>
                       ) : null}
                       
@@ -1480,8 +1496,8 @@ export function Tables() {
                     </div>
                   )}
 
-                  {(endPayStatus === 'partial' || endPayStatus === 'unpaid') && (
-                    <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4 space-y-3">
+                  {endInfo.balance > 0 && (endPayStatus === 'partial' || endPayStatus === 'unpaid') && (
+                    <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4 space-y-3 mt-3">
                       <div className="flex justify-between items-center">
                         <p className="text-[10px] text-amber-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><AlertTriangle size={11}/> Debt Tracking Required</p>
                       </div>
@@ -1489,8 +1505,7 @@ export function Tables() {
                       <input type="text" maxLength={50} value={debtContact} onChange={e=>setDebtContact(e.target.value)} placeholder="Contact Number / ID Info" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200" />
                     </div>
                   )}
-                </>
-              )}
+              </>
 
               {(() => {
                 let canEnd = true;
@@ -1498,7 +1513,8 @@ export function Tables() {
                 if (endInfo.balance > 0) {
                   if (endPayStatus === 'paid') {
                     if (endPayMethod === 'cash') {
-                      canEnd = !!endCashTendered && parseFloat(endCashTendered) >= endInfo.balance;
+                      const actualTendered = endCashTendered !== '' ? parseFloat(endCashTendered) : endInfo.balance;
+                      canEnd = actualTendered >= endInfo.balance;
                     } else if (endPayMethod === 'gcash') {
                       canEnd = endGcashRef.length >= 13;
                     }

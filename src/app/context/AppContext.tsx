@@ -357,20 +357,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     
     setReservations(prev => [...prev, newRes as Reservation]);
     
+    // 🟢 Map payload to match the Supabase camelCase schema exactly
     const supabasePayload = {
-      ...newRes,
-      date: newRes.date.toISOString(), 
-      createdAt: newRes.createdAt.toISOString(),
+      id: newRes.id,
+      customerName: newRes.customerName,
+      contactNumber: newRes.contactNumber,
+      email: newRes.email || null,
+      date: newRes.date.toISOString(),
+      timeSlot: newRes.timeSlot,
+      durationHours: newRes.durationHours,
+      partySize: newRes.partySize,
+      tableId: newRes.tableId || null,
+      status: newRes.status,
+      totalAmount: newRes.totalAmount,
+      downPaymentAmount: newRes.downPaymentAmount,
       downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-      balancePaid: newRes.balancePaid ? 1 : 0
+      balancePaid: newRes.balancePaid ? 1 : 0,
+      paymentRef: newRes.paymentRef || null,
+      receiptImg: newRes.receiptImg || null,
+      promoCode: newRes.promoCode || null,
+      discountAmount: newRes.discountAmount || null,
+      createdAt: newRes.createdAt.toISOString()
     };
-
+    
     supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
-      if (error) {
-        console.error("Error inserting reservation to Supabase:", error);
-      } else {
-        console.log("Successfully saved to Supabase!");
-      }
+      if (error) console.error("Supabase insert error:", error);
     });
     
     return id;

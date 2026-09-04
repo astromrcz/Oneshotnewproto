@@ -407,6 +407,29 @@ app.put('/api/cms', (req, res) => {
   processNextKey();
 });
 
+// 🟢 NEW: HYBRID CACHE ARCHITECTURE
+// Receives the primary fetch from Supabase and overwrites the local SQLite database for offline fallback.
+app.post('/api/cache-reservations', (req, res) => {
+  const { reservations } = req.body;
+  if (!Array.isArray(reservations)) return res.status(400).json({ error: 'Invalid payload' });
+
+  db.serialize(() => {
+    db.run('BEGIN TRANSACTION');
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    reservations.forEach(r => {
+      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString()]);
+    });
+    stmt.finalize();
+    db.run('COMMIT', (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: "Successfully cached cloud reservations to local SQLite." });
+    });
+  });
+});
+
 app.post('/api/sync-to-cloud', async (req, res) => {
   let syncErrors = [];
   try {

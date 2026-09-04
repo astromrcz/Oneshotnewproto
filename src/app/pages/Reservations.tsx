@@ -3,9 +3,9 @@ import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reser
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
-  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert, RefreshCw
+  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert, RefreshCw, Table2
 } from 'lucide-react';
-import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek } from 'date-fns';
+import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek, addMinutes } from 'date-fns';
 import { useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
@@ -20,20 +20,119 @@ const statusConfig: Record<ReservationStatus, { label: string; color: string; do
   cancelled: { label: 'Cancelled', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20', dot: 'bg-rose-400' },
 };
 
-const formatDate = (d: Date) => {
-  if (isToday(d)) return `Today, ${format(d, 'h:mm a')}`;
-  if (isTomorrow(d)) return `Tomorrow, ${format(d, 'h:mm a')}`;
-  return format(d, 'MMM d, h:mm a');
+const formatDateTime = (dateVal: string | Date, timeStr: string) => {
+  try {
+    const d = new Date(dateVal);
+    const [h, m] = (timeStr || '00:00').split(':').map(Number);
+    d.setHours(h, m, 0, 0);
+    if (isToday(d)) return `Today, ${format(d, 'h:mm a')}`;
+    if (isTomorrow(d)) return `Tomorrow, ${format(d, 'h:mm a')}`;
+    return format(d, 'MMM d, yyyy · h:mm a');
+  } catch { return String(dateVal); }
+};
+
+const formatTimeOnly = (timeStr: string) => {
+  try {
+    const [h, m] = (timeStr || '00:00').split(':').map(Number);
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return format(d, 'h:mm a');
+  } catch { return timeStr; }
 };
 
 const todayStart = startOfDay(new Date());
 
+function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const cells: Array<{ day: number; currentMonth: boolean; date: Date }> = [];
+  for (let i = firstDayOfMonth - 1; i >= 0; i--) { const d = new Date(year, month - 1, daysInPrevMonth - i); cells.push({ day: daysInPrevMonth - i, currentMonth: false, date: d }); }
+  for (let d = 1; d <= daysInMonth; d++) { cells.push({ day: d, currentMonth: true, date: new Date(year, month, d) }); }
+  const remaining = 42 - cells.length;
+  for (let d = 1; d <= remaining; d++) { cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) }); }
+
+  const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
+  
+  const getClosedData = (date: Date) => closedDates.find((cd: any) => { 
+    if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
+    if (!cd.date) return false;
+    const d = new Date(cd.date); 
+    if (isNaN(d.getTime())) return false;
+    d.setHours(0, 0, 0, 0); 
+    return d.getTime() === date.getTime(); 
+  });
+
+  const isPastDate = (date: Date) => date < today;
+  const isSelected = (date: Date) => selectedDate ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })() : false;
+  const isTodayDate = (date: Date) => date.getTime() === today.getTime();
+
+  return (
+    <div className="bg-transparent select-none">
+      <div className="flex items-center justify-between mb-4 px-1">
+        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1))} className="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronLeft size={16} /></button>
+        <span className="text-xs font-bold text-white">{format(viewDate, 'MMMM yyyy')}</span>
+        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1))} className="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronRight size={16} /></button>
+      </div>
+      <div className="grid grid-cols-7 mb-2">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="text-center text-[8px] text-neutral-500 font-bold uppercase tracking-widest">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-y-1">
+        {cells.map(({ day, currentMonth, date }, idx) => {
+          const past = isPastDate(date); 
+          const selected = isSelected(date); 
+          const today_ = isTodayDate(date);
+          const closedData = getClosedData(date);
+          const closed = !!closedData && currentMonth;
+          const reserved = isReserved(date) && currentMonth; 
+          
+          const handleCellClick = () => {
+            if (closed) {
+              onClosedClick?.(date, closedData.reason || 'Closed for maintenance or private event.');
+            } else if (!past && currentMonth) {
+              onSelect(date);
+            }
+          };
+
+          const disabled = !currentMonth || (past && !closed);
+
+          return (
+            <div key={idx} className="flex justify-center">
+              <div 
+                onClick={handleCellClick} 
+                className={`relative flex flex-col items-center justify-center w-8 h-8 rounded-full text-xs transition-all 
+                  ${!currentMonth ? 'opacity-20 cursor-default' : ''} 
+                  ${past && currentMonth && !closed ? 'opacity-30 cursor-default text-neutral-600' : ''} 
+                  ${closed ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30 hover:bg-rose-500/20 cursor-pointer' : ''} 
+                  ${selected && !closed ? 'bg-emerald-500 text-white shadow-md cursor-pointer' : ''} 
+                  ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400 cursor-pointer' : ''} 
+                  ${!selected && !disabled && !closed && !today_ ? 'text-neutral-300 hover:bg-neutral-800 cursor-pointer' : ''}`}
+              >
+                <span className={`pointer-events-none ${selected ? 'font-bold' : 'font-medium'}`}>{day}</span>
+                {reserved && !selected && !closed && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-amber-400 pointer-events-none" />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function Reservations() {
   const { 
-    reservations, addReservation, updateReservationStatus, cancelReservation, 
+    reservations, addReservation, updateReservationStatus, updateReservation, cancelReservation, 
     updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, 
     rates, updateRefundStatus, theme, reservationTerms,
-    staffUsers, hashPassword, addActivity, sessionHistory, refreshLiveMonitor
+    staffUsers, hashPassword, addActivity, sessionHistory, 
+    lastSynced, forceFullSync
   } = useAppContext() as any;
   const navigate = useNavigate();
   
@@ -73,83 +172,14 @@ export function Reservations() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     flash("Syncing live data...", "loading");
-    await refreshLiveMonitor();
+    await forceFullSync();
     flash("Data successfully synced!", "success");
     setIsRefreshing(false);
   };
 
-  // 🟢 INITIAL MOUNT SYNC: Ensure Local Machine pulls truth from Supabase
+  // 🟢 INITIAL MOUNT SYNC: Auto-fetch Supabase when opening reservations
   useEffect(() => {
-    let isMounted = true;
-    const syncFromSupabase = async () => {
-      try {
-        const { data: cloudData, error } = await supabase.from('reservations').select('*');
-        if (error || !cloudData) return;
-
-        const localRes = await fetch('http://localhost:3001/api/reservations');
-        if (!localRes.ok) return;
-        const localData = await localRes.json();
-
-        let hasChanges = false;
-
-        for (const cloud of cloudData) {
-          const localMatch = localData.find((l: any) => l.id === cloud.id);
-
-          const normalized = {
-            id: cloud.id, 
-            customerName: cloud.customerName || cloud.customer_name || 'Guest',
-            contactNumber: cloud.contactNumber || cloud.contact_number || '',
-            email: cloud.email || null,
-            date: cloud.date || cloud.reservation_date,
-            timeSlot: cloud.timeSlot || cloud.time_slot || '',
-            durationHours: cloud.durationHours || cloud.duration_hours || 1,
-            partySize: cloud.partySize || cloud.party_size || 1,
-            tableId: cloud.tableId || cloud.table_id || null,
-            status: cloud.status || 'pending',
-            totalAmount: cloud.totalAmount || cloud.total_amount || 0,
-            downPaymentAmount: cloud.downPaymentAmount || cloud.down_payment_amount || 0,
-            downPaymentPaid: !!(cloud.downPaymentPaid || cloud.down_payment_paid),
-            balancePaid: !!(cloud.balancePaid || cloud.balance_paid),
-            paymentRef: cloud.paymentRef || cloud.payment_ref || null,
-            receiptImg: cloud.receiptImg || cloud.receipt_img_url || null,
-            cancellationReason: cloud.cancellationReason || cloud.cancellation_reason || null,
-            refundStatus: cloud.refundStatus || cloud.refund_status || null,
-            refundMethod: cloud.refundMethod || cloud.refund_method || null,
-            refundNotes: cloud.refundNotes || cloud.refund_notes || null,
-            createdAt: cloud.createdAt || cloud.created_at || new Date().toISOString()
-          };
-
-          if (!localMatch) {
-            await fetch('http://localhost:3001/api/reservations', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(normalized)
-            });
-            hasChanges = true;
-          } else if (
-            localMatch.status !== normalized.status || 
-            localMatch.downPaymentPaid !== normalized.downPaymentPaid || 
-            localMatch.balancePaid !== normalized.balancePaid
-          ) {
-            await fetch(`http://localhost:3001/api/reservations/${normalized.id}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(normalized)
-            });
-            hasChanges = true;
-          }
-        }
-
-        if (hasChanges && isMounted) {
-          refreshLiveMonitor(); 
-        }
-      } catch (err) {
-        console.error('Initial Supabase Sync Error:', err);
-      }
-    };
-
-    syncFromSupabase();
-    return () => { isMounted = false; };
+    forceFullSync();
   }, []);
   
   // Void Modal State
@@ -171,12 +201,24 @@ export function Reservations() {
   const [settleModal, setSettleModal] = useState<{ id: string; customerName: string; balanceDue: number } | null>(null);
   const [tenderedAmount, setTenderedAmount] = useState('');
 
-  // Form state
+  // Reschedule Modal State
+  const [rescheduleModal, setRescheduleModal] = useState<{
+    id: string; customerName: string; originalDate: Date;
+    newDate: Date | null; newTimeSlot: string; newDuration: number; newTableId: string | null;
+  } | null>(null);
+  const [isRescheduling, setIsRescheduling] = useState(false);
+
+  // 🟢 Form state (Two-Panel Layout)
   const [form, setForm] = useState({
-    customerName: '', contactNumber: '', email: '', date: '',
-    timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: '',
-    paymentMethod: 'gcash' as 'gcash' | 'cash'
+    customerName: '', contactNumber: '', email: '',
+    timeSlot: '', durationHours: 2, partySize: 2, paymentRef: '',
+    paymentMethod: 'cash' as 'gcash' | 'cash'
   });
+  
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [isCalendarExpanded, setIsCalendarExpanded] = useState(true);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -264,15 +306,15 @@ export function Reservations() {
     }
   };
 
-  const getNextClosingTime = (dateStr: string) => {
-    if (!dateStr) return null;
-    const d = new Date(dateStr);
+  const getNextClosingTime = (dateObj: Date) => {
+    if (!dateObj) return null;
+    const d = new Date(dateObj);
     const isWeekend = d.getDay() === 5 || d.getDay() === 6;
     const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
     if (!closeTimeStr) return null;
     
     const [hr, min] = closeTimeStr.split(':').map(Number);
-    const closeDate = new Date(dateStr);
+    const closeDate = new Date(dateObj);
     closeDate.setHours(hr, min, 0, 0);
     
     if (hr <= 12) {
@@ -283,10 +325,10 @@ export function Reservations() {
 
   const maxAllowedDuration = (() => {
     let maxMins = (reservationTerms?.maxHours || 8) * 60;
-    if (form.date && form.timeSlot) {
-      const closeDate = getNextClosingTime(form.date);
+    if (selectedDate && form.timeSlot) {
+      const closeDate = getNextClosingTime(selectedDate);
       const [h, m] = form.timeSlot.split(':').map(Number);
-      const startD = new Date(form.date);
+      const startD = new Date(selectedDate);
       startD.setHours(h, m, 0, 0);
       
       if (closeDate) {
@@ -300,104 +342,70 @@ export function Reservations() {
   const maxAllowedPartySize = (() => {
     const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
     const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 20;
-    if (!form.date) return Math.max(wDayMax, wEndMax);
-    const d = new Date(form.date);
+    if (!selectedDate) return Math.max(wDayMax, wEndMax);
+    const d = new Date(selectedDate);
     const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
     return isWeekend ? wEndMax : wDayMax;
   })();
 
-  const isTimeSlotValid = (() => {
-    if (!form.date || !form.timeSlot) return true;
-    const parseToMins = (t: string) => { const [h, m] = (t||'0').split(':').map(Number); return h * 60 + (m || 0); };
-    const d = new Date(form.date);
-    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-    const startStr = isWeekend ? rates?.weekendStartTime : rates?.weekdayStartTime;
-    const endStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    if (!startStr || !endStr) return true;
-    const startMins = parseToMins(startStr);
-    let endMins = parseToMins(endStr);
-    if (endMins <= startMins) endMins += 24 * 60;
-    const slotMins = parseToMins(form.timeSlot);
-    let normalizedSlot = slotMins;
-    if (slotMins < startMins) normalizedSlot += 24 * 60;
-    return normalizedSlot >= startMins && normalizedSlot < endMins;
-  })();
+  // 🟢 Strict Table Validation Logic for Staff Overrides
+  const validateTimeSlot = (time: string, duration: number) => {
+    if (!time || !selectedDate) return 'invalid';
+    if (!selectedTableId) return 'no_table';
 
-  const advanceCheck = (() => {
-    if (!form.date || !form.timeSlot) return { valid: true, message: '' };
-    const [y, m, d] = form.date.split('-').map(Number);
-    const [hr, min] = form.timeSlot.split(':').map(Number);
-    const bookingDateTime = new Date(y, m - 1, d, hr, min);
-    const now = new Date();
-    if (bookingDateTime < now) return { valid: false, message: 'Cannot reserve a date or time in the past.' };
-    const advanceHours = Number(reservationTerms?.advanceBookingHours) || 1;
-    const minAllowedTime = new Date(now.getTime() + advanceHours * 3600 * 1000);
-    if (isSameDay(bookingDateTime, now) && bookingDateTime < minAllowedTime) {
-      return { valid: false, message: `Same-day reservations require at least ${advanceHours} hour(s) advance booking.` };
+    const parseToMins = (t: string) => {
+      const [hh = '0', mm = '0'] = (t || '').split(':');
+      return Number(hh) * 60 + Number(mm || 0);
+    };
+
+    const slotMins = parseToMins(time);
+    const requestedStart = new Date(selectedDate);
+    const [h, m] = time.split(':').map(Number);
+    requestedStart.setHours(h, m, 0, 0);
+    const requestedEnd = addMinutes(requestedStart, duration * 60);
+
+    if (isToday(requestedStart)) {
+      const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+      if (slotMins <= nowMins) return 'past'; 
     }
-    return { valid: true, message: '' };
-  })();
 
-  const capacityCheck = (() => {
-    if (!form.date || !form.timeSlot) return { valid: true, message: '' };
-    const d = new Date(form.date);
-    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-    const limitPercent = isWeekend ? Number(rates?.weekendOnlineCapacityLimit || 40) : Number(rates?.weekdayOnlineCapacityLimit || 90);
-    const activeTables = tables.filter((t: any) => t.isActive);
-    const maxTablesForHour = Math.max(1, Math.floor((activeTables.length || 10) * (limitPercent / 100)));
-    const [reqH, reqM] = form.timeSlot.split(':').map(Number);
-    const reqStart = reqH * 60 + reqM;
-    const reqEnd = reqStart + form.durationHours * 60;
+    // Strict Check 1: Existing Reservations on this Specific Table
+    let tableOverlapCount = 0;
+    const sameTableRes = reservations.filter((r: any) => 
+      r.tableId === selectedTableId && 
+      r.status !== 'cancelled' && 
+      r.status !== 'completed' && 
+      isSameDay(new Date(r.date), requestedStart)
+    );
 
-    const overlappingCount = reservations.filter((r: any) => {
-      if (r.status === 'cancelled' || r.status === 'completed') return false;
-      if (!isSameDay(new Date(r.date), d)) return false;
-      const [rH, rM] = (r.timeSlot || '00:00').split(':').map(Number);
-      const rStart = rH * 60 + rM;
-      const rEnd = rStart + (Number(r.durationHours) || 2) * 60;
-      return reqStart < rEnd && reqEnd > rStart;
-    }).length;
+    sameTableRes.forEach((r: any) => {
+      const rStart = new Date(r.date);
+      const [rH, rM] = r.timeSlot.split(':').map(Number);
+      rStart.setHours(rH, rM, 0, 0); 
+      const rEnd = addMinutes(rStart, r.durationHours * 60);
+      if (requestedStart < rEnd && requestedEnd > rStart) tableOverlapCount++;
+    });
 
-    if (overlappingCount >= maxTablesForHour) {
-      return { valid: false, message: `Capacity reached (${limitPercent}% limit). Please select a different time.` };
+    if (tableOverlapCount > 0) return 'table_conflict';
+
+    // Strict Check 2: Live Active Walk-In on this Specific Table
+    if (isToday(requestedStart)) {
+      const targetTable = tables.find((t: any) => t.id === selectedTableId);
+      if (targetTable?.status === 'occupied' && targetTable.session?.startTime && targetTable.session?.durationMinutes) {
+         const sessionEnd = addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes);
+         if (requestedStart < sessionEnd) return 'active_conflict';
+      }
     }
-    return { valid: true, message: '' };
-  })();
+
+    return 'valid';
+  };
+  
+  const timeValidation = validateTimeSlot(form.timeSlot, form.durationHours);
 
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
   const totalAmount = form.durationHours * effectiveHourly;
   const downPaymentPercentVal = rates && Number(rates.downPaymentPercent) >= 0 ? Number(rates.downPaymentPercent) : DOWN_PAYMENT_RATE * 100;
   const downPayment = totalAmount * (downPaymentPercentVal / 100);
-
-  const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
-  const closedMap = new Map(closedDates.map((c: any) => [c.date, c]));
-  
-  const resMap = reservations.reduce((acc: any, r: any) => {
-    const d = dateKey(new Date(r.date));
-    if (!acc[d]) acc[d] = [];
-    acc[d].push(r);
-    return acc;
-  }, {} as Record<string, Reservation[]>);
-
-  const eventsMap = events.reduce((acc: any, e: any) => {
-    if (!e.date) return acc;
-    const datesArray = e.date.split(',');
-    datesArray.forEach((d: any) => {
-      const key = d.trim();
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(e);
-    });
-    return acc;
-  }, {} as Record<string, Event[]>);
-  
-  const promosMap = promoCodes.reduce((acc: any, p: any) => {
-    if(p.expiresAt) {
-      const d = format(new Date(p.expiresAt), 'yyyy-MM-dd');
-      if (!acc[d]) acc[d] = [];
-      acc[d].push(p);
-    }
-    return acc;
-  }, {} as Record<string, PromoCode[]>);
 
   const handleSendEmail = (resId: string) => flash(`Reschedule email sent to Reservation #${resId.toUpperCase()}`, "success");
 
@@ -461,8 +469,9 @@ export function Reservations() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!advanceCheck.valid) return flash(advanceCheck.message, "error");
-    if (!capacityCheck.valid) return flash(capacityCheck.message, "error");
+    
+    if (timeValidation !== 'valid') return flash("Invalid time slot. Please resolve scheduling conflicts.", "error");
+    if (!selectedDate || !selectedTableId) return flash("Please select a date and a specific table.", "error");
 
     if (form.email) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -475,9 +484,9 @@ export function Reservations() {
       return flash("Please provide either a GCash Reference Number OR a Receipt Image.", "error");
     }
 
-    const [year, month, day] = form.date.split('-').map(Number);
     const [hour, minute] = form.timeSlot.split(':').map(Number);
-    const dateObj = new Date(year, month - 1, day, hour, minute);
+    const dateObj = new Date(selectedDate);
+    dateObj.setHours(hour, minute, 0, 0);
 
     const isDuplicate = reservations.some((r: any) => 
       r.customerName.trim().toLowerCase() === form.customerName.trim().toLowerCase() && 
@@ -502,31 +511,47 @@ export function Reservations() {
       const payload = {
         customerName: form.customerName.trim(), contactNumber: form.contactNumber, email: form.email,
         date: dateObj, timeSlot: form.timeSlot, durationHours: form.durationHours, partySize: form.partySize,
-        tableId: undefined, // 🟢 Forces "Any Available Table" walk-in logic
+        tableId: selectedTableId, // 🟢 EXPLICITLY ASSIGNED TO SELECTED TABLE
         status: form.paymentMethod === 'cash' ? 'confirmed' : 'pending',
-        totalAmount, downPaymentAmount: downPayment, downPaymentPaid: form.paymentMethod === 'cash' ? true : !!finalReceiptUrl || !!form.paymentRef.trim(),
-        balancePaid: false, paymentRef: form.paymentMethod === 'cash' ? 'CASH' : (form.paymentRef || undefined), receiptImg: finalReceiptUrl || undefined
+        totalAmount, downPaymentAmount: downPayment, 
+        downPaymentPaid: form.paymentMethod === 'cash' ? true : !!finalReceiptUrl || !!form.paymentRef.trim(),
+        balancePaid: false, 
+        paymentRef: form.paymentMethod === 'cash' ? 'CASH' : (form.paymentRef || undefined), 
+        receiptImg: finalReceiptUrl || undefined
       };
 
       // 1. Save to local SQLite (which updates UI instantly)
       const generatedId = addReservation(payload);
 
-      // 2. 🟢 SILENT PUSH DIRECTLY TO SUPABASE
-      // Mirrors the manual booking to the live cloud database automatically
+      // 2. SILENT PUSH DIRECTLY TO SUPABASE
       supabase.from('reservations').upsert([{
-        ...payload,
         id: generatedId,
-        date: dateObj.toISOString(),
-        createdAt: new Date().toISOString(),
-        downPaymentPaid: payload.downPaymentPaid ? 1 : 0,
-        balancePaid: payload.balancePaid ? 1 : 0
+        customer_name: payload.customerName,
+        contact_number: payload.contactNumber,
+        email: payload.email || null,
+        date: payload.date.toISOString(),
+        time_slot: payload.timeSlot,
+        duration_hours: payload.durationHours,
+        party_size: payload.partySize,
+        table_id: payload.tableId || null,
+        status: payload.status,
+        total_amount: payload.totalAmount,
+        down_payment_amount: payload.downPaymentAmount,
+        down_payment_paid: payload.downPaymentPaid ? 1 : 0,
+        balance_paid: payload.balancePaid ? 1 : 0,
+        payment_ref: payload.paymentRef || null,
+        receipt_img_url: payload.receiptImg || null,
+        created_at: new Date().toISOString()
       }]).then(({ error }) => {
         if (error) console.error("Silent Push Error:", error);
       });
 
       flash("Reservation successfully created!", "success");
       setShowForm(false);
-      setForm({ customerName: '', contactNumber: '', email: '', date: '', timeSlot: '', durationHours: 2, partySize: 2, tableId: '', paymentRef: '', paymentMethod: 'gcash' });
+      setForm({ customerName: '', contactNumber: '', email: '', timeSlot: '', durationHours: 2, partySize: 2, paymentRef: '', paymentMethod: 'cash' });
+      setSelectedDate(null);
+      setSelectedTableId(null);
+      setIsCalendarExpanded(true);
       setReceiptFile(null); setReceiptPreview(null);
     } catch (err) {
       flash("Failed to process reservation. Please check your connection.", "error");
@@ -560,6 +585,36 @@ export function Reservations() {
     if (!r.balancePaid) return s + (r.totalAmount - r.downPaymentAmount);
     return s;
   }, 0);
+
+  const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
+  const closedMap = new Map(closedDates.map((c: any) => [c.date, c]));
+  
+  const resMap = reservations.reduce((acc: any, r: any) => {
+    const d = dateKey(new Date(r.date));
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(r);
+    return acc;
+  }, {} as Record<string, Reservation[]>);
+
+  const eventsMap = events.reduce((acc: any, e: any) => {
+    if (!e.date) return acc;
+    const datesArray = e.date.split(',');
+    datesArray.forEach((d: any) => {
+      const key = d.trim();
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(e);
+    });
+    return acc;
+  }, {} as Record<string, Event[]>);
+  
+  const promosMap = promoCodes.reduce((acc: any, p: any) => {
+    if(p.expiresAt) {
+      const d = format(new Date(p.expiresAt), 'yyyy-MM-dd');
+      if (!acc[d]) acc[d] = [];
+      acc[d].push(p);
+    }
+    return acc;
+  }, {} as Record<string, PromoCode[]>);
 
   // ─── Render Calendar ─────────────────────────────────────────────────
   const renderCalendar = () => {
@@ -606,7 +661,6 @@ export function Reservations() {
                 >
                   <span className={`font-semibold text-xs mb-1 ${isTodayDate ? 'text-amber-400' : isPastDate ? 'text-neutral-600' : 'text-neutral-300'}`}>{format(day, 'd')}</span>
                   
-                  {/* 🟢 FIXED: pointer-events-none completely blocks scrollbars from swallowing the click */}
                   <div className="w-full space-y-0.5 overflow-hidden flex-1 pointer-events-none">
                     {dayCls && <div className="w-full text-[9px] bg-rose-500/20 text-rose-400 rounded px-1 truncate font-semibold">Closed</div>}
                     
@@ -662,14 +716,21 @@ export function Reservations() {
       {/* 🟢 ENHANCED TOOLBAR */}
       <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
         
-        {/* View Toggles */}
-        <div className="flex bg-neutral-900 border border-neutral-800 rounded-lg p-1 flex-shrink-0">
-          <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors ${viewMode === 'list' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>
-            <ListIcon size={14} /> List
-          </button>
-          <button onClick={() => setViewMode('calendar')} className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors ${viewMode === 'calendar' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>
-            <CalendarX2 size={14} /> Calendar
-          </button>
+        {/* View Toggles & Sync Info */}
+        <div className="flex flex-col items-start gap-1 flex-shrink-0">
+          <div className="flex bg-neutral-900 border border-neutral-800 rounded-lg p-1 w-full">
+            <button onClick={() => setViewMode('list')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${viewMode === 'list' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              <ListIcon size={14} /> List
+            </button>
+            <button onClick={() => setViewMode('calendar')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${viewMode === 'calendar' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              <CalendarX2 size={14} /> Calendar
+            </button>
+          </div>
+          {lastSynced && (
+            <p className="text-[9px] text-neutral-500 uppercase tracking-widest font-semibold pl-1">
+              Last synced at {format(lastSynced, 'hh:mm a')}
+            </p>
+          )}
         </div>
 
         {/* Expandable Search */}
@@ -763,7 +824,7 @@ export function Reservations() {
                         <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2">{r.customerName}<span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span></p>
                         <p className="text-xs text-neutral-500">{r.contactNumber}</p>
                       </td>
-                      <td className="px-4 py-3"><p className="text-sm text-neutral-300">{formatDate(new Date(r.date))}</p></td>
+                      <td className="px-4 py-3"><p className="text-sm text-neutral-300 font-medium">{formatDateTime(r.date, r.timeSlot)}</p></td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.durationHours}h</span></td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.partySize} pax</span></td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.tableId ? tables.find((t: any) => t.id === r.tableId)?.name || r.tableId : '—'}</span></td>
@@ -802,8 +863,11 @@ export function Reservations() {
                                 {r.status === 'checked-in' && (
                                   <button disabled={!hasCompletedSession(r)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(r.id, 'completed'); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
                                 )}
+                                {r.status === 'confirmed' && (
+                                  <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: r.id, customerName: r.customerName, originalDate: new Date(r.date), newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
+                                )}
                                 {(r.status !== 'cancelled' && r.status !== 'completed') && (
-                                  <button onClick={(e) => { e.stopPropagation(); setCancelTarget(r.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Cancel Booking</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setCancelTarget(r.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{r.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
                                 )}
                               </motion.div>
                             )}
@@ -919,7 +983,7 @@ export function Reservations() {
             </div>
             <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto hide-scrollbar">
               <div className="grid grid-cols-2 gap-5 text-base">
-                <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Date & Time</p><p className="text-lg text-neutral-200 font-medium">{format(new Date(selected.date), 'MMM d, yyyy')}</p><p className="text-neutral-400 text-sm font-medium">{selected.timeSlot}</p></div>
+                <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Date & Time</p><p className="text-lg text-neutral-200 font-medium">{format(new Date(selected.date), 'MMM d, yyyy')}</p><p className="text-emerald-400 text-sm font-bold">{formatTimeOnly(selected.timeSlot)}</p></div>
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Duration</p><p className="text-lg text-neutral-200 font-medium">{selected.durationHours} hour{selected.durationHours > 1 ? 's' : ''}</p><p className="text-neutral-400 text-sm font-medium">{selected.partySize} pax</p></div>
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Contact</p><p className="text-lg text-neutral-200 font-medium">{selected.contactNumber}</p>{selected.email && <p className="text-neutral-400 text-sm">{selected.email}</p>}</div>
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Table</p><p className="text-lg text-neutral-200 font-medium">{selected.tableId ? tables.find((t: any) => t.id === selected.tableId)?.name || selected.tableId : 'Not assigned'}</p></div>
@@ -998,8 +1062,11 @@ export function Reservations() {
                       {selected.status === 'checked-in' && (
                         <button disabled={!hasCompletedSession(selected)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(selected.id, 'completed'); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
                       )}
+                      {selected.status === 'confirmed' && (
+                        <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: selected.id, customerName: selected.customerName, originalDate: new Date(selected.date), newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
+                      )}
                       {(selected.status !== 'cancelled' && selected.status !== 'completed') && (
-                        <button onClick={(e) => { e.stopPropagation(); setCancelTarget(selected.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Cancel Booking</button>
+                        <button onClick={(e) => { e.stopPropagation(); setCancelTarget(selected.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{selected.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
                       )}
                     </motion.div>
                   )}
@@ -1010,117 +1077,224 @@ export function Reservations() {
         </div>
       )}
 
-      {/* New Reservation Form Modal */}
+      {/* 🟢 NEW TWO-PANEL RESERVATION MODAL FOR STAFF */}
       {showForm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
-              <h2 className="text-base font-bold text-neutral-100">New Reservation</h2>
-              <button onClick={() => setShowForm(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg"><X size={16} /></button>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-3xl w-full max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[90vh]">
+            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 shrink-0">
+              <div>
+                <h2 className="text-lg font-black text-neutral-100 flex items-center gap-2"><Plus size={18} className="text-emerald-500"/> New Manual Booking</h2>
+                <p className="text-xs text-neutral-500 mt-0.5">Staff override enabled. Select a specific table to lock it in.</p>
+              </div>
+              <button onClick={() => setShowForm(false)} className="p-2.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-xl transition-colors"><X size={18} /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto hide-scrollbar">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2 space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Customer Name *</label>
-                  <input required maxLength={50} value={form.customerName} onChange={e => setForm(f => ({ ...f, customerName: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600" placeholder="Full name" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Contact Number *</label>
-                  <input required type="tel" minLength={11} maxLength={11} value={form.contactNumber} onChange={e => setForm(f => ({ ...f, contactNumber: e.target.value.replace(/\D/g, '').slice(0, 11) }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600 font-mono" placeholder="09123456789" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Email</label>
-                  <input type="email" maxLength={50} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600" placeholder="Optional" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Date *</label>
-                  <input required type="date" min={format(new Date(), 'yyyy-MM-dd')} value={form.date} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Time Slot *</label>
-                  <input required type="time" value={form.timeSlot} style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} onChange={e => setForm(f => ({ ...f, timeSlot: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
-                </div>
-                
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex justify-between"><span>Duration (hours)</span>{form.timeSlot && <span className="text-[10px] text-amber-500">Max ~{maxAllowedDuration}h</span>}</label>
-                  <select value={form.durationHours} onChange={e => setForm(f => ({ ...f, durationHours: parseInt(e.target.value) }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-                    {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex justify-between"><span>Party Size</span><span className="text-[10px] text-emerald-500 font-bold">Max {maxAllowedPartySize}</span></label>
-                  <input type="number" min="1" max={maxAllowedPartySize} value={form.partySize} onChange={e => setForm(f => ({ ...f, partySize: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
-                </div>
-
-                {/* 🟢 GCash Method Switch */}
-                <div className="sm:col-span-2 space-y-3 border-t border-neutral-800 pt-4 mt-2">
-                  <div className="flex justify-between items-center">
-                    <p className="text-xs text-amber-500 uppercase tracking-wider font-bold flex items-center gap-1.5"><DollarSign size={14}/> Down Payment Info (Required)</p>
-                    <div className="flex bg-neutral-900 border border-neutral-800 rounded-lg p-1">
-                      <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'gcash'}))} className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${form.paymentMethod === 'gcash' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>GCash</button>
-                      <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'cash'}))} className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${form.paymentMethod === 'cash' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>Cash</button>
-                    </div>
+            
+            <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 p-6 gap-6">
+              
+              {/* LEFT PANEL: Integrated Calendar & Table Feed */}
+              <div className="lg:col-span-5 flex flex-col h-full bg-neutral-900 rounded-2xl border border-neutral-800 shadow-inner overflow-hidden">
+                <div className="bg-neutral-950 p-4 border-b border-neutral-800 flex flex-col gap-3 z-20 shrink-0">
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold ml-1">Step 1 — Date & Table</p>
+                  <div 
+                    onClick={() => setIsCalendarExpanded(!isCalendarExpanded)}
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 cursor-pointer flex items-center justify-between hover:border-emerald-500 transition-colors shadow-sm"
+                  >
+                    <span className={selectedDate ? 'font-semibold text-white' : 'text-neutral-500'}>
+                      {selectedDate ? format(selectedDate, 'MMMM d, yyyy') : 'Select a date...'}
+                    </span>
+                    <Calendar size={18} className={isCalendarExpanded ? "text-emerald-500" : "text-neutral-500"} />
                   </div>
+                </div>
 
-                  {form.paymentMethod === 'gcash' ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in">
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">
-                          Ref No. {receiptFile ? <span className="text-neutral-600 font-normal normal-case">(Optional)</span> : <span className="text-rose-500">*</span>}
-                        </label>
-                        <input type="text" value={form.paymentRef} onChange={e => setForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit ref" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono tracking-widest" />
+                <AnimatePresence>
+                  {isCalendarExpanded && (
+                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-b border-neutral-800 bg-neutral-950/50 shrink-0">
+                      <div className="p-4">
+                        <MiniCalendar
+                          selectedDate={selectedDate}
+                          onSelect={(d) => { setSelectedDate(d); setSelectedTableId(null); setIsCalendarExpanded(false); }}
+                          reservedDates={[]} closedDates={closedDates}
+                        />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">
-                          Receipt Image {form.paymentRef.trim() ? <span className="text-neutral-600 font-normal normal-case">(Optional)</span> : <span className="text-rose-500">*</span>}
-                        </label>
-                        <div className="flex items-center gap-3">
-                          <label className="flex-1 cursor-pointer bg-neutral-900 border border-dashed border-neutral-700 hover:border-emerald-500 rounded-lg px-3 py-2 text-center transition-colors flex flex-col items-center justify-center h-[42px]">
-                            <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { 
-                              const file = e.target.files?.[0]; 
-                              if (file) {
-                                if (!file.type.startsWith('image/')) { flash('Please upload JPG or PNG only.', 'error'); return; }
-                                setReceiptPreview(URL.createObjectURL(file)); 
-                                setReceiptFile(file);
-                              } 
-                            }} />
-                            <div className="flex items-center gap-1 text-[10px] text-neutral-400"><Upload size={12} /> {receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</div>
-                          </label>
-                          {receiptPreview && <img src={receiptPreview} alt="Receipt" className="w-10 h-10 object-cover rounded-md border border-neutral-700 shadow-sm" />}
-                        </div>
-                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="overflow-y-auto p-4 space-y-3 hide-scrollbar flex-1 bg-neutral-900">
+                  {!selectedDate ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
+                      <Calendar size={32} className="text-neutral-600 mb-3" />
+                      <p className="text-sm text-neutral-400">Select a date to view available tables.</p>
                     </div>
                   ) : (
-                    <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-4 animate-in fade-in flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0"><CheckCircle size={18} className="text-emerald-400" /></div>
-                      <div><p className="text-sm font-bold text-emerald-400">Cash Payment Selected</p><p className="text-xs text-neutral-400 mt-0.5">The down payment will instantly be marked as verified and paid via Cash.</p></div>
-                    </div>
+                    <>
+                      <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-3">Live Table Status</p>
+                      {tables.filter((t: any) => t.isActive).map((table: any) => {
+                        const isSel = selectedTableId === table.id;
+                        const isOcc = table.status === 'occupied';
+                        const isMaint = table.status === 'maintenance';
+                        
+                        let inUseUntil = null;
+                        if (isOcc && table.session && isToday(selectedDate)) {
+                          const end = addMinutes(new Date(table.session.startTime), table.session.durationMinutes || 60);
+                          inUseUntil = format(end, 'h:mm a');
+                        }
+
+                        const tableRes = reservations.filter((r: any) => 
+                          r.tableId === table.id && isSameDay(new Date(r.date), selectedDate) && r.status !== 'cancelled' && r.status !== 'completed'
+                        ).sort((a: any, b: any) => {
+                          const timeA = a.timeSlot.split(':').map(Number);
+                          const timeB = b.timeSlot.split(':').map(Number);
+                          return (timeA[0]*60 + timeA[1]) - (timeB[0]*60 + timeB[1]);
+                        });
+
+                        return (
+                          <div key={table.id} className={`relative rounded-xl border transition-all ${isMaint ? 'bg-neutral-900/40 border-neutral-800/60 opacity-60' : isSel ? 'bg-emerald-950/20 border-emerald-500 shadow-lg shadow-emerald-900/20' : 'bg-neutral-950 border-neutral-800 hover:border-neutral-600'}`}>
+                            <div className="p-4">
+                              <div className="flex justify-between items-start mb-3">
+                                <div>
+                                  <h4 className={`text-sm font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</h4>
+                                  {isMaint ? <p className="text-[10px] text-rose-400 font-semibold mt-1">Maintenance</p> : isOcc && isToday(selectedDate) ? <p className="text-[10px] text-amber-400 font-semibold mt-1">In Use until {inUseUntil}</p> : <p className="text-[10px] text-emerald-400 font-semibold mt-1">Available</p>}
+                                </div>
+                                <button disabled={isMaint} onClick={() => setSelectedTableId(table.id)} className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors border ${isSel ? 'bg-emerald-500 text-white border-emerald-400 shadow-md' : isMaint ? 'bg-neutral-800 text-neutral-600 border-neutral-700 cursor-not-allowed' : 'bg-neutral-800 text-neutral-300 hover:bg-emerald-600/20 hover:text-emerald-400 hover:border-emerald-500/50 border-neutral-700'}`}>
+                                  {isSel ? 'Selected' : 'Select'}
+                                </button>
+                              </div>
+                              <div className="bg-neutral-900/80 rounded-lg p-2.5 border border-neutral-800/50">
+                                <p className="text-[9px] text-neutral-500 uppercase tracking-widest font-semibold mb-1.5">Today's Reservations</p>
+                                {tableRes.length === 0 ? <p className="text-xs text-neutral-600 italic">No bookings.</p> : (
+                                  <div className="space-y-1.5">
+                                    {tableRes.map((r: any) => {
+                                      const rStart = new Date(r.date);
+                                      const [rH, rM] = r.timeSlot.split(':').map(Number);
+                                      rStart.setHours(rH, rM, 0, 0);
+                                      const rEnd = addMinutes(rStart, r.durationHours * 60);
+                                      return (
+                                        <div key={r.id} className="flex items-center gap-2 text-xs">
+                                          <div className="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0" />
+                                          <span className="text-neutral-300 font-medium">{format(rStart, 'h:mm a')} - {format(rEnd, 'h:mm a')}</span>
+                                          <span className="text-neutral-500 truncate text-[10px]">({r.durationHours}h)</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
                   )}
                 </div>
               </div>
 
-              {/* Payment Summary */}
-              <div className="bg-neutral-900 rounded-xl p-4 border border-neutral-800 space-y-2">
-                <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment Summary</p>
-                <div className="flex justify-between text-sm">
-                  <span className="text-neutral-400">Total ({form.durationHours}h × ₱{effectiveHourly})</span>
-                  <span className="text-neutral-200 font-semibold">{formatPHP(totalAmount)}</span>
-                </div>
-                <div className="flex justify-between text-sm border-t border-neutral-800 pt-2">
-                  <span className="text-neutral-400">Down Payment ({downPaymentPercentVal}%)</span>
-                  <span className="text-amber-400 font-semibold">{formatPHP(downPayment)}</span>
-                </div>
+              {/* RIGHT PANEL: Booking Form */}
+              <div className="lg:col-span-7 h-full overflow-y-auto hide-scrollbar pb-10">
+                {!selectedDate || !selectedTableId ? (
+                  <div className="bg-neutral-900 border border-dashed border-neutral-700 rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-3 h-full min-h-[400px]">
+                    <div className="w-16 h-16 rounded-full bg-neutral-800/50 flex items-center justify-center mb-2"><Table2 size={32} className="text-neutral-600" /></div>
+                    <p className="text-neutral-400 font-semibold">Select a table from the feed to continue.</p>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5 shadow-xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Step 2 — Details</p>
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">Booking {tables.find((t: any) => t.id === selectedTableId)?.name}</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs text-neutral-400 mb-1.5">Full Name <span className="text-rose-500">*</span></label>
+                        <input required type="text" value={form.customerName} onChange={e => setForm(f => ({ ...f, customerName: e.target.value }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500" placeholder="e.g. Juan dela Cruz" />
+                      </div>
+                      <div className="flex gap-3 sm:col-span-2">
+                        <div className="flex-1">
+                          <label className="block text-xs text-neutral-400 mb-1.5">Phone Number <span className="text-rose-500">*</span></label>
+                          <input required type="tel" value={form.contactNumber} onChange={e => setForm(f => ({ ...f, contactNumber: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500" placeholder="09XX-XXX-XXXX" />
+                        </div>
+                        <div className="w-20 shrink-0">
+                          <label className="block text-xs text-neutral-400 mb-1.5">Pax</label>
+                          <input type="number" min="1" max={maxAllowedPartySize} value={form.partySize} onChange={e => setForm(f => ({ ...f, partySize: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500 text-center" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Schedule Setup */}
+                    <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800/80">
+                      <label className="block text-xs text-emerald-500 font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5"><Clock size={14} /> Schedule Setup</label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs text-neutral-400 mb-1.5">Start Time <span className="text-rose-500">*</span></label>
+                          <input required type="time" style={{ colorScheme: 'dark' }} value={form.timeSlot} onChange={e => setForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500 ${timeValidation !== 'valid' && form.timeSlot ? 'border-rose-500/50 text-rose-200' : 'border-neutral-700'}`} />
+                        </div>
+                        <div className="flex flex-col justify-end">
+                          <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end"><span>Duration</span><span className="text-[9px] text-amber-500">Max ~{maxAllowedDuration}h</span></label>
+                          <select value={form.durationHours} onChange={e => setForm(f => ({ ...f, durationHours: parseInt(e.target.value) }))} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500">
+                            {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-3">
+                        {timeValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> Time has passed.</p>}
+                        {timeValidation === 'table_conflict' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>Table has another reservation overlapping this time.</span></div>}
+                        {timeValidation === 'active_conflict' && <div className="text-[10px] text-amber-400 font-bold flex items-start gap-1.5 bg-amber-950/20 p-2.5 rounded border border-amber-900/30 mt-2"><Clock size={14} className="shrink-0 mt-0.5" /><span>Table has an active walk-in timer running. Wait for it to finish.</span></div>}
+                        {timeValidation === 'valid' && <p className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-2"><CheckCircle size={10} /> Valid selection!</p>}
+                      </div>
+                    </div>
+
+                    {/* Payment Block (Staff retains Cash option) */}
+                    <div className="space-y-3 border-t border-neutral-800 pt-4">
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-amber-500 uppercase tracking-wider font-bold">Down Payment Info</p>
+                        <div className="flex bg-neutral-950 border border-neutral-800 rounded-lg p-1">
+                          <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'gcash'}))} className={`px-3 py-1 text-xs font-semibold rounded-md ${form.paymentMethod === 'gcash' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>GCash</button>
+                          <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'cash'}))} className={`px-3 py-1 text-xs font-semibold rounded-md ${form.paymentMethod === 'cash' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>Cash</button>
+                        </div>
+                      </div>
+
+                      {form.paymentMethod === 'gcash' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
+                            <input type="text" value={form.paymentRef} onChange={e => setForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
+                            <div className="flex items-center gap-3 mt-1.5">
+                              <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center">
+                                <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
+                                <span className="text-[10px] text-neutral-400">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
+                          <CheckCircle size={16} className="text-emerald-400" />
+                          <p className="text-xs text-emerald-400 font-bold">Down payment will instantly mark as verified.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-neutral-800/50 rounded-xl p-4 border border-neutral-700/50">
+                      <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Summary</p>
+                      <div className="flex justify-between text-xs mb-1.5"><span className="text-neutral-400">Total ({form.durationHours}h)</span><span className="text-neutral-200">{formatPHP(totalAmount)}</span></div>
+                      <div className="flex justify-between text-xs font-bold text-amber-400"><span className="">Down Payment ({downPaymentPercentVal}%)</span><span className="">{formatPHP(downPayment)}</span></div>
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
+                      <button type="button" onClick={() => setShowForm(false)} className="px-4 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl font-semibold">Cancel</button>
+                      <button type="submit" disabled={isSubmitting || timeValidation !== 'valid' || (form.paymentMethod === 'gcash' && !receiptFile && !form.paymentRef.trim())} className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 text-white text-sm rounded-xl font-bold flex items-center justify-center gap-2">
+                        {isSubmitting ? 'Saving...' : 'Confirm Manual Booking'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
 
-              {!isTimeSlotValid && form.timeSlot && <p className="text-[10px] text-rose-400 font-bold bg-rose-950/20 p-2 rounded border border-rose-900/50 flex items-center gap-1"><AlertTriangle size={12} /> The selected time slot falls outside operating hours.</p>}
-
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
-                <button type="submit" disabled={isSubmitting || !isTimeSlotValid || (form.paymentMethod === 'gcash' && !receiptFile && !form.paymentRef.trim())} className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2">
-                  {isSubmitting ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</> : <><Plus size={15} /> Create Reservation</>}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -1197,30 +1371,205 @@ export function Reservations() {
         </div>
       )}
 
-      {/* Cancel Dialog */}
-      {showCancelDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl">
-            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center">
-              <div>
-                <h2 className="text-base font-bold text-neutral-100">Cancel Reservation</h2>
-                <p className="text-xs text-neutral-500">Reservation #{cancelTarget?.toUpperCase()}</p>
+      {/* Deny / Cancel Dialog */}
+      {showCancelDialog && (() => {
+        const targetRes = reservations.find((r: any) => r.id === cancelTarget);
+        const isPending = targetRes?.status === 'pending';
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl">
+              <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+                <div>
+                  <h2 className="text-base font-bold text-rose-400">{isPending ? 'Deny Reservation' : 'Cancel Booking'}</h2>
+                  <p className="text-xs text-neutral-500">Reservation #{cancelTarget?.toUpperCase()}</p>
+                </div>
+                <button onClick={() => { setShowCancelDialog(false); setCancelReason(''); }} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors"><X size={16} /></button>
               </div>
-              <button onClick={() => setShowCancelDialog(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg"><X size={16} /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-neutral-500">Are you sure you want to cancel this reservation?</p>
-              <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="Enter reason for cancellation (optional)" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600" />
-              <div className="flex gap-3">
-                <button type="button" onClick={() => setShowCancelDialog(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
-                <button type="button" onClick={() => { if (cancelTarget) { cancelReservation(cancelTarget, cancelReason); setShowCancelDialog(false); flash("Reservation cancelled successfully.", "success"); } }} className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2">
-                  <X size={15} /> Confirm Cancel
-                </button>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-neutral-300">Are you sure you want to {isPending ? 'deny' : 'cancel'} this reservation?</p>
+                
+                {isPending && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Quick Select Reason</p>
+                    <div className="flex flex-wrap gap-2">
+                      {["Blurry/Unreadable GCash Receipt", "Invalid/Mismatched Payment Amount", "Fake/Duplicate Receipt", "Customer Requested Denial"].map(r => (
+                        <button key={r} type="button" onClick={() => setCancelReason(r)} className={`px-2.5 py-1 text-[10px] rounded-full border transition-colors ${cancelReason === r ? 'bg-rose-500/20 border-rose-500/50 text-rose-400 font-bold' : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:border-neutral-500'}`}>
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="Type specific reason for cancellation/denial..." className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-rose-500/40 placeholder-neutral-600" rows={3} />
+                
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={() => { setShowCancelDialog(false); setCancelReason(''); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Abort</button>
+                  <button type="button" disabled={!cancelReason.trim()} onClick={() => { if (cancelTarget) { cancelReservation(cancelTarget, cancelReason); setShowCancelDialog(false); setCancelReason(''); flash(`Reservation ${isPending ? 'denied' : 'cancelled'} successfully.`, "success"); setSelectedId(null); } }} className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2">
+                    <X size={15} /> Confirm {isPending ? 'Denial' : 'Cancel'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
+      {/* Reschedule Modal */}
+      {rescheduleModal && (() => {
+        // 🟢 DYAMIC RESCHEDULE VALIDATOR
+        const rescheduleValidation = (() => {
+          if (!rescheduleModal.newDate || !rescheduleModal.newTimeSlot || !rescheduleModal.newTableId) return 'invalid';
+          
+          const requestedStart = new Date(rescheduleModal.newDate);
+          const [h, m] = rescheduleModal.newTimeSlot.split(':').map(Number);
+          requestedStart.setHours(h, m, 0, 0);
+          const requestedEnd = addMinutes(requestedStart, rescheduleModal.newDuration * 60);
+
+          if (isBefore(requestedStart, new Date()) && !isToday(requestedStart)) return 'past';
+          if (isToday(requestedStart) && (h * 60 + m) <= new Date().getHours() * 60 + new Date().getMinutes()) return 'past';
+
+          // 1. Closure Check
+          const isClosed = closedDates.some((c: any) => {
+            if (c.type === 'weekly') return requestedStart.getDay() === c.dayOfWeek;
+            if (!c.date) return false;
+            return isSameDay(new Date(c.date), requestedStart);
+          });
+          if (isClosed) return 'closed';
+
+          // 2. Event Check
+          const blockingEvent = events.find((e: any) => {
+            if (!e.date) return false;
+            const eventDates = e.date.split(',').map((d: string) => d.trim());
+            if (!eventDates.includes(format(requestedStart, 'yyyy-MM-dd'))) return false;
+            
+            if (e.allowReservations === false || e.allowReservations === 0) return true;
+            
+            const eventTableIds = typeof e.eventTableIds === 'string' ? JSON.parse(e.eventTableIds || '[]') : (e.eventTableIds || []);
+            if (eventTableIds.includes(rescheduleModal.newTableId)) return true;
+            
+            return false;
+          });
+          if (blockingEvent) return 'event_conflict';
+
+          // 3. Existing Reservation Check (Excluding the current reservation being moved)
+          const overlap = reservations.some((r: any) => {
+            if (r.id === rescheduleModal.id || r.tableId !== rescheduleModal.newTableId || r.status === 'cancelled' || r.status === 'completed') return false;
+            if (!isSameDay(new Date(r.date), requestedStart)) return false;
+            const rStart = new Date(r.date);
+            const [rH, rM] = (r.timeSlot || '00:00').split(':').map(Number);
+            rStart.setHours(rH, rM, 0, 0);
+            const rEnd = addMinutes(rStart, r.durationHours * 60);
+            return requestedStart < rEnd && requestedEnd > rStart;
+          });
+          if (overlap) return 'table_conflict';
+
+          return 'valid';
+        })();
+
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 shrink-0">
+                <div>
+                  <h3 className="text-base font-bold text-amber-400">Reschedule Booking</h3>
+                  <p className="text-xs text-neutral-500">{rescheduleModal.customerName} (#{rescheduleModal.id.toUpperCase()})</p>
+                </div>
+                <button onClick={() => setRescheduleModal(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto space-y-5 hide-scrollbar">
+                
+                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800/80">
+                  <label className="block text-xs text-emerald-500 font-bold uppercase tracking-wider mb-3">1. Select New Date</label>
+                  <input type="date" value={rescheduleModal.newDate ? format(rescheduleModal.newDate, 'yyyy-MM-dd') : ''} min={format(new Date(), 'yyyy-MM-dd')} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newDate: new Date(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
+                </div>
+
+                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800/80">
+                  <label className="block text-xs text-emerald-500 font-bold uppercase tracking-wider mb-3">2. Select New Time & Table</label>
+                  <div className="grid grid-cols-2 gap-4 mb-3">
+                    <div>
+                      <label className="block text-[10px] text-neutral-500 mb-1">Time</label>
+                      <input type="time" value={rescheduleModal.newTimeSlot} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newTimeSlot: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-neutral-500 mb-1">Duration</label>
+                      <select value={rescheduleModal.newDuration} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newDuration: parseInt(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-amber-500">
+                        {[1,2,3,4,5,6].map(h => <option key={h} value={h}>{h} hour{h>1?'s':''}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-neutral-500 mb-1">Assign Table</label>
+                    <select value={rescheduleModal.newTableId || ''} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newTableId: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-amber-500">
+                      <option value="" disabled>Select a table...</option>
+                      {tables.filter((t: any) => t.isActive).map((t: any) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="mt-3">
+                    {rescheduleValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> Time has passed.</p>}
+                    {rescheduleValidation === 'closed' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>The venue is marked as closed on this date.</span></div>}
+                    {rescheduleValidation === 'event_conflict' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>This table is blocked by a special event on this date.</span></div>}
+                    {rescheduleValidation === 'table_conflict' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>Table has another reservation overlapping this time.</span></div>}
+                    {rescheduleValidation === 'valid' && <p className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-2"><CheckCircle size={10} /> Valid selection!</p>}
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="p-6 border-t border-neutral-800 bg-neutral-900/30 shrink-0 flex gap-3">
+                 <button type="button" disabled={isRescheduling} onClick={() => setRescheduleModal(null)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
+                 <button 
+                    type="button" 
+                    disabled={rescheduleValidation !== 'valid' || isRescheduling}
+                    onClick={async () => {
+                      setIsRescheduling(true);
+                      
+                      try {
+                        const processReschedule = new Promise<void>((resolve) => {
+                          setTimeout(() => { 
+                            const rDate = new Date(rescheduleModal.newDate!);
+                            const [h,m] = rescheduleModal.newTimeSlot.split(':').map(Number);
+                            rDate.setHours(h, m, 0, 0);
+                            
+                            updateReservation(rescheduleModal.id, {
+                               date: rDate,
+                               timeSlot: rescheduleModal.newTimeSlot,
+                               durationHours: rescheduleModal.newDuration,
+                               tableId: rescheduleModal.newTableId!
+                            });
+                            resolve();
+                          }, 500); 
+                        });
+
+                        const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 10000));
+                        const isTimeout = await Promise.race([ processReschedule.then(() => false), timeout ]);
+
+                        if (isTimeout) {
+                          flash("Session timed out (10s limit exceeded). Please check your connection and try again.", "error");
+                        } else {
+                          flash("Reservation successfully rescheduled.", "success");
+                          setRescheduleModal(null);
+                          setSelectedId(null);
+                        }
+                      } catch (error) {
+                        flash("An error occurred while rescheduling.", "error");
+                      } finally {
+                        setIsRescheduling(false);
+                      }
+                    }} 
+                    className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-amber-900/30 flex items-center justify-center gap-2"
+                  >
+                    {isRescheduling ? <><RefreshCw size={15} className="animate-spin" /> Processing...</> : 'Confirm Reschedule'}
+                  </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Admin Authorized Void Modal */}
       {voidModal && (
@@ -1265,7 +1614,7 @@ export function Reservations() {
       )}
 
       {/* 🟢 GLOBAL REFRESH BLOCKER */}
-      {isRefreshing && (
+      {(isRefreshing || isRescheduling) && (
         <div className="fixed inset-0 z-[99999] cursor-wait" />
       )}
 

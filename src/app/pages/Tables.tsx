@@ -5,9 +5,9 @@ import {
   Search, Play, Zap, X, UserPlus, Clock,
   Calendar, Users, CheckCircle, ChevronRight,
   CreditCard, Banknote, AlertTriangle, CircleCheck,
-  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History, Info, RefreshCw
+  ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History, Info, RefreshCw, ArrowRightLeft
 } from 'lucide-react';
-import { isToday, differenceInSeconds, addMinutes } from 'date-fns';
+import { isToday, differenceInSeconds, addMinutes, isSameDay} from 'date-fns';
 
 type FilterStatus = 'all' | 'available' | 'occupied' | 'reserved' | 'maintenance';
 type PaymentMethod = 'gcash' | 'cash';
@@ -21,11 +21,11 @@ type CustomerSource =
 
 export function Tables() {
   const { 
-    tables, queue, reservations, assignTable, extendSession, freeTable, 
+    tables, queue, reservations, assignTable, extendSession, migrateSession, freeTable, 
     inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, 
     staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
-    removeFromQueue, updateReservationStatus
+    removeFromQueue, updateReservationStatus, forceFullSync
   } = useAppContext() as any;
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
@@ -42,6 +42,10 @@ export function Tables() {
   const [dismissedNearEnd, setDismissedNearEnd] = useState<Set<string>>(new Set());
   
   const [useProrated,      setUseProrated]      = useState(false);
+  
+  // Migrate Session States
+  const [migratingTableId, setMigratingTableId] = useState<string | null>(null);
+  const [migrateTargetId,  setMigrateTargetId]  = useState<string>('');
   
   // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
   const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
@@ -257,14 +261,128 @@ export function Tables() {
   };
   const posInfo = getPosSessionInfo();
 
+  const getNextClosingTime = () => {
+    const now = new Date();
+    const isWeekend = now.getDay() === 5 || now.getDay() === 6;
+    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
+    if (!closeTimeStr) return null;
+    
+    const [hr, min] = closeTimeStr.split(':').map(Number);
+    const closeDate = new Date(now);
+    closeDate.setHours(hr, min, 0, 0);
+    
+    if (closeDate <= now) {
+      closeDate.setDate(closeDate.getDate() + 1);
+    }
+    return closeDate;
+  };
+
+  const getNextReservation = (tableId: string) => {
+    const now = new Date();
+    const upcoming = reservations
+      .filter((r: any) => {
+        if (r.tableId !== tableId || (r.status !== 'pending' && r.status !== 'confirmed')) return false;
+        // 🟢 FIX: Reconstruct exact date and time to bypass Javascript Midnight mapping
+        const rDate = new Date(r.date);
+        const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
+        rDate.setHours(h, m, 0, 0);
+        return rDate > now && isSameDay(rDate, now); // Only match future reservations today
+      })
+      .sort((a: any, b: any) => {
+        const aDate = new Date(a.date);
+        const [ah, am] = (a.timeSlot || '00:00').split(':').map(Number);
+        aDate.setHours(ah, am, 0, 0);
+        const bDate = new Date(b.date);
+        const [bh, bm] = (b.timeSlot || '00:00').split(':').map(Number);
+        bDate.setHours(bh, bm, 0, 0);
+        return aDate.getTime() - bDate.getTime();
+      });
+
+    if (!upcoming.length) return null;
+    
+    const r = upcoming[0];
+    const rDate = new Date(r.date);
+    const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
+    rDate.setHours(h, m, 0, 0);
+    
+    return { date: rDate, customerName: r.customerName, timeSlot: r.timeSlot };
+  };
+
+
+
   const openAssign = (tableId: string) => {
+    if (forceFullSync) forceFullSync(); // 🟢 Automatically pull latest cloud reservations
+    
     setAssigningTableId(tableId);
     setSelectedCustomer(null);
     setCustomerName('');
-    setDurationMinutes(60);
-    setAmountPaid('');
+    const availData = getAvailableDurations(tableId);
+    const defaultMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+    setDurationMinutes(defaultMins);
+    setAmountPaid(((defaultMins / 60) * effectiveHourly).toFixed(2));
     setPaymentOption('payNow');
   };
+
+  // 🟢 DYAMIC FALLBACK: Auto-adjust modal if background sync finds a new booking mid-click
+  useEffect(() => {
+    if (assigningTableId) {
+      const availData = getAvailableDurations(assigningTableId);
+      if (durationMinutes !== 'open' && typeof durationMinutes === 'number') {
+        if (durationMinutes > availData.maxMins) {
+          const newMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+          setDurationMinutes(newMins);
+          setAmountPaid(((newMins / 60) * effectiveHourly).toFixed(2));
+        }
+      } else if (durationMinutes === 'open' && (isOpenTimeDisabled || availData.maxMins < 1440)) {
+          const newMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+          setDurationMinutes(newMins);
+          setAmountPaid(((newMins / 60) * effectiveHourly).toFixed(2));
+          setPaymentOption('payNow');
+      }
+    }
+  }, [reservations, assigningTableId, effectiveHourly]);
+
+  // 🟢 NEW: Pro-Rated Table-Specific Gap Calculator
+  const getAvailableDurations = (tableId: string | null) => {
+    if (!tableId) return { opts: [60], maxMins: 1440, conflictWarning: null, isBlocked: false };
+    const now = new Date();
+    let maxMins = (reservationTerms?.maxHours || 8) * 60;
+    let conflictWarning = null;
+    let isBlocked = false;
+
+    const closeDate = getNextClosingTime();
+    if (closeDate) {
+      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
+      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
+    }
+
+    const nextRes = getNextReservation(tableId);
+    if (nextRes) {
+      const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, now) / 60);
+      if (minsUntilRes < 30) {
+        maxMins = 0;
+        isBlocked = true; // HARD STOP ENFORCED
+        conflictWarning = `Table locked. Upcoming reservation for ${nextRes.customerName} arrives in ${minsUntilRes} min(s).`;
+      } else {
+        maxMins = Math.min(maxMins, minsUntilRes);
+        conflictWarning = `Upcoming reservation at ${nextRes.timeSlot}. Max pro-rated play time is ${maxMins} mins.`;
+      }
+    }
+
+    const opts = [];
+    for (let m = 60; m <= maxMins; m += 60) opts.push(m);
+    
+    // Pro-rated fraction injection (e.g. 45m or 90m)
+    if (maxMins > 0 && !opts.includes(maxMins)) {
+       opts.push(maxMins);
+       opts.sort((a,b) => a-b);
+    }
+    if (opts.length === 0 && maxMins >= 30) opts.push(maxMins); 
+
+    return { opts, maxMins, conflictWarning, isBlocked };
+  };
+
+  
 
   const openEnd = (tableId: string) => {
     const table = tables.find((t: any) => t.id === tableId);
@@ -280,19 +398,92 @@ export function Tables() {
   const openExtend = (tableId: string) => {
     const table = tables.find((t: any) => t.id === tableId);
     setExtendingTableId(tableId);
-    setExtendMinutes(60); setExtendPayStatus('paid'); setExtendPayMethod('cash'); setExtendPartialAmount(''); setExtendCashTendered(''); setExtendGcashRef('');
+    const extLimits = getExtensionLimits(tableId);
+    // 🟢 Auto-select the smallest available extension, or default to 60 if fully blocked
+    setExtendMinutes(extLimits.opts.length > 0 ? extLimits.opts[0] : 60); 
+    setExtendPayStatus('paid'); setExtendPayMethod('cash'); setExtendPartialAmount(''); setExtendCashTendered(''); setExtendGcashRef('');
     setDebtName(table?.session?.customerName || ''); setDebtContact('');
   };
 
   const pickCustomer = (c: CustomerSource) => {
     setSelectedCustomer(c); setCustomerName(c.name);
+    const availData = getAvailableDurations(assigningTableId);
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
-      setDurationMinutes(mins); setAmountPaid(((mins / 60) * effectiveHourly).toFixed(2));
+      const finalMins = Math.min(mins, availData.maxMins); // Enforce max gap
+      setDurationMinutes(finalMins); setAmountPaid(((finalMins / 60) * effectiveHourly).toFixed(2));
     } else {
-      setDurationMinutes(60); setAmountPaid(((60 / 60) * effectiveHourly).toFixed(2));
+      const defaultMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+      setDurationMinutes(defaultMins); setAmountPaid(((defaultMins / 60) * effectiveHourly).toFixed(2));
     }
   };
+
+  const getExtensionLimits = (tableId: string) => {
+    const now = new Date();
+    let maxMins = (reservationTerms?.maxHours || 8) * 60;
+    let blocksOpenTime = false;
+    let conflictWarning = "";
+
+    const closeDate = getNextClosingTime();
+    if (closeDate) {
+      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
+      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
+    }
+
+    const nextRes = getNextReservation(tableId);
+    if (nextRes) {
+      const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, now) / 60);
+      if (minsUntilRes > 0) {
+        maxMins = Math.min(maxMins, minsUntilRes);
+        blocksOpenTime = true;
+        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${nextRes.timeSlot}.`;
+      } else {
+        maxMins = 0;
+        blocksOpenTime = true;
+        conflictWarning = `Table is reserved for ${nextRes.customerName} NOW. Extension blocked.`;
+      }
+    }
+
+    const opts = [];
+    for (let m = 60; m <= maxMins; m += 60) opts.push(m);
+    return { opts, maxMins, blocksOpenTime, conflictWarning };
+  };
+
+  const isOpenTimeDisabled = (() => {
+    const now = new Date();
+    const closeDate = getNextClosingTime();
+    if (!closeDate) return false;
+    
+    const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
+    const cutoff = rates?.bookingCutoffMinutes || 60;
+    return minsLeft <= cutoff;
+  })();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const assignCustomer = sessionStorage.getItem('assignCustomer');
+      const assignTableId = sessionStorage.getItem('assignTableId');
+      if (assignCustomer && assignTableId) {
+        const customer = JSON.parse(assignCustomer);
+        setAssigningTableId(assignTableId);
+        setSelectedCustomer(customer as any);
+        setCustomerName(customer.name);
+        setPaymentOption('payNow');
+        
+        if (customer.kind === 'reservation') {
+          const mins = (customer as any).durationHours * 60;
+          setDurationMinutes(mins);
+          setAmountPaid(((mins / 60) * effectiveHourly).toFixed(2));
+        } else {
+          setDurationMinutes(60);
+          setAmountPaid(((60 / 60) * effectiveHourly).toFixed(2));
+        }
+        
+        sessionStorage.removeItem('assignCustomer');
+        sessionStorage.removeItem('assignTableId');
+      }
+    }
+  }, [effectiveHourly]);
 
   const handleAssign = (e: React.FormEvent) => {
     e.preventDefault();
@@ -513,16 +704,6 @@ export function Tables() {
     setIsEditingMenu(true);
   };
 
-  const getNextReservation = (tableId: string) => {
-    const now = new Date();
-    const upcoming = reservations
-      .filter((r: any) => r.tableId === tableId && (r.status === 'pending' || r.status === 'confirmed') && new Date(r.date) > now)
-      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    if (!upcoming.length) return null;
-    const r = upcoming[0];
-    return { date: new Date(r.date), customerName: r.customerName, timeSlot: r.timeSlot };
-  };
-
   const filterBtns: { key: FilterStatus; label: string; count: number; color: string }[] = [
     { key: 'all',         label: 'All',         count: activeTables.length, color: 'bg-neutral-800 text-neutral-200 border-neutral-700' },
     { key: 'available',   label: 'Available',   count: available,           color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
@@ -539,106 +720,6 @@ export function Tables() {
       </span>
     );
   };
-
-  const getNextClosingTime = () => {
-    const now = new Date();
-    const isWeekend = now.getDay() === 5 || now.getDay() === 6;
-    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    if (!closeTimeStr) return null;
-    
-    const [hr, min] = closeTimeStr.split(':').map(Number);
-    const closeDate = new Date(now);
-    closeDate.setHours(hr, min, 0, 0);
-    
-    if (closeDate <= now) {
-      closeDate.setDate(closeDate.getDate() + 1);
-    }
-    return closeDate;
-  };
-
-  const getAvailableDurations = () => {
-    const now = new Date();
-    let maxMins = (reservationTerms?.maxHours || 8) * 60;
-    const closeDate = getNextClosingTime();
-    
-    if (closeDate) {
-      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
-      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
-    }
-
-    const opts = [];
-    for (let m = 60; m <= maxMins; m += 60) opts.push(m);
-    return opts.length > 0 ? opts : [60]; 
-  };
-
-  const availableDurations = getAvailableDurations();
-
-  const getExtensionLimits = (tableId: string) => {
-    const now = new Date();
-    let maxMins = (reservationTerms?.maxHours || 8) * 60;
-    let blocksOpenTime = false;
-    let conflictWarning = "";
-
-    const closeDate = getNextClosingTime();
-    if (closeDate) {
-      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
-      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
-    }
-
-    const nextRes = getNextReservation(tableId);
-    if (nextRes) {
-      const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, now) / 60);
-      if (minsUntilRes > 0) {
-        maxMins = Math.min(maxMins, minsUntilRes);
-        blocksOpenTime = true;
-        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${nextRes.timeSlot}.`;
-      } else {
-        maxMins = 0;
-        blocksOpenTime = true;
-        conflictWarning = `Table is reserved for ${nextRes.customerName} NOW. Extension blocked.`;
-      }
-    }
-
-    const opts = [];
-    for (let m = 60; m <= maxMins; m += 60) opts.push(m);
-    return { opts, maxMins, blocksOpenTime, conflictWarning };
-  };
-
-  const isOpenTimeDisabled = (() => {
-    const now = new Date();
-    const closeDate = getNextClosingTime();
-    if (!closeDate) return false;
-    
-    const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
-    const cutoff = rates?.bookingCutoffMinutes || 60;
-    return minsLeft <= cutoff;
-  })();
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const assignCustomer = sessionStorage.getItem('assignCustomer');
-      const assignTableId = sessionStorage.getItem('assignTableId');
-      if (assignCustomer && assignTableId) {
-        const customer = JSON.parse(assignCustomer);
-        setAssigningTableId(assignTableId);
-        setSelectedCustomer(customer as any);
-        setCustomerName(customer.name);
-        setPaymentOption('payNow');
-        
-        if (customer.kind === 'reservation') {
-          const mins = (customer as any).durationHours * 60;
-          setDurationMinutes(mins);
-          setAmountPaid(((mins / 60) * effectiveHourly).toFixed(2));
-        } else {
-          setDurationMinutes(60);
-          setAmountPaid(((60 / 60) * effectiveHourly).toFixed(2));
-        }
-        
-        sessionStorage.removeItem('assignCustomer');
-        sessionStorage.removeItem('assignTableId');
-      }
-    }
-  }, [effectiveHourly]);
 
   const PayStatusBtn = ({ value, current, label, onChange, disabled }: { value: PaymentStatus; current: PaymentStatus; label: string; onChange: (v: PaymentStatus) => void; disabled?: boolean }) => (
     <button type="button" disabled={disabled} onClick={() => onChange(value)} className={`flex-1 py-2 rounded-xl border text-xs font-semibold transition-all ${disabled ? 'opacity-50 cursor-not-allowed bg-neutral-900/50 border-neutral-800 text-neutral-600' : current === value ? value === 'paid' ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400' : value === 'partial' ? 'bg-amber-600/15 border-amber-600 text-amber-400' : 'bg-rose-600/15 border-rose-600 text-rose-400' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
@@ -776,10 +857,15 @@ export function Tables() {
       {/* POS SIDEBAR */}
       {posTableId && posTable && (
         <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-10 animate-in slide-in-from-right-10 duration-300">
-          <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 flex-none">
+          <div className="p-4 border-b border-neutral-800 flex justify-between items-start bg-neutral-900/50 flex-none">
             <div>
               <h3 className="font-bold text-neutral-100 flex items-center gap-2"><ShoppingCart size={15} className="text-emerald-400"/> Table Billing & Extras</h3>
               <p className="text-xs text-neutral-500">{posTable.name} · {posTable.session?.customerName || 'No Session'}</p>
+              {posTable.session && (
+                <button onClick={() => { setMigratingTableId(posTableId); setPosTableId(null); setMigrateTargetId(''); }} className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800 hover:bg-blue-900/50 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors border border-neutral-700 hover:border-blue-800">
+                  <ArrowRightLeft size={13} /> Migrate Session
+                </button>
+              )}
             </div>
             <button onClick={() => setPosTableId(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16}/></button>
           </div>
@@ -1101,139 +1187,163 @@ export function Tables() {
                 </div>
               )}
 
-              <form onSubmit={handleAssign} className="p-6 space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
-                    <UserPlus size={11} />{selectedCustomer ? 'Selected Customer' : 'Customer Name'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={customerName}
-                      onChange={e => { setCustomerName(e.target.value); if (selectedCustomer) setSelectedCustomer(null); }}
-                      className={`w-full bg-neutral-900 border rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600 transition-colors ${
-                        selectedCustomer ? 'border-emerald-600/40 bg-emerald-950/20' : 'border-neutral-800'
-                      }`}
-                      placeholder="Enter customer name"
-                      required
-                      autoFocus={allCustomers.length === 0}
-                    />
-                    {selectedCustomer && (
-                      <button type="button" onClick={() => { setSelectedCustomer(null); setCustomerName(''); }}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600 hover:text-neutral-300">
-                        <X size={13} />
-                      </button>
+              {(() => {
+                const availData = getAvailableDurations(assigningTableId);
+                return availData.isBlocked ? (
+                  <div className="p-10 flex flex-col items-center justify-center text-center space-y-4">
+                    <div className="w-16 h-16 rounded-full bg-rose-500/10 flex items-center justify-center border border-rose-500/20">
+                      <AlertTriangle size={32} className="text-rose-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-rose-400 mb-1">Table Locked</h3>
+                      <p className="text-sm text-rose-300/80 leading-relaxed max-w-sm">{availData.conflictWarning}</p>
+                    </div>
+                    <p className="text-xs text-neutral-500">Please assign this customer to a different table.</p>
+                  </div>
+                ) : (
+                  <form onSubmit={handleAssign} className="p-6 space-y-4">
+                    {availData.conflictWarning && (
+                      <div className="bg-amber-950/30 border border-amber-900/50 p-3 rounded-lg flex items-start gap-2 mb-3">
+                        <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                        <p className="text-[10px] text-amber-400 font-semibold leading-relaxed">{availData.conflictWarning}</p>
+                      </div>
                     )}
-                  </div>
-                  {selectedCustomer && (
-                    <p className="text-[11px] text-emerald-500 flex items-center gap-1">
-                      <CheckCircle size={10} />
-                      {selectedCustomer.kind === 'queue' ? 'Assigned from walk-in queue' : `Assigned from today's reservation · ${(selectedCustomer as any).timeSlot}`}
-                    </p>
-                  )}
-                </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                        <UserPlus size={11} />{selectedCustomer ? 'Selected Customer' : 'Customer Name'}
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={customerName}
+                          onChange={e => { setCustomerName(e.target.value); if (selectedCustomer) setSelectedCustomer(null); }}
+                          className={`w-full bg-neutral-900 border rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600 transition-colors ${
+                            selectedCustomer ? 'border-emerald-600/40 bg-emerald-950/20' : 'border-neutral-800'
+                          }`}
+                          placeholder="Enter customer name"
+                          required
+                          autoFocus={allCustomers.length === 0}
+                        />
+                        {selectedCustomer && (
+                          <button type="button" onClick={() => { setSelectedCustomer(null); setCustomerName(''); }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600 hover:text-neutral-300">
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                      {selectedCustomer && (
+                        <p className="text-[11px] text-emerald-500 flex items-center gap-1">
+                          <CheckCircle size={10} />
+                          {selectedCustomer.kind === 'queue' ? 'Assigned from walk-in queue' : `Assigned from today's reservation · ${(selectedCustomer as any).timeSlot}`}
+                        </p>
+                      )}
+                    </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
-                    <Clock size={11} /> Duration
-                  </label>
-                  <select 
-                    value={durationMinutes === 'open' ? 'open' : durationMinutes}
-                    onChange={e => {
-                      const val = e.target.value;
-                      if (val === 'open') {
-                        setDurationMinutes('open');
-                        setAmountPaid('0');
-                        setPaymentOption('payLater');
-                      } else {
-                        const d = Number(val);
-                        setDurationMinutes(d);
-                        if (paymentOption === 'payNow') setAmountPaid(((d / 60) * effectiveHourly).toFixed(2));
-                      }
-                    }}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                  >
-                    {availableDurations.map(d => (
-                      <option key={d} value={d}>{d / 60} Hour{d / 60 > 1 ? 's' : ''}</option>
-                    ))}
-                    <option value="open" disabled={isOpenTimeDisabled}>
-                      Open Time {isOpenTimeDisabled ? '(Disabled near cut-off)' : ''}
-                    </option>
-                  </select>
-                </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                        <Clock size={11} /> Duration
+                      </label>
+                      <select 
+                        value={durationMinutes === 'open' ? 'open' : durationMinutes}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === 'open') {
+                            setDurationMinutes('open');
+                            setAmountPaid('0');
+                            setPaymentOption('payLater');
+                          } else {
+                            const d = Number(val);
+                            setDurationMinutes(d);
+                            if (paymentOption === 'payNow') setAmountPaid(((d / 60) * effectiveHourly).toFixed(2));
+                          }
+                        }}
+                        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      >
+                        {availData.opts.map(d => (
+                          <option key={d} value={d}>
+                            {d % 60 === 0 ? `${d / 60} Hour${d / 60 > 1 ? 's' : ''}` : `${d} Minutes (Pro-rated)`}
+                          </option>
+                        ))}
+                        <option value="open" disabled={isOpenTimeDisabled || availData.maxMins < 1440}>
+                          Open Time {(isOpenTimeDisabled || availData.maxMins < 1440) ? '(Blocked by reservations or cut-off)' : ''}
+                        </option>
+                      </select>
+                    </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment Option</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={durationMinutes === 'open'}
-                      onClick={() => setPaymentOption('payNow')}
-                      className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                        durationMinutes === 'open'
-                          ? 'opacity-50 cursor-not-allowed bg-neutral-900/50 border-neutral-800 text-neutral-600'
-                          : paymentOption === 'payNow'
-                          ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
-                          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                      }`}
-                    >
-                      <CreditCard size={11} className="inline mr-1.5" /> Pay Now
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentOption('payLater')}
-                      className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                        paymentOption === 'payLater'
-                          ? 'bg-amber-600/15 border-amber-600 text-amber-400'
-                          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                      }`}
-                    >
-                      <Clock size={11} className="inline mr-1.5" /> Pay Later
-                    </button>
-                  </div>
-                </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Payment Option</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={durationMinutes === 'open'}
+                          onClick={() => setPaymentOption('payNow')}
+                          className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                            durationMinutes === 'open'
+                              ? 'opacity-50 cursor-not-allowed bg-neutral-900/50 border-neutral-800 text-neutral-600'
+                              : paymentOption === 'payNow'
+                              ? 'bg-emerald-600/15 border-emerald-600 text-emerald-400'
+                              : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                          }`}
+                        >
+                          <CreditCard size={11} className="inline mr-1.5" /> Pay Now
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentOption('payLater')}
+                          className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                            paymentOption === 'payLater'
+                              ? 'bg-amber-600/15 border-amber-600 text-amber-400'
+                              : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                          }`}
+                        >
+                          <Clock size={11} className="inline mr-1.5" /> Pay Later
+                        </button>
+                      </div>
+                    </div>
 
-                {paymentOption === 'payNow' && durationMinutes !== 'open' && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Amount Paid (PHP)</label>
-                    <input
-                      type="number"
-                      max="999999"
-                      value={amountPaid}
-                      onChange={e => { if (e.target.value.length <= 7) setAmountPaid(e.target.value); }}
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                      placeholder={`₱${(((durationMinutes as number) / 60) * effectiveHourly).toFixed(2)}`}
-                      step="0.01"
-                    />
-                    <p className="text-[10px] text-neutral-600">Suggested: {formatPHP(((durationMinutes as number) / 60) * effectiveHourly)} for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
-                  </div>
-                )}
+                    {paymentOption === 'payNow' && durationMinutes !== 'open' && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Amount Paid (PHP)</label>
+                        <input
+                          type="number"
+                          max="999999"
+                          value={amountPaid}
+                          onChange={e => { if (e.target.value.length <= 7) setAmountPaid(e.target.value); }}
+                          className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                          placeholder={`₱${(((durationMinutes as number) / 60) * effectiveHourly).toFixed(2)}`}
+                          step="0.01"
+                        />
+                        <p className="text-[10px] text-neutral-600">Suggested: {formatPHP(((durationMinutes as number) / 60) * effectiveHourly)} for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
+                      </div>
+                    )}
 
-                {durationMinutes === 'open' && (
-                  <div className="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3">
-                    <p className="text-[10px] text-blue-400 font-semibold mb-1">Open Time Selected</p>
-                    <p className="text-[10px] text-blue-600/80">Customer will be billed automatically at the end of the session based on exact time played.</p>
-                  </div>
-                )}
+                    {durationMinutes === 'open' && (
+                      <div className="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3">
+                        <p className="text-[10px] text-blue-400 font-semibold mb-1">Open Time Selected</p>
+                        <p className="text-[10px] text-blue-600/80">Customer will be billed automatically at the end of the session based on exact time played.</p>
+                      </div>
+                    )}
 
-                {paymentOption === 'payLater' && durationMinutes !== 'open' && (
-                  <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-3">
-                    <p className="text-[10px] text-amber-600/80">Payment will be collected at the end of the session.</p>
-                  </div>
-                )}
+                    {paymentOption === 'payLater' && durationMinutes !== 'open' && (
+                      <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-3">
+                        <p className="text-[10px] text-amber-600/80">Payment will be collected at the end of the session.</p>
+                      </div>
+                    )}
 
-                <div className="flex gap-3 pt-1">
-                  <button type="button" onClick={() => setAssigningTableId(null)}
-                    className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
-                    Cancel
-                  </button>
-                  <button type="submit"
-                    disabled={paymentOption === 'payNow' && durationMinutes !== 'open' && (!amountPaid || parseFloat(amountPaid) <= 0)}
-                    className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2 font-semibold disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed">
-                    <Play size={14} /> Start Timer
-                  </button>
-                </div>
-              </form>
+                    <div className="flex gap-3 pt-1">
+                      <button type="button" onClick={() => setAssigningTableId(null)}
+                        className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
+                        Cancel
+                      </button>
+                      <button type="submit"
+                        disabled={paymentOption === 'payNow' && durationMinutes !== 'open' && (!amountPaid || parseFloat(amountPaid) <= 0)}
+                        className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2 font-semibold disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed">
+                        <Play size={14} /> Start Timer
+                      </button>
+                    </div>
+                  </form>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1532,9 +1642,13 @@ export function Tables() {
                         }}
                         className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
                       >
-                        {extLimits.opts.map(d => (
-                          <option key={d} value={d}>+{d / 60} Hour{d / 60 > 1 ? 's' : ''} (+{formatPHP((d / 60) * effectiveHourly)})</option>
-                        ))}
+                        {extLimits.opts.length === 0 ? (
+                          <option value={60} disabled>No extra time available</option>
+                        ) : (
+                          extLimits.opts.map(d => (
+                            <option key={d} value={d}>+{d / 60} Hour{d / 60 > 1 ? 's' : ''} (+{formatPHP((d / 60) * effectiveHourly)})</option>
+                          ))
+                        )}
                         <option value="open" disabled={extLimits.blocksOpenTime || isOpenTimeDisabled || extendingTable.session?.isOpenTime}>
                           {extendingTable.session?.isOpenTime ? 'Already on Open Time' : 'Switch to Open Time'} {(extLimits.blocksOpenTime || isOpenTimeDisabled) && !extendingTable.session?.isOpenTime ? '(Blocked by reservations or cut-off)' : ''}
                         </option>
@@ -1587,15 +1701,25 @@ export function Tables() {
 
               {(() => {
                 let canExtend = true;
+                const extLimits = getExtensionLimits(extendingTableId);
+
+                // 🟢 NEW: Hard stop. Prevent extension if mathematically blocked by an upcoming reservation
+                if (extendMinutes === 'open') {
+                  if (extLimits.blocksOpenTime || isOpenTimeDisabled || extendingTable.session?.isOpenTime) canExtend = false;
+                } else {
+                  if (extLimits.maxMins === 0 || (extendMinutes as number) > extLimits.maxMins) canExtend = false;
+                }
                 
-                if (extendPayStatus === 'paid') {
-                  if (extendPayMethod === 'cash') canExtend = !!extendCashTendered && parseFloat(extendCashTendered) >= extendCharge;
-                  if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length === 13;
-                } else if (extendPayStatus === 'partial') {
-                  const partial = parseFloat(extendPartialAmount) || 0;
-                  if (partial <= 0) canExtend = false;
-                  else if (extendPayMethod === 'cash') canExtend = true;
-                  else if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length >= 13;
+                if (canExtend) {
+                  if (extendPayStatus === 'paid') {
+                    if (extendPayMethod === 'cash') canExtend = !!extendCashTendered && parseFloat(extendCashTendered) >= extendCharge;
+                    if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length === 13;
+                  } else if (extendPayStatus === 'partial') {
+                    const partial = parseFloat(extendPartialAmount) || 0;
+                    if (partial <= 0) canExpent = false;
+                    else if (extendPayMethod === 'cash') canExtend = true;
+                    else if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length >= 13;
+                  }
                 }
 
                 return (
@@ -1618,6 +1742,62 @@ export function Tables() {
                 );
               })()}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 MIGRATE SESSION MODAL */}
+      {migratingTableId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl flex flex-col overflow-hidden">
+            <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center bg-blue-950/20">
+              <div>
+                <h2 className="text-base font-bold text-blue-400 flex items-center gap-2"><ArrowRightLeft size={16} /> Migrate Session</h2>
+                <p className="text-xs text-neutral-500">Move {tables.find((t: any) => t.id === migratingTableId)?.name}'s active session to a new table.</p>
+              </div>
+              <button onClick={() => setMigratingTableId(null)} className="p-2 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Select Destination Table</label>
+                <select 
+                  value={migrateTargetId} 
+                  onChange={e => setMigrateTargetId(e.target.value)}
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                >
+                  <option value="" disabled>Select an available table...</option>
+                  {tables.filter((t: any) => t.status === 'available' && t.isActive).map((t: any) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                {tables.filter((t: any) => t.status === 'available' && t.isActive).length === 0 && (
+                   <p className="text-[10px] text-rose-400 font-bold mt-1">No available tables found.</p>
+                )}
+              </div>
+              
+              <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4">
+                 <p className="text-[10px] text-neutral-400 leading-relaxed">
+                   <strong>Note:</strong> All timers, F&B orders, and payment history will be seamlessly transferred to the new table. The current table will be instantly freed for incoming reservations.
+                 </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setMigratingTableId(null)} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
+                <button 
+                  type="button" 
+                  disabled={!migrateTargetId}
+                  onClick={() => {
+                    migrateSession(migratingTableId, migrateTargetId);
+                    setMigratingTableId(null);
+                    setPosTableId(null); // Close the POS sidebar to refresh it
+                    flash("Session successfully migrated.", "success");
+                  }} 
+                  className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2"
+                >
+                  Confirm Transfer
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

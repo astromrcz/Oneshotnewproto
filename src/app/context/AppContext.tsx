@@ -140,7 +140,7 @@ type AppContextType = {
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
-  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
   addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
@@ -171,6 +171,8 @@ type AppContextType = {
   acknowledgeRefund: (id: string) => void;
   isLoggingOut: boolean;
   logoutStep: string;
+  lastSynced: Date | null;
+  forceFullSync: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -208,6 +210,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutStep, setLogoutStep] = useState('');
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
   // 🎨 Global Theme State
   const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('oneshot_theme') as 'dark' | 'light') || 'dark');
@@ -294,128 +297,115 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshLiveMonitor = async () => {
     try {
-      const [tablesRes, queueRes] = await Promise.all([ fetch('http://localhost:3001/api/tables').catch(() => null), fetch('http://localhost:3001/api/queue').catch(() => null) ]);
+      const [tablesRes, queueRes, resRes] = await Promise.all([ 
+        fetch('http://localhost:3001/api/tables').catch(() => null), 
+        fetch('http://localhost:3001/api/queue').catch(() => null),
+        fetch('http://localhost:3001/api/reservations').catch(() => null)
+      ]);
       if (tablesRes && tablesRes.ok) { const newTables = await tablesRes.json(); setTables(prev => JSON.stringify(prev) !== JSON.stringify(newTables) ? newTables : prev); }
       if (queueRes && queueRes.ok) { const newQueue = await queueRes.json(); setQueue(prev => JSON.stringify(prev) !== JSON.stringify(newQueue) ? newQueue : prev); }
+      if (resRes && resRes.ok) { const newRes = await resRes.json(); setReservations(prev => JSON.stringify(prev) !== JSON.stringify(newRes) ? newRes : prev); }
     } catch (error) {}
   };
 
-  useEffect(() => {
-    const fetchLocalDatabase = async () => {
-      try {
-        const [tablesRes, resRes, invRes, queueRes, ratesRes, feedRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, activitiesRes, staffRes, lostRes, watchlistRes, sessionHistoryRes] = await Promise.all([
-          fetch('http://localhost:3001/api/tables').catch(() => null), 
-          fetch('http://localhost:3001/api/reservations').catch(() => null), 
-          fetch('http://localhost:3001/api/inventory').catch(() => null), 
-          fetch('http://localhost:3001/api/queue').catch(() => null), 
-          fetch('http://localhost:3001/api/settings/rates').catch(() => null), 
-          fetch('http://localhost:3001/api/feedback').catch(() => null), 
-          fetch('http://localhost:3001/api/announcements').catch(() => null), 
-          fetch('http://localhost:3001/api/cms').catch(() => null), 
-          fetch('http://localhost:3001/api/closed-dates').catch(() => null), 
-          fetch('http://localhost:3001/api/promo-codes').catch(() => null), 
-          fetch('http://localhost:3001/api/events').catch(() => null), 
-          fetch('http://localhost:3001/api/activities').catch(() => null), 
-          fetch('http://localhost:3001/api/staff').catch(() => null), 
-          fetch('http://localhost:3001/api/lost-and-found').catch(() => null),
-          fetch('http://localhost:3001/api/watchlist').catch(() => null),
-          fetch('http://localhost:3001/api/session-history').catch(() => null),
-        ]);
-        let isLocalActive = false;
-        
-        if (tablesRes && tablesRes.ok) {
-          setTables(await tablesRes.json());
-          isLocalActive = true;
-        }
-        if (resRes && resRes.ok) setReservations(await resRes.json());
-        if (invRes && invRes.ok) setInventory(await invRes.json());
-        if (queueRes && queueRes.ok) setQueue(await queueRes.json());
-        if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
-        if (annRes && annRes.ok) setAnnouncements(await annRes.json());
-        if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
-        if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
-        if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
-        if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
-        if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
-        if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
-        if (watchlistRes && watchlistRes.ok) setWatchlist(await watchlistRes.json());
-        if (sessionHistoryRes && sessionHistoryRes.ok) setSessionHistory(await sessionHistoryRes.json());
-        if (eventsRes && eventsRes.ok) {
-          const dbEvents = await eventsRes.json();
-          setEvents(prev => {
-            const existingIds = new Set(prev.map(e => e.id));
-            const newEvents = dbEvents.filter((e: any) => !existingIds.has(e.id));
-            return [...prev, ...newEvents];
-          });
-        }
-        if (ratesRes && ratesRes.ok) {
-          const dbSettings = await ratesRes.json();
-          setRates(prev => ({ ...prev, ...dbSettings }));
-          setReservationTerms(prev => ({ ...prev, ...dbSettings }));
-        }
+  const forceFullSync = async () => {
+    try {
+      // 1. FETCH FLOOR DATA (Local Machine is Source of Truth for physical floor operations)
+      const [tablesRes, invRes, queueRes, staffRes, historyRes, activitiesRes, feedRes, lostRes, watchRes] = await Promise.all([
+        fetch('http://localhost:3001/api/tables').catch(() => null),
+        fetch('http://localhost:3001/api/inventory').catch(() => null),
+        fetch('http://localhost:3001/api/queue').catch(() => null),
+        fetch('http://localhost:3001/api/staff').catch(() => null),
+        fetch('http://localhost:3001/api/session-history').catch(() => null),
+        fetch('http://localhost:3001/api/activities').catch(() => null),
+        fetch('http://localhost:3001/api/feedback').catch(() => null),
+        fetch('http://localhost:3001/api/lost-and-found').catch(() => null),
+        fetch('http://localhost:3001/api/watchlist').catch(() => null)
+      ]);
 
-       // Fallback: If local fetch fails (e.g. on Vercel), fetch critical public data directly from Supabase
-        if (!isLocalActive) {
-          const [ { data: tablesData }, { data: resData }, { data: annData }, { data: cmsData }, { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData } ] = await Promise.all([
-            supabase.from('tables').select('*'), 
-            supabase.from('reservations').select('*'), 
-            supabase.from('announcements').select('*'), 
-            supabase.from('cms').select('*'), 
-            supabase.from('system_settings').select('*'),
-            supabase.from('closed_dates').select('*'), 
-            supabase.from('promo_codes').select('*'), 
-            supabase.from('events').select('*')
-          ]);
-          
-          if (tablesData) setTables(tablesData as Table[]);
-          if (resData) setReservations(resData as Reservation[]);
-          if (annData) setAnnouncements(annData as Announcement[]);
-          
-          if (promoData) {
-            setPromoCodes((promoData as any[]).map(r => ({
-              id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description,
-              isActive: !!r.is_active, isLimitedUses: !!r.is_limited_uses, maxUsage: r.max_usage,
-              usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at
-            })) as PromoCode[]);
-          }
-          if (closedDatesData) {
-            setClosedDates((closedDatesData as any[]).map(r => ({
-              id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week,
-              reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time
-            })) as ClosedDate[]);
-          }
-          if (eventsData) {
-             setEvents((eventsData as any[]).map(e => ({
-                ...e, 
-                slotsFull: !!e.slotsFull, 
-                allowReservations: e.allowReservations !== false,
-                caterWalkIns: e.caterWalkIns !== false,
-                walkInTableCount: e.walkInTableCount ?? 10,
-                attachments: e.attachments ? [e.attachments] : []
-             })) as Event[]);
-          }
-          if (cmsData) {
-            const configObj = cmsData.reduce((acc: any, curr: any) => { acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue; return acc; }, {});
-            setSiteConfig(configObj);
-          }
-          if (settingsData) {
-            const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
-              let val = curr.setting_value || curr.settingValue;
-              if (val === 'true') val = true;
-              else if (val === 'false') val = false;
-              else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
-              acc[curr.key_name || curr.keyName] = val; 
-              return acc; 
-            }, {});
-            setRates(prev => ({ ...prev, ...settingsObj }));
-            setReservationTerms(prev => ({ ...prev, ...settingsObj }));
-          }
-        }
-      } catch (err) { }
+      if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
+      if (invRes && invRes.ok) setInventory(await invRes.json());
+      if (queueRes && queueRes.ok) setQueue(await queueRes.json());
+      if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
+      if (historyRes && historyRes.ok) setSessionHistory(await historyRes.json());
+      if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
+      if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
+      if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
+      if (watchRes && watchRes.ok) setWatchlist(await watchRes.json());
+
+      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations & Configs)
+      const [
+        { data: resData, error: resErr }, { data: annData }, { data: cmsData }, 
+        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }
+      ] = await Promise.all([
+        supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), 
+        supabase.from('cms').select('*'), supabase.from('system_settings').select('*'), 
+        supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), 
+        supabase.from('events').select('*')
+      ]);
+
+      if (resErr) throw new Error("Supabase is unreachable.");
+
+      if (annData) setAnnouncements(annData as Announcement[]);
+      if (promoData) setPromoCodes((promoData as any[]).map(r => ({ id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description, isActive: !!r.is_active, isLimitedUses: !!r.is_limited_uses, maxUsage: r.max_usage, usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at })) as PromoCode[]);
+      if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
+      if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
       
-      setTimeout(() => setIsInitializing(false), 800);
-    };
-    fetchLocalDatabase();
+      if (cmsData) { 
+        const configObj = cmsData.reduce((acc: any, curr: any) => { acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue; return acc; }, {}); 
+        setSiteConfig(configObj); 
+      }
+      
+      if (settingsData) { 
+        const settingsObj = settingsData.reduce((acc: any, curr: any) => { let val = curr.setting_value || curr.settingValue; if (val === 'true') val = true; else if (val === 'false') val = false; else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val); acc[curr.key_name || curr.keyName] = val; return acc; }, {}); 
+        setRates(prev => ({ ...prev, ...settingsObj })); 
+        setReservationTerms(prev => ({ ...prev, ...settingsObj })); 
+      }
+
+      if (resData) {
+        const mappedRes = (resData as any[]).map(r => ({
+          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url
+        }));
+        setReservations(mappedRes);
+
+        // 3. CACHE RESERVATIONS TO LOCAL SQLITE FOR OFFLINE FALLBACK
+        fetch('http://localhost:3001/api/cache-reservations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reservations: mappedRes })
+        }).catch(() => console.log('Local Cache Update Failed'));
+      }
+      
+      setLastSynced(new Date());
+
+    } catch (err) {
+      console.warn("⚠️ Supabase Offline. Loading Reservations from Local Cache...", err);
+      // 4. STRICT OFFLINE FALLBACK FOR RESERVATIONS & CLOUD SETTINGS
+      const [resRes, ratesRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes] = await Promise.all([
+        fetch('http://localhost:3001/api/reservations').catch(() => null), fetch('http://localhost:3001/api/settings/rates').catch(() => null), fetch('http://localhost:3001/api/announcements').catch(() => null), fetch('http://localhost:3001/api/cms').catch(() => null), fetch('http://localhost:3001/api/closed-dates').catch(() => null), fetch('http://localhost:3001/api/promo-codes').catch(() => null), fetch('http://localhost:3001/api/events').catch(() => null)
+      ]);
+
+      if (resRes && resRes.ok) setReservations(await resRes.json());
+      if (annRes && annRes.ok) setAnnouncements(await annRes.json());
+      if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
+      if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
+      if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
+      if (eventsRes && eventsRes.ok) {
+        const dbEvents = await eventsRes.json();
+        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...dbEvents.filter((e: any) => !existingIds.has(e.id))]; });
+      }
+      if (ratesRes && ratesRes.ok) {
+        const dbSettings = await ratesRes.json();
+        setRates(prev => ({ ...prev, ...dbSettings }));
+        setReservationTerms(prev => ({ ...prev, ...dbSettings }));
+      }
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  useEffect(() => {
+    forceFullSync();
   }, []);
 
   useEffect(() => {
@@ -478,49 +468,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) { throw e; }
   };
 
-  const performLoginSync = async () => {
-    try {
-      const [resLocal, resCloud] = await Promise.all([
-        fetch('http://localhost:3001/api/reservations').then(r => r.ok ? r.json() : []).catch(() => []),
-        supabase.from('reservations').select('*').then(res => res.data || []).catch(() => [])
-      ]);
-
-      if (resCloud.length > 0) {
-        setReservations(prev => {
-          const merged = [...prev];
-          resCloud.forEach((cloudRes: any) => {
-            const exists = merged.find(r => r.id === cloudRes.id);
-            if (!exists) {
-              const newRes: Reservation = {
-                id: cloudRes.id, customerName: cloudRes.customerName || cloudRes.customer_name,
-                contactNumber: cloudRes.contactNumber || cloudRes.contact_number,
-                email: cloudRes.email, date: new Date(cloudRes.date), timeSlot: cloudRes.timeSlot || cloudRes.time_slot,
-                durationHours: cloudRes.durationHours || cloudRes.duration_hours, partySize: cloudRes.partySize || cloudRes.party_size,
-                tableId: cloudRes.tableId || cloudRes.table_id, status: cloudRes.status,
-                totalAmount: cloudRes.totalAmount || cloudRes.total_amount,
-                downPaymentAmount: cloudRes.downPaymentAmount || cloudRes.down_payment_amount,
-                downPaymentPaid: !!cloudRes.downPaymentPaid || !!cloudRes.down_payment_paid,
-                balancePaid: !!cloudRes.balancePaid || !!cloudRes.balance_paid,
-                createdAt: new Date(cloudRes.createdAt || cloudRes.created_at),
-                cancellationReason: cloudRes.cancellationReason || cloudRes.cancellation_reason,
-                refundStatus: cloudRes.refundStatus || cloudRes.refund_status,
-                refundMethod: cloudRes.refundMethod || cloudRes.refund_method,
-                refundNotes: cloudRes.refundNotes || cloudRes.refund_notes
-              };
-              merged.push(newRes);
-              syncToDB('/api/reservations', 'POST', newRes, 'Synced online booking').catch(() => {});
-            }
-          });
-          return merged;
-        });
-      }
-
-      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
-    } catch (e) {
-      console.log('Login sync fallback: local state preserved.');
-    }
-  };
-
   const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
     const actor = staffProfile?.fullName || 'System / Customer';
     const actorId = staffProfile?.id || 'system';
@@ -535,7 +482,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setActivities(prev => [newActivity, ...prev]);
     syncToDB('/api/activities', 'POST', newActivity, "Activity logged").then(runCloudBackup).catch(()=>{});
   };
-
 
   const assignTable = (tableId: string, session: Session) => {
     const updatedSession = { ...session, orders: [] };
@@ -563,6 +509,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return t;
     }));
     addActivity('session_extended', `Extended session at ${tables.find(t=>t.id===tableId)?.name} by ${mins} minutes`);
+  };
+
+  const migrateSession = (fromTableId: string, toTableId: string) => {
+    setTables(prev => {
+      const fromTable = prev.find(t => t.id === fromTableId);
+      const toTable = prev.find(t => t.id === toTableId);
+      if (!fromTable || !toTable || !fromTable.session) return prev;
+
+      const sessionToMove = { ...fromTable.session };
+
+      const newTables = prev.map(t => {
+        if (t.id === fromTableId) return { ...t, status: 'available' as TableStatus, session: undefined };
+        if (t.id === toTableId) return { ...t, status: 'occupied' as TableStatus, session: sessionToMove };
+        return t;
+      });
+
+      syncToDB(`/api/tables/${fromTableId}`, 'PUT', { status: 'available', session: null }, `Freed for migration`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ status: 'available', sessionData: null, isActive: 1 }).eq('id', fromTableId).then();
+
+      syncToDB(`/api/tables/${toTableId}`, 'PUT', { status: 'occupied', session: sessionToMove }, `Occupied from migration`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(sessionToMove), isActive: 1 }).eq('id', toTableId).then();
+
+      addActivity('admin_action', `Migrated session (${sessionToMove.customerName}) from ${fromTable.name} to ${toTable.name}`);
+      return newTables;
+    });
   };
 
   const reserveTable = (tableId: string) => {
@@ -669,7 +640,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     supabase.from('queue').update({ status: 'called' }).eq('id', id).then();
   };
 
-
   const addLostItem = (i: Omit<LostItem, 'id'>) => {
     const newItem = { ...i, id: `lf${Date.now()}` };
     setLostItems(prev => [newItem, ...prev]);
@@ -733,8 +703,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked'); 
       updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      
-      await performLoginSync();
+      await forceFullSync();
       return true; 
     }
     return false; 
@@ -750,8 +719,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
       updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      
-      await performLoginSync();
+      await forceFullSync();
       return true;
     }
     return false; 
@@ -910,14 +878,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`).then(runCloudBackup).catch(() => {});
     
     const supabasePayload = {
-      ...newRes,
-      date: newRes.date.toISOString(), 
-      createdAt: newRes.createdAt.toISOString(),
-      downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-      balancePaid: newRes.balancePaid ? 1 : 0,
-      receiptImg: null 
+      id: newRes.id,
+      customer_name: newRes.customerName,
+      contact_number: newRes.contactNumber,
+      email: newRes.email || null,
+      date: newRes.date.toISOString(),
+      time_slot: newRes.timeSlot,
+      duration_hours: newRes.durationHours,
+      party_size: newRes.partySize,
+      table_id: newRes.tableId || null,
+      status: newRes.status,
+      total_amount: newRes.totalAmount,
+      down_payment_amount: newRes.downPaymentAmount,
+      down_payment_paid: newRes.downPaymentPaid ? 1 : 0,
+      balance_paid: newRes.balancePaid ? 1 : 0,
+      payment_ref: newRes.paymentRef || null,
+      receipt_img_url: newRes.receiptImg || null,
+      promo_code: newRes.promoCode || null,
+      discount_amount: newRes.discountAmount || null,
+      created_at: newRes.createdAt.toISOString()
     };
-    supabase.from('reservations').insert([supabasePayload]).then();
+    
+    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+      if (error) console.error("Supabase insert error:", error);
+    });
+    
     return id;
   };
   
@@ -931,21 +916,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ status: 'cancelled', cancellationReason: reason }).eq('id', id).then();
+    supabase.from('reservations').update({ status: 'cancelled', cancellation_reason: reason }).eq('id', id).then();
     addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
   };
 
   const updateDownPayment = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ downPaymentPaid: paid ? 1 : 0 }).eq('id', id).then();
+    supabase.from('reservations').update({ down_payment_paid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
   };
 
   const updateBalance = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ balancePaid: paid ? 1 : 0 }).eq('id', id).then();
+    supabase.from('reservations').update({ balance_paid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
   };
 
@@ -953,20 +938,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } as Reservation : r));
     const payload = { refundStatus, refundMethod: method, refundNotes: notes };
     syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update(payload).eq('id', id).then();
+    supabase.from('reservations').update({ refund_status: refundStatus, refund_method: method, refund_notes: notes }).eq('id', id).then();
     addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
   };
 
   const acknowledgeRefund = (id: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { refundStatus: 'acknowledged' }, `Refund acknowledged`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then();
+    supabase.from('reservations').update({ refund_status: 'acknowledged' }).eq('id', id).then();
   };
 
   const updateReservation = (id: string, u: Partial<Reservation>) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update(u).eq('id', id).then();
+    
+    // 🟢 Fixed: Reverted to camelCase to match the actual Supabase schema
+    const dbUpdates: any = {};
+    if (u.date) dbUpdates.date = new Date(u.date).toISOString();
+    if (u.timeSlot) dbUpdates.timeSlot = u.timeSlot;
+    if (u.durationHours) dbUpdates.durationHours = u.durationHours;
+    if (u.partySize) dbUpdates.partySize = u.partySize;
+    if (u.status) dbUpdates.status = u.status;
+    if (u.tableId !== undefined) dbUpdates.tableId = u.tableId; 
+    
+    supabase.from('reservations').update(dbUpdates).eq('id', id).then(({error}) => {
+      if (error) console.error("Supabase Reschedule Error:", error);
+    });
     addActivity('reservation_updated', `Reservation ${id} details were updated`);
   };
 
@@ -1163,7 +1160,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
-      assignTable, freeTable, reserveTable, extendSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
+      assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,
       addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,
@@ -1176,7 +1173,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       hashPassword,
       theme, primaryColor, updateTheme, updatePrimaryColor,
       updateRefundStatus, acknowledgeRefund,
-      isLoggingOut, logoutStep
+      isLoggingOut, logoutStep,
+      lastSynced, forceFullSync
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (
@@ -1274,7 +1272,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {children}
       
     </AppContext.Provider>
-    
   );
 }
 

@@ -218,11 +218,18 @@ export function HomePage() {
   const [now, setNow] = useState(new Date());
   const [activeSection, setActiveSection] = useState<Section>('home');
 
-  const [setCurrentUser] = useState<{ name: string; email: string; } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState<'options' | 'login' | 'register'>('options');
+  const [authMode, setAuthMode] = useState<'options' | 'login' | 'register' | 'forgot'>('options');
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showRegPromoModal, setShowRegPromoModal] = useState(false);
+
+  // 🟢 NET TRUST SCORE ALGORITHM
+  const completedBookings = userReservations.filter((r: any) => r.status === 'completed').length;
+  const missedBookings = userReservations.filter((r: any) => r.status === 'walkout' || r.status === 'cancelled').length;
+  const netTrustScore = completedBookings - missedBookings;
+  const isTrustedCustomer = netTrustScore >= 3;
+  // 🟢 THRESHOLD CAP: Waiver is revoked if they book more than 3 hours
+  const isDownPaymentWaived = isTrustedCustomer && resForm.duration <= 3;
 
   useEffect(() => {
     if (activeSection === 'reservations' && !currentUser) {
@@ -234,8 +241,60 @@ export function HomePage() {
     }
   }, [activeSection, currentUser]);
 
-  const [loginForm, setLoginForm] = useState({ email: '', password: '', showPw: false, error: '' });
-  const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '' });
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', showPw: false, error: '', loading: false });
+  const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+  const [forgotForm, setForgotForm] = useState({ email: '', error: '', success: false, loading: false });
+
+  // 🟢 SUPABASE AUTH HANDLERS
+  const handleOAuthLogin = async (provider: 'google' | 'facebook' | 'apple') => {
+    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
+    if (error) alert(`${provider} login error: ` + error.message);
+  };
+
+  const handleLoginSubmit = async () => {
+    if (!loginForm.email || !loginForm.password) return setLoginForm(f => ({ ...f, error: 'Please fill all fields.' }));
+    setLoginForm(f => ({ ...f, loading: true, error: '' }));
+    const { error } = await supabase.auth.signInWithPassword({ email: loginForm.email, password: loginForm.password });
+    if (error) {
+      setLoginForm(f => ({ ...f, error: error.message, loading: false }));
+    } else {
+      setShowAuthModal(false);
+      setLoginForm({ email: '', password: '', showPw: false, error: '', loading: false });
+      window.location.reload(); 
+    }
+  };
+
+  const handleRegisterSubmit = async () => {
+    if (!registerForm.name || !registerForm.email || !registerForm.phone || !registerForm.password) return setRegisterForm(f => ({ ...f, error: 'Please fill all required fields.' }));
+    if (registerForm.password !== registerForm.confirm) return setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
+    
+    setRegisterForm(f => ({ ...f, loading: true, error: '' }));
+    const { error } = await supabase.auth.signUp({
+      email: registerForm.email,
+      password: registerForm.password,
+      options: { data: { full_name: registerForm.name, phone: registerForm.phone } }
+    });
+    
+    if (error) {
+      setRegisterForm(f => ({ ...f, error: error.message, loading: false }));
+    } else {
+      setShowAuthModal(false);
+      setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+      alert("Registration successful! You are now logged in.");
+      window.location.reload();
+    }
+  };
+
+  const handleForgotSubmit = async () => {
+    if (!forgotForm.email) return setForgotForm(f => ({ ...f, error: 'Please enter your email.' }));
+    setForgotForm(f => ({ ...f, loading: true, error: '' }));
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotForm.email, { redirectTo: `${window.location.origin}/reset-password` });
+    if (error) {
+      setForgotForm(f => ({ ...f, error: error.message, loading: false }));
+    } else {
+      setForgotForm(f => ({ ...f, success: true, loading: false }));
+    }
+  };
 
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0);
   const [resTab, setResTab] = useState<'new' | 'track'>('new');
@@ -400,33 +459,7 @@ export function HomePage() {
   const downPaymentPercentVal = rates && Number(rates.downPaymentPercent) >= 0 ? Number(rates.downPaymentPercent) : DOWN_PAYMENT_RATE * 100;
   const downPayment = Math.ceil(totalAmount * (downPaymentPercentVal ? downPaymentPercentVal / 100 : DOWN_PAYMENT_RATE));
 
-  const handleLoginSubmit = () => {
-    if (!loginForm.email || !loginForm.password) {
-      setLoginForm(f => ({ ...f, error: 'Please fill all fields.' }));
-      return;
-    }
-    const name = loginForm.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    // @ts-ignore
-    setCurrentUser({ name, email: loginForm.email });
-    setShowLoginModal(false);
-    setLoginForm({ email: '', password: '', showPw: false, error: '' });
-  };
-
-  const handleRegisterSubmit = () => {
-    if (!registerForm.name || !registerForm.email || !registerForm.phone || !registerForm.password) {
-      setRegisterForm(f => ({ ...f, error: 'Please fill all required fields.' }));
-      return;
-    }
-    if (registerForm.password !== registerForm.confirm) {
-      setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
-      return;
-    }
-    // @ts-ignore
-    setCurrentUser({ name: registerForm.name, email: registerForm.email });
-    setShowRegisterModal(false);
-    setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '' });
-  };
-
+  
   const handleApplyPromo = () => {
     if (!promoCodeInput.trim()) return;
     const promo = applyPromoCode(promoCodeInput.trim());
@@ -669,13 +702,14 @@ export function HomePage() {
         timeSlot: resForm.timeSlot,
         durationHours: resForm.duration,
         partySize: resForm.pax,
-        tableId: selectedTableId, // 🟢 Now correctly submitting the specific table
-        status: 'pending',
+        tableId: selectedTableId, 
+        // 🟢 WAIVER LOGIC APPLIED HERE
+        status: isDownPaymentWaived ? 'confirmed' : 'pending',
         totalAmount,
-        downPaymentAmount: downPayment,
-        downPaymentPaid: !!finalReceiptUrl,
+        downPaymentAmount: isDownPaymentWaived ? 0 : downPayment,
+        downPaymentPaid: isDownPaymentWaived ? true : !!finalReceiptUrl,
         balancePaid: false,
-        paymentRef: 'GCASH_UPLOAD',
+        paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : 'GCASH_UPLOAD',
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
         receiptImg: finalReceiptUrl || undefined,
@@ -1908,6 +1942,7 @@ export function HomePage() {
                       onChange={e => {
                         setLoginForm(f => ({ ...f, email: e.target.value, error: '' }));
                         setRegisterForm(f => ({ ...f, email: e.target.value, error: '' }));
+                        setForgotForm(f => ({ ...f, email: e.target.value, error: '' }));
                       }} 
                       className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3.5 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
                     />
@@ -1927,22 +1962,17 @@ export function HomePage() {
                   </div>
 
                   <div className="space-y-3">
-                    {/* 🟢 GOOGLE SIGN IN BUTTON */}
-                    <button className="w-full flex items-center justify-center gap-3 bg-white hover:bg-neutral-200 text-black py-2.5 rounded-xl text-sm font-bold transition-colors">
-                      <div className="w-5 h-5 bg-neutral-200 rounded-full flex items-center justify-center text-[10px] text-neutral-500 font-black">G</div>
-                      Google
+                    <button onClick={() => handleOAuthLogin('google')} className="w-full bg-white hover:bg-neutral-200 text-black font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-sm">
+                      <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                      Continue with Google
                     </button>
-
-                    {/* 🟢 FACEBOOK SIGN IN BUTTON */}
-                    <button className="w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#1865D0] text-white py-2.5 rounded-xl text-sm font-bold transition-colors">
-                      <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center text-[10px] font-black">f</div>
-                      Facebook
+                    <button onClick={() => handleOAuthLogin('facebook')} className="w-full bg-[#1877F2] hover:bg-[#166FE5] text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-sm">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.469h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.469h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                      Continue with Facebook
                     </button>
-
-                    {/* 🟢 APPLE SIGN IN BUTTON */}
-                    <button className="w-full flex items-center justify-center gap-3 bg-black hover:bg-neutral-900 border border-neutral-700 text-white py-2.5 rounded-xl text-sm font-bold transition-colors">
-                      <div className="w-5 h-5 bg-neutral-800 rounded-full flex items-center justify-center text-[10px] font-black text-white"></div>
-                      Apple
+                    <button onClick={() => handleOAuthLogin('apple')} className="w-full bg-black hover:bg-neutral-900 border border-neutral-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-sm">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><path d="M12 20.684c-1.631 0-3.136-.5-4.407-1.391-.19-.134-.336-.312-.416-.519l-2.029-5.263c-.156-.405-.246-.838-.246-1.284 0-1.898 1.155-3.52 2.845-4.238 1.196-.508 2.557-.591 3.824-.236.425.119.882.119 1.306 0 1.267-.355 2.628-.272 3.824.236 1.69.718 2.845 2.34 2.845 4.238 0 .446-.09.879-.246 1.284l-2.029 5.263c-.08.207-.226.385-.416.519-1.271.89-2.776 1.391-4.407 1.391zm.703-14.779c-1.312 0-2.435-.85-2.834-2.062-.128-.387-.197-.8-.197-1.218 0-1.312.85-2.435 2.062-2.834.387-.128.8-.197 1.218-.197 1.312 0 2.435.85 2.834 2.062.128.387.197.8.197 1.218 0 1.312-.85 2.435-2.062 2.834-.387.128-.8.197-1.218.197z"/></svg>
+                      Continue with Apple
                     </button>
                   </div>
 
@@ -1973,9 +2003,11 @@ export function HomePage() {
                       </div>
                     </div>
                   </div>
-                  <button onClick={() => { handleLoginSubmit(); if(loginForm.email && loginForm.password) setShowAuthModal(false); }} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">Sign In securely</button>
+                  <button onClick={handleLoginSubmit} disabled={loginForm.loading} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">
+                    {loginForm.loading ? 'Signing in...' : 'Sign In securely'}
+                  </button>
                   <p className="text-center text-xs text-neutral-500 mt-4">
-                    Forgot your password? <button className="text-emerald-400 hover:underline font-bold">Reset it</button>
+                    Forgot your password? <button onClick={() => setAuthMode('forgot')} className="text-emerald-400 hover:underline font-bold">Reset it</button>
                   </p>
                 </div>
               )}
@@ -1995,7 +2027,41 @@ export function HomePage() {
                     <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
                     <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
                   </div>
-                  <button onClick={() => { handleRegisterSubmit(); if(registerForm.name && registerForm.email && registerForm.phone && registerForm.password && registerForm.password === registerForm.confirm) setShowAuthModal(false); }} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">Register Account</button>
+                  <button onClick={handleRegisterSubmit} disabled={registerForm.loading} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">
+                    {registerForm.loading ? 'Creating Account...' : 'Register Account'}
+                  </button>
+                </div>
+              )}
+
+              {/* 🟢 NEW: Forgot Password Mode */}
+              {authMode === 'forgot' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 mb-2 border-b border-neutral-800/60 pb-4">
+                    <button onClick={() => setAuthMode('login')} className="text-neutral-500 hover:text-white transition-colors"><ChevronLeft size={20} /></button>
+                    <h3 className="text-lg font-bold text-white flex-1">Reset Password</h3>
+                    <button onClick={() => setShowAuthModal(false)} className="text-neutral-600 hover:text-white"><X size={18} /></button>
+                  </div>
+                  
+                  {forgotForm.success ? (
+                    <div className="bg-emerald-950/20 border border-emerald-900/40 p-5 rounded-xl text-center">
+                      <CheckCircle size={32} className="text-emerald-500 mx-auto mb-3" />
+                      <p className="text-emerald-400 font-bold mb-1">Recovery Link Sent!</p>
+                      <p className="text-xs text-neutral-400">Check your email ({forgotForm.email}) for the secure reset link.</p>
+                      <button onClick={() => setAuthMode('options')} className="mt-4 w-full py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-xs font-semibold transition-colors">Back to Sign In</button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-neutral-400 mb-2">Enter your email address and we'll send you a secure link to reset your password.</p>
+                      {forgotForm.error && <div className="bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-3 py-2 rounded-lg">{forgotForm.error}</div>}
+                      <div>
+                        <label className="block text-xs text-neutral-400 mb-1.5">Email Address</label>
+                        <input type="email" autoFocus value={forgotForm.email} onChange={e => setForgotForm(f => ({ ...f, email: e.target.value, error: '' }))} placeholder="juan@email.com" className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" />
+                      </div>
+                      <button onClick={handleForgotSubmit} disabled={forgotForm.loading || !forgotForm.email.includes('@')} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">
+                        {forgotForm.loading ? 'Sending...' : 'Send Recovery Link'}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -2044,46 +2110,66 @@ export function HomePage() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[95vh] overflow-y-auto hide-scrollbar">
               <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex items-center justify-between">
-                <div><h3 className="text-base font-bold text-white">Down Payment</h3></div>
+                <div><h3 className="text-base font-bold text-white">Payment & Confirmation</h3></div>
                 <button onClick={closeReservation} className="text-neutral-600 hover:text-white transition-colors"><X size={18} /></button>
               </div>
               <div className="p-6">
-               <div className="bg-amber-950/30 border border-amber-800/30 rounded-xl p-4 mb-5 text-center">
-                  <p className="text-xs text-amber-500 mb-1">Amount Due ({rates?.downPaymentPercent ?? 25}% Down Payment)</p>
-                  <p className="text-4xl font-black text-amber-400">₱{downPayment}.00</p>
-                  <p className="text-xs text-neutral-500 mt-1">Remaining balance <span className="text-neutral-300 font-semibold">₱{totalAmount - downPayment}.00</span> must be paid after your game</p>
-                </div>
                 
-                <div className="flex flex-col items-center gap-4">
-                  <QRDisplay pattern={QR_GCASH} color="#1d4ed8" />
-                  <div className="text-center">
-                    <p className="text-sm font-bold text-blue-400">GCash</p>
-                    <p className="text-xs text-neutral-300 font-semibold">ONE SHOT BAR & BILLIARDS</p>
-                    <p className="text-xs text-neutral-500">+63 917-123-4567</p>
-                  </div>
-                  
-                  <div className="w-full mt-2 text-left">
-                    <label className="block text-xs text-neutral-400 mb-1.5">Upload Receipt Screenshot <span className="text-rose-500">*</span></label>
-                    <div className="flex items-center gap-3">
-                      <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 hover:border-blue-500 rounded-lg px-3 py-3 text-center transition-colors flex flex-col items-center justify-center gap-1">
-                        <input type="file" accept="image/*" className="hidden" onChange={e => { 
-                          const file = e.target.files?.[0]; 
-                          if (file) {
-                            setReceiptImg(URL.createObjectURL(file)); 
-                            setReceiptFile(file);
-                          } 
-                        }} />
-                          <Upload size={14} className="text-neutral-500" />
-                        <span className="text-[10px] text-neutral-400">{receiptImg ? 'Change Image' : 'Tap to upload'}</span>
-                      </label>
-                      {receiptImg && (
-                        <div className="w-14 h-14 rounded-lg border border-neutral-700 overflow-hidden flex-shrink-0 bg-neutral-900">
-                          <img src={receiptImg} alt="Receipt" className="w-full h-full object-cover" />
-                        </div>
-                      )}
+                {/* 🟢 THE WAIVER UI OVERRIDE */}
+                {isDownPaymentWaived ? (
+                  <div className="bg-emerald-950/30 border border-emerald-500/50 rounded-xl p-6 mb-5 text-center shadow-lg shadow-emerald-900/20 animate-in fade-in zoom-in-95">
+                    <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Shield size={24} className="text-emerald-400" />
+                    </div>
+                    <h3 className="text-lg font-black text-emerald-400 mb-1">Trusted Customer Benefit</h3>
+                    <p className="text-xs text-emerald-300/80 font-medium mb-4 leading-relaxed">
+                      Because of your proven booking reliability (Trust Score: {netTrustScore}), your GCash down payment requirement is <strong className="text-white">completely waived</strong> for this session.
+                    </p>
+                    <div className="inline-flex items-center gap-2 bg-neutral-900/80 px-4 py-2 rounded-lg border border-neutral-800">
+                       <span className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Pay At Venue</span>
+                       <span className="text-sm font-black text-white">₱{totalAmount}.00</span>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="bg-amber-950/30 border border-amber-800/30 rounded-xl p-4 mb-5 text-center">
+                      <p className="text-xs text-amber-500 mb-1">Amount Due ({rates?.downPaymentPercent ?? 25}% Down Payment)</p>
+                      <p className="text-4xl font-black text-amber-400">₱{downPayment}.00</p>
+                      <p className="text-xs text-neutral-500 mt-1">Remaining balance <span className="text-neutral-300 font-semibold">₱{totalAmount - downPayment}.00</span> must be paid after your game</p>
+                    </div>
+                    
+                    <div className="flex flex-col items-center gap-4">
+                      <QRDisplay pattern={QR_GCASH} color="#1d4ed8" />
+                      <div className="text-center">
+                        <p className="text-sm font-bold text-blue-400">GCash</p>
+                        <p className="text-xs text-neutral-300 font-semibold">ONE SHOT BAR & BILLIARDS</p>
+                        <p className="text-xs text-neutral-500">+63 917-123-4567</p>
+                      </div>
+                      
+                      <div className="w-full mt-2 text-left">
+                        <label className="block text-xs text-neutral-400 mb-1.5">Upload Receipt Screenshot <span className="text-rose-500">*</span></label>
+                        <div className="flex items-center gap-3">
+                          <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 hover:border-blue-500 rounded-lg px-3 py-3 text-center transition-colors flex flex-col items-center justify-center gap-1">
+                            <input type="file" accept="image/*" className="hidden" onChange={e => { 
+                              const file = e.target.files?.[0]; 
+                              if (file) {
+                                setReceiptImg(URL.createObjectURL(file)); 
+                                setReceiptFile(file);
+                              } 
+                            }} />
+                              <Upload size={14} className="text-neutral-500" />
+                            <span className="text-[10px] text-neutral-400">{receiptImg ? 'Change Image' : 'Tap to upload'}</span>
+                          </label>
+                          {receiptImg && (
+                            <div className="w-14 h-14 rounded-lg border border-neutral-700 overflow-hidden flex-shrink-0 bg-neutral-900">
+                              <img src={receiptImg} alt="Receipt" className="w-full h-full object-cover" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mt-5 mb-5 max-h-44 overflow-y-auto">
                   <p className="text-xs font-bold text-white mb-3 flex items-center gap-1.5">
@@ -2094,7 +2180,7 @@ export function HomePage() {
                     <li>• Maximum booking duration (based on cut-off) is {maxAllowedDuration} hour(s).</li>
                     <li>• Online booking window: {fmt12(rates?.reservationStartTime || '12:00')} to {fmt12(((() => { const e = rates?.reservationEndTime || '02:00'; const [hh, mm] = e.split(':').map(Number); let em = hh*60 + (mm||0); const sm = (rates?.reservationStartTime||'12:00').split(':').map(Number); let smm = sm[0]*60 + (sm[1]||0); if (em <= smm) em += 24*60; return em - 60; })()))} (cutoff 1 hour before close)</li>
                     <li>• Store hours: {fmt12(rates?.reservationStartTime || '12:00')} — {fmt12(rates?.reservationEndTime || '02:00')}</li>
-                    <li>• A {rates?.downPaymentPercent ?? 25}% down payment is required to secure your slot.</li>
+                    {!isDownPaymentWaived && <li>• A {rates?.downPaymentPercent ?? 25}% down payment is required to secure your slot.</li>}
                     <li>• Remaining balance must be settled after your session.</li>
                     <li>• Online capacity limit: {rates?.onlineCapacityLimit ?? 70}% of tables (admin-configured)</li>
                     <li>• {reservationTerms.cancellationPolicy}</li>
@@ -2109,17 +2195,11 @@ export function HomePage() {
 
                 <button 
                   onClick={handlePaymentConfirm} 
-                  disabled={confirmingPayment || !receiptImg || !agreedToTerms /* || !captchaToken */} 
+                  disabled={confirmingPayment || (!isDownPaymentWaived && !receiptImg) || !agreedToTerms} 
                   className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30"
                 >
-                  {confirmingPayment ? 'Processing...' : <><CheckCircle size={15} /> I've Sent the Payment</>}
+                  {confirmingPayment ? 'Processing...' : (isDownPaymentWaived ? <><CheckCircle size={15} /> Confirm Reservation</> : <><CheckCircle size={15} /> I've Sent the Payment</>)}
                 </button>
-                
-                {/* 🟢 RECAPTCHA LEGAL DISCLAIMER COMMENTED OUT
-                <p className="text-[10px] text-neutral-500 text-center leading-relaxed mt-4 px-2">
-                  This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Privacy Policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Terms of Service</a> apply.
-                </p>
-                */}
               </div>
             </motion.div>
           </motion.div>

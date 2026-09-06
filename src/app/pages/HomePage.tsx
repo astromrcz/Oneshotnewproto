@@ -145,7 +145,32 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onCl
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, currentUser, acknowledgeRefund, validateBookingPreflight } = useAppContext() as any;
+  const { siteConfig, isSystemOffline, announcements, tables, queue, reservations, events, closedDates, reservationTerms, rates, addReservation, cancelReservation, updateReservation, addFeedback, applyPromoCode, adminLogin, staffLogin, acknowledgeRefund, validateBookingPreflight } = useAppContext() as any;
+
+  // 🟢 SUPABASE REAL-TIME AUTH LISTENER
+  const [activeUser, setActiveUser] = useState<{ name: string; email: string; } | null>(null);
+
+  useEffect(() => {
+    // 1. Fetch current session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setActiveUser({ name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User', email: session.user.email || '' });
+      }
+    });
+
+    // 2. Listen for live login/logout events (Removes the need for page reloads)
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setActiveUser({ name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User', email: session.user.email || '' });
+      } else {
+        setActiveUser(null);
+      }
+    });
+
+    return () => authListener.subscription.unsubscribe();
+  }, []);
+
+  const currentUser = activeUser; // Alias to safely pass the live user data to the rest of the file
 
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
@@ -228,6 +253,10 @@ export function HomePage() {
   const missedBookings = userReservations.filter((r: any) => r.status === 'walkout' || r.status === 'cancelled').length;
   const netTrustScore = completedBookings - missedBookings;
   const isTrustedCustomer = netTrustScore >= 3;
+
+  const totalHoursPlayed = userReservations
+    .filter((r: any) => r.status === 'completed')
+    .reduce((sum: number, r: any) => sum + (r.durationHours || 0), 0);
   // 🟢 THRESHOLD CAP: Waiver is revoked if they book more than 3 hours
   const isDownPaymentWaived = isTrustedCustomer && resForm.duration <= 3;
 
@@ -260,13 +289,15 @@ export function HomePage() {
     } else {
       setShowAuthModal(false);
       setLoginForm({ email: '', password: '', showPw: false, error: '', loading: false });
-      window.location.reload(); 
     }
   };
 
   const handleRegisterSubmit = async () => {
     if (!registerForm.name || !registerForm.email || !registerForm.phone || !registerForm.password) return setRegisterForm(f => ({ ...f, error: 'Please fill all required fields.' }));
     if (registerForm.password !== registerForm.confirm) return setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
+    
+    // 🟢 PASSWORD VALIDATOR: 8 Characters Minimum ONLY
+    if (registerForm.password.length < 8) return setRegisterForm(f => ({ ...f, error: 'Password must be at least 8 characters long.' }));
     
     setRegisterForm(f => ({ ...f, loading: true, error: '' }));
     const { error } = await supabase.auth.signUp({
@@ -281,7 +312,6 @@ export function HomePage() {
       setShowAuthModal(false);
       setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
       alert("Registration successful! You are now logged in.");
-      window.location.reload();
     }
   };
 
@@ -918,7 +948,7 @@ export function HomePage() {
                 <div className="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[9px] font-black text-white flex-shrink-0">{currentUser.name[0]}</div>
                 <span className="text-xs text-emerald-300 font-medium hidden sm:block truncate">{currentUser.name}</span>
               </button>
-              <button onClick={() => { setCurrentUser(null); setTrackedReservations(null); }} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-2 py-1.5 transition-colors">Logout</button>
+              <button onClick={async () => { await supabase.auth.signOut(); setTrackedReservations(null); }} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-2 py-1.5 transition-colors">Logout</button>
             </div>
           ) : (
             <button onClick={() => { setAuthMode('options'); setShowAuthModal(true); }} className="flex items-center gap-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 px-5 py-2 rounded-full transition-all font-bold shadow-lg shadow-emerald-900/30">
@@ -1921,6 +1951,118 @@ export function HomePage() {
       </main>
 
       {/* ════ MODALS ════ */}
+      <AnimatePresence>
+        {showProfileModal && currentUser && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowProfileModal(false)}>
+            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} onClick={e => e.stopPropagation()} className="bg-neutral-950 border border-neutral-800 rounded-3xl w-full max-w-sm shadow-2xl relative overflow-hidden">
+              
+              {/* 🟢 DECORATIVE BACKGROUND GLOW */}
+              <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-emerald-900/20 to-transparent pointer-events-none" />
+              
+              <div className="p-7 relative z-10">
+                <div className="flex justify-between items-start mb-8">
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center text-2xl font-black text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-4 ring-neutral-950">
+                        {currentUser.name[0]}
+                      </div>
+                      {/* Floating Badge for Trusted Users */}
+                      {isTrustedCustomer && (
+                        <div className="absolute -bottom-1 -right-1 bg-neutral-950 rounded-full p-1 border border-emerald-900/50">
+                          <Shield size={12} className="text-emerald-400 fill-emerald-400/20" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-xl font-black text-white leading-tight truncate">{currentUser.name}</h3>
+                      <p className="text-xs text-emerald-400/70 font-medium truncate mt-0.5">{currentUser.email}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowProfileModal(false)} className="text-neutral-500 hover:text-white transition-colors bg-neutral-900/50 p-1.5 rounded-full hover:bg-neutral-800 border border-neutral-800"><X size={16} /></button>
+                </div>
+
+                <div className="space-y-4">
+                  
+                  {/* 🟢 TRUST STATUS GAMIFICATION CARD */}
+                  {isTrustedCustomer ? (
+                    <div className="bg-emerald-950/30 border border-emerald-500/50 rounded-2xl p-5 flex items-start gap-4 shadow-lg shadow-emerald-900/10 relative overflow-hidden">
+                      <div className="absolute -right-4 -top-4 w-20 h-20 bg-emerald-500/10 rounded-full blur-2xl" />
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                        <Shield size={20} className="text-emerald-400" />
+                      </div>
+                      <div className="relative z-10">
+                        <h4 className="text-sm font-black text-emerald-400 mb-1">Trusted Customer</h4>
+                        <p className="text-[10px] text-emerald-200/70 leading-relaxed">
+                          Zero-downpayment bookings unlocked! Your stellar track record (Score: {netTrustScore}) keeps this perk active.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-5 relative overflow-hidden">
+                      <div className="flex items-start gap-3 relative z-10">
+                        <div className="w-8 h-8 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center shrink-0">
+                          <Lock size={14} className="text-neutral-400" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-sm font-bold text-neutral-200 flex items-center justify-between">
+                            Standard Tier
+                            <span className="text-[10px] text-emerald-500 font-black">{Math.max(0, netTrustScore)} / 3</span>
+                          </h4>
+                          <p className="text-[10px] text-neutral-500 leading-relaxed mt-1">
+                            Complete {Math.max(0, 3 - netTrustScore)} more bookings without missing to unlock zero-downpayment Trusted Status.
+                          </p>
+                          {/* Animated Progress Bar */}
+                          <div className="w-full bg-neutral-950 rounded-full h-1.5 mt-3 overflow-hidden border border-neutral-800/50">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(Math.max(0, netTrustScore) / 3) * 100}%` }}
+                              transition={{ duration: 1, ease: "easeOut" }}
+                              className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full rounded-full" 
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 🟢 SLEEK METRICS DASHBOARD */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-neutral-900/50 border border-neutral-800/80 p-3 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group hover:bg-neutral-900 transition-colors">
+                      <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/5 rounded-full blur-xl transition-all group-hover:bg-emerald-500/10" />
+                      <CheckCircle size={14} className="text-emerald-500/40 mb-1" />
+                      <p className="text-2xl font-black text-white">{completedBookings}</p>
+                      <p className="text-[8px] text-neutral-500 uppercase tracking-widest font-bold mt-1">Completed</p>
+                    </div>
+                    <div className="bg-neutral-900/50 border border-neutral-800/80 p-3 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group hover:bg-neutral-900 transition-colors">
+                      <div className="absolute top-0 right-0 w-16 h-16 bg-sky-500/5 rounded-full blur-xl transition-all group-hover:bg-sky-500/10" />
+                      <Clock size={14} className="text-sky-500/40 mb-1" />
+                      <p className="text-2xl font-black text-sky-400">{totalHoursPlayed}</p>
+                      <p className="text-[8px] text-neutral-500 uppercase tracking-widest font-bold mt-1">Hours Played</p>
+                    </div>
+                    <div className="bg-neutral-900/50 border border-neutral-800/80 p-3 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group hover:bg-neutral-900 transition-colors">
+                      <div className="absolute top-0 right-0 w-16 h-16 bg-rose-500/5 rounded-full blur-xl transition-all group-hover:bg-rose-500/10" />
+                      <XCircle size={14} className="text-rose-500/40 mb-1" />
+                      <p className="text-2xl font-black text-rose-400">{missedBookings}</p>
+                      <p className="text-[8px] text-neutral-500 uppercase tracking-widest font-bold mt-1">Missed</p>
+                    </div>
+                  </div>
+                
+                {/* 🟢 POLISHED ACTIONS */}
+                <div className="mt-6 pt-6 border-t border-neutral-800/60 flex flex-col gap-3">
+                  <button onClick={() => { setShowProfileModal(false); setActiveSection('reservations'); setResTab('track'); }} className="w-full flex items-center justify-center gap-2 bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold py-3.5 rounded-xl transition-colors text-sm shadow-sm">
+                    <BookOpen size={16} className="text-emerald-500" /> View My Bookings
+                  </button>
+                  <button onClick={async () => { await supabase.auth.signOut(); setShowProfileModal(false); }} className="w-full flex items-center justify-center gap-2 bg-transparent hover:bg-rose-950/30 text-rose-400/80 hover:text-rose-400 font-semibold py-3 rounded-xl transition-colors text-xs">
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showAuthModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAuthModal(false)}>

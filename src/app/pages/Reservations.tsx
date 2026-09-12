@@ -3,16 +3,17 @@ import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reser
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
-  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert, RefreshCw, Table2
+  CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert, RefreshCw, Table2,
+  FileText, QrCode
 } from 'lucide-react';
-import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek, addMinutes } from 'date-fns';
+import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek, addMinutes, differenceInHours, differenceInDays } from 'date-fns';
 import { useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 
 const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
-const statusConfig: Record<ReservationStatus, { label: string; color: string; dot: string }> = {
+const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
   pending: { label: 'Pending', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-400' },
   confirmed: { label: 'Confirmed', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', dot: 'bg-emerald-400' },
   'checked-in': { label: 'Checked In', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', dot: 'bg-blue-400' },
@@ -132,7 +133,7 @@ export function Reservations() {
     updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, 
     rates, updateRefundStatus, theme, reservationTerms,
     staffUsers, hashPassword, addActivity, sessionHistory, 
-    lastSynced, forceFullSync
+    lastSynced, forceFullSync, addWatchlistItem
   } = useAppContext() as any;
   const navigate = useNavigate();
   
@@ -177,7 +178,7 @@ export function Reservations() {
     setIsRefreshing(false);
   };
 
-  // 🟢 INITIAL MOUNT SYNC: Auto-fetch Supabase when opening reservations
+  // Auto-fetch Supabase when opening reservations
   useEffect(() => {
     forceFullSync();
   }, []);
@@ -196,19 +197,21 @@ export function Reservations() {
   // Refund & Image View
   const [refundNotes, setRefundNotes] = useState('');
   const [viewImage, setViewImage] = useState<string | null>(null);
+  const [viewingEReceipt, setViewingEReceipt] = useState<any | null>(null);
 
   // Settle Balance Modal State
   const [settleModal, setSettleModal] = useState<{ id: string; customerName: string; balanceDue: number } | null>(null);
   const [tenderedAmount, setTenderedAmount] = useState('');
 
-  // Reschedule Modal State
+  // 🟢 Enhanced Reschedule Modal State
   const [rescheduleModal, setRescheduleModal] = useState<{
     id: string; customerName: string; originalDate: Date;
     newDate: Date | null; newTimeSlot: string; newDuration: number; newTableId: string | null;
+    staffConfirmed: boolean;
   } | null>(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
 
-  // 🟢 Form state (Two-Panel Layout)
+  // Form state
   const [form, setForm] = useState({
     customerName: '', contactNumber: '', email: '',
     timeSlot: '', durationHours: 2, partySize: 2, paymentRef: '',
@@ -348,7 +351,6 @@ export function Reservations() {
     return isWeekend ? wEndMax : wDayMax;
   })();
 
-  // 🟢 Strict Table Validation Logic for Staff Overrides
   const validateTimeSlot = (time: string, duration: number) => {
     if (!time || !selectedDate) return 'invalid';
     if (!selectedTableId) return 'no_table';
@@ -369,7 +371,6 @@ export function Reservations() {
       if (slotMins <= nowMins) return 'past'; 
     }
 
-    // Strict Check 1: Existing Reservations on this Specific Table
     let tableOverlapCount = 0;
     const sameTableRes = reservations.filter((r: any) => 
       r.tableId === selectedTableId && 
@@ -388,7 +389,6 @@ export function Reservations() {
 
     if (tableOverlapCount > 0) return 'table_conflict';
 
-    // Strict Check 2: Live Active Walk-In on this Specific Table
     if (isToday(requestedStart)) {
       const targetTable = tables.find((t: any) => t.id === selectedTableId);
       if (targetTable?.status === 'occupied' && targetTable.session?.startTime && targetTable.session?.durationMinutes) {
@@ -511,7 +511,7 @@ export function Reservations() {
       const payload = {
         customerName: form.customerName.trim(), contactNumber: form.contactNumber, email: form.email,
         date: dateObj, timeSlot: form.timeSlot, durationHours: form.durationHours, partySize: form.partySize,
-        tableId: selectedTableId, // 🟢 EXPLICITLY ASSIGNED TO SELECTED TABLE
+        tableId: selectedTableId,
         status: form.paymentMethod === 'cash' ? 'confirmed' : 'pending',
         totalAmount, downPaymentAmount: downPayment, 
         downPaymentPaid: form.paymentMethod === 'cash' ? true : !!finalReceiptUrl || !!form.paymentRef.trim(),
@@ -520,10 +520,8 @@ export function Reservations() {
         receiptImg: finalReceiptUrl || undefined
       };
 
-      // 1. Save to local SQLite (which updates UI instantly)
       const generatedId = addReservation(payload);
 
-      // 2. SILENT PUSH DIRECTLY TO SUPABASE
       supabase.from('reservations').upsert([{
         id: generatedId,
         customer_name: payload.customerName,
@@ -765,12 +763,13 @@ export function Reservations() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value as any)}
-              className="appearance-none h-10 w-36 bg-neutral-900 border border-neutral-800 rounded-lg pl-3 pr-8 text-sm font-semibold text-neutral-300 outline-none focus:border-emerald-500 transition-colors cursor-pointer capitalize"
+              className="appearance-none h-10 w-44 bg-neutral-900 border border-neutral-800 rounded-lg pl-3 pr-8 text-sm font-semibold text-neutral-300 outline-none focus:border-emerald-500 transition-colors cursor-pointer capitalize"
             >
               <option value="all">All Statuses</option>
               <option value="pending">Pending</option>
               <option value="confirmed">Confirmed</option>
               <option value="checked-in">Checked In</option>
+              <option value="pending-reschedule">Pending Reschedule</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
@@ -817,7 +816,7 @@ export function Reservations() {
                     </td>
                   </tr>
                 ) : filtered.map((r: any) => {
-                  const cfg = statusConfig[r.status as ReservationStatus];
+                  const cfg = statusConfig[r.status] || { label: r.status, color: 'bg-neutral-800 text-neutral-400', dot: 'bg-neutral-500' };
                   return (
                     <tr key={r.id} onClick={() => setSelectedId(r.id)} className="hover:bg-neutral-900/60 transition-colors cursor-pointer relative">
                       <td className="px-4 py-3">
@@ -852,7 +851,7 @@ export function Reservations() {
                           </button>
                           <AnimatePresence>
                             {openActionRowId === r.id && (
-                              <motion.div initial={{ opacity: 0, y: 5, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 5, scale: 0.95 }} className="absolute right-4 top-10 mt-1 w-40 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
+                              <motion.div initial={{ opacity: 0, y: 5, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 5, scale: 0.95 }} className="absolute right-4 top-10 mt-1 w-44 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
                                 {r.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); updateReservationStatus(r.id, 'confirmed'); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
                                 {r.status === 'confirmed' && (
                                   <>
@@ -864,7 +863,7 @@ export function Reservations() {
                                   <button disabled={!hasCompletedSession(r)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(r.id, 'completed'); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
                                 )}
                                 {r.status === 'confirmed' && (
-                                  <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: r.id, customerName: r.customerName, originalDate: new Date(r.date), newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: r.id, customerName: r.customerName, originalDate: new Date(r.date), newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
                                 )}
                                 {(r.status !== 'cancelled' && r.status !== 'completed') && (
                                   <button onClick={(e) => { e.stopPropagation(); setCancelTarget(r.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{r.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
@@ -934,7 +933,7 @@ export function Reservations() {
                                   </div>
                                   <p className="text-xs text-neutral-500">{r.timeSlot} · {r.partySize} pax</p>
                                 </div>
-                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${statusConfig[r.status as ReservationStatus]?.color}`}>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${statusConfig[r.status]?.color}`}>
                                   {r.status}
                                 </span>
                               </div>
@@ -1042,6 +1041,18 @@ export function Reservations() {
                     )}
                   </div>
                 </div>
+
+                {/* 🟢 DIGITAL E-RECEIPT BUTTON */}
+                {selected.status === 'completed' && (
+                  <div className="border-t border-neutral-800 pt-5 mt-2">
+                    <button 
+                      onClick={() => setViewingEReceipt(selected)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-sm font-bold text-emerald-400 transition-colors shadow-lg shadow-black/20"
+                    >
+                      <FileText size={16} /> View Digital e-Receipt
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Status Actions Dropdown */}
@@ -1063,7 +1074,7 @@ export function Reservations() {
                         <button disabled={!hasCompletedSession(selected)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(selected.id, 'completed'); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
                       )}
                       {selected.status === 'confirmed' && (
-                        <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: selected.id, customerName: selected.customerName, originalDate: new Date(selected.date), newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
+                        <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: selected.id, customerName: selected.customerName, originalDate: new Date(selected.date), newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
                       )}
                       {(selected.status !== 'cancelled' && selected.status !== 'completed') && (
                         <button onClick={(e) => { e.stopPropagation(); setCancelTarget(selected.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{selected.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
@@ -1321,7 +1332,7 @@ export function Reservations() {
                 <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Amount Paid / Tendered (₱) *</label>
                 <input
                   type="number"
-                  min={settleModal.balanceDue}
+                  min="0"
                   max={settleModal.balanceDue + 100000}
                   step="any"
                   autoFocus
@@ -1335,13 +1346,20 @@ export function Reservations() {
               {(() => {
                 const tendered = parseFloat(tenderedAmount) || 0;
                 const change = Math.max(0, tendered - settleModal.balanceDue);
+                const debt = Math.max(0, settleModal.balanceDue - tendered);
                 const isOverLimit = tendered > settleModal.balanceDue + 100000;
                 return (
                   <>
-                    <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4 flex justify-between items-center">
-                      <span className="text-xs text-neutral-400 uppercase tracking-wider font-bold">Change Due</span>
-                      <span className="text-lg font-black text-emerald-400">{formatPHP(change)}</span>
+                    <div className={`border rounded-xl p-4 flex justify-between items-center transition-colors ${debt > 0 && tenderedAmount !== '' ? 'bg-amber-950/20 border-amber-900/40' : 'bg-neutral-900/60 border-neutral-800/80'}`}>
+                      <span className="text-xs text-neutral-400 uppercase tracking-wider font-bold">{debt > 0 && tenderedAmount !== '' ? 'Shortfall / Debt' : 'Change Due'}</span>
+                      <span className={`text-lg font-black ${debt > 0 && tenderedAmount !== '' ? 'text-amber-400' : 'text-emerald-400'}`}>{formatPHP(debt > 0 && tenderedAmount !== '' ? debt : change)}</span>
                     </div>
+                    {debt > 0 && tenderedAmount !== '' && (
+                       <div className="bg-rose-950/20 border border-rose-900/30 rounded-xl p-3 flex items-start gap-2">
+                         <AlertTriangle size={14} className="text-rose-500 flex-shrink-0 mt-0.5" />
+                         <p className="text-[10px] text-rose-300 leading-relaxed font-semibold">Partial payment detected. Customer will automatically be added to the Watchlist for debt tracking.</p>
+                       </div>
+                    )}
                     {isOverLimit && <p className="text-[10px] text-rose-400 text-center font-bold">⚠️ Error: Amount is excessively high.</p>}
                   </>
                 );
@@ -1352,14 +1370,31 @@ export function Reservations() {
                 <button
                   type="button"
                   disabled={
-                    (parseFloat(tenderedAmount) || 0) < settleModal.balanceDue || 
+                    tenderedAmount === '' ||
+                    (parseFloat(tenderedAmount) || 0) < 0 || 
                     (parseFloat(tenderedAmount) || 0) > settleModal.balanceDue + 100000
                   }
                   onClick={() => {
+                    const tendered = parseFloat(tenderedAmount) || 0;
+                    const debt = Math.max(0, settleModal.balanceDue - tendered);
+
+                    if (debt > 0 && addWatchlistItem) {
+                      addWatchlistItem({
+                        name: settleModal.customerName,
+                        reason: 'debt',
+                        description: `Unpaid balance of ${formatPHP(debt)} from Reservation #${settleModal.id.toUpperCase()}.`,
+                        status: 'active',
+                        dateAdded: new Date()
+                      });
+                      if (addActivity) {
+                        addActivity('admin_action', `Automatically added ${settleModal.customerName} to Watchlist for unpaid debt of ${formatPHP(debt)} (Res #${settleModal.id.toUpperCase()}).`);
+                      }
+                    }
+
                     updateBalance(settleModal.id, true);
                     setSettleModal(null);
                     setTenderedAmount('');
-                    flash("Balance settled successfully.", "success");
+                    flash(debt > 0 ? "Partial payment logged. Customer added to watchlist." : "Balance settled successfully.", debt > 0 ? "error" : "success");
                   }}
                   className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30"
                 >
@@ -1417,11 +1452,21 @@ export function Reservations() {
 
       {/* Reschedule Modal */}
       {rescheduleModal && (() => {
-        // 🟢 DYAMIC RESCHEDULE VALIDATOR
+        // 🟢 DYNAMIC RESCHEDULE VALIDATORS (Industry Standards)
+        const originalStart = new Date(rescheduleModal.originalDate);
+        const [oH, oM] = rescheduleModal.newTimeSlot.split(':').map(Number);
+        originalStart.setHours(oH, oM, 0, 0);
+        
+        const hoursUntilOriginal = differenceInHours(originalStart, new Date());
+        const isWithin24Hours = hoursUntilOriginal >= 0 && hoursUntilOriginal < 24;
+        
+        const requestedStart = new Date(rescheduleModal.newDate || new Date());
+        const daysInFuture = differenceInDays(requestedStart, new Date());
+        const isExceeding30Days = daysInFuture > 30;
+
         const rescheduleValidation = (() => {
           if (!rescheduleModal.newDate || !rescheduleModal.newTimeSlot || !rescheduleModal.newTableId) return 'invalid';
           
-          const requestedStart = new Date(rescheduleModal.newDate);
           const [h, m] = rescheduleModal.newTimeSlot.split(':').map(Number);
           requestedStart.setHours(h, m, 0, 0);
           const requestedEnd = addMinutes(requestedStart, rescheduleModal.newDuration * 60);
@@ -1442,17 +1487,14 @@ export function Reservations() {
             if (!e.date) return false;
             const eventDates = e.date.split(',').map((d: string) => d.trim());
             if (!eventDates.includes(format(requestedStart, 'yyyy-MM-dd'))) return false;
-            
             if (e.allowReservations === false || e.allowReservations === 0) return true;
-            
             const eventTableIds = typeof e.eventTableIds === 'string' ? JSON.parse(e.eventTableIds || '[]') : (e.eventTableIds || []);
             if (eventTableIds.includes(rescheduleModal.newTableId)) return true;
-            
             return false;
           });
           if (blockingEvent) return 'event_conflict';
 
-          // 3. Existing Reservation Check (Excluding the current reservation being moved)
+          // 3. Existing Reservation Check
           const overlap = reservations.some((r: any) => {
             if (r.id === rescheduleModal.id || r.tableId !== rescheduleModal.newTableId || r.status === 'cancelled' || r.status === 'completed') return false;
             if (!isSameDay(new Date(r.date), requestedStart)) return false;
@@ -1470,16 +1512,30 @@ export function Reservations() {
         return (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
             <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-              <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50 shrink-0">
+              <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-violet-950/30 shrink-0">
                 <div>
-                  <h3 className="text-base font-bold text-amber-400">Reschedule Booking</h3>
-                  <p className="text-xs text-neutral-500">{rescheduleModal.customerName} (#{rescheduleModal.id.toUpperCase()})</p>
+                  <h3 className="text-base font-bold text-violet-400">Reschedule Booking</h3>
+                  <p className="text-xs text-neutral-400">Operational Change Request</p>
                 </div>
                 <button onClick={() => setRescheduleModal(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
               </div>
               
               <div className="p-6 overflow-y-auto space-y-5 hide-scrollbar">
                 
+                {/* 🟢 24-HOUR & 30-DAY VALIDATOR WARNINGS */}
+                {isWithin24Hours && (
+                  <div className="bg-rose-950/20 border border-rose-900/50 p-4 rounded-xl space-y-2">
+                    <p className="text-xs font-bold text-rose-400 flex items-center gap-1.5"><AlertTriangle size={14}/> 24-Hour Policy Warning</p>
+                    <p className="text-[10px] text-rose-300/80 leading-relaxed">This reservation is less than 24 hours away. Rescheduling is restricted by default. If this is a verified management override, check the confirmation box below.</p>
+                  </div>
+                )}
+                {isExceeding30Days && (
+                  <div className="bg-amber-950/20 border border-amber-900/50 p-3 rounded-xl">
+                    <p className="text-xs font-bold text-amber-500 flex items-center gap-1.5"><Calendar size={14}/> Booking Range Exceeded</p>
+                    <p className="text-[10px] text-amber-400/80 mt-1">Requested date is more than 30 days in the future. Please select an earlier date.</p>
+                  </div>
+                )}
+
                 <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800/80">
                   <label className="block text-xs text-emerald-500 font-bold uppercase tracking-wider mb-3">1. Select New Date</label>
                   <input type="date" value={rescheduleModal.newDate ? format(rescheduleModal.newDate, 'yyyy-MM-dd') : ''} min={format(new Date(), 'yyyy-MM-dd')} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newDate: new Date(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
@@ -1518,50 +1574,56 @@ export function Reservations() {
                   </div>
                 </div>
 
+                {/* 🟢 STAFF PROTOCOL CHECKBOX */}
+                <div className="bg-blue-950/20 border border-blue-900/40 p-4 rounded-xl">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={rescheduleModal.staffConfirmed} 
+                      onChange={e => setRescheduleModal(prev => prev ? ({...prev, staffConfirmed: e.target.checked}) : null)}
+                      className="mt-1 flex-shrink-0"
+                    />
+                    <span className="text-xs text-blue-200/90 leading-relaxed font-semibold">
+                      I confirm that I have contacted the customer via their registered phone number and they have agreed to this schedule change, per our operational terms.
+                    </span>
+                  </label>
+                </div>
+
               </div>
 
               <div className="p-6 border-t border-neutral-800 bg-neutral-900/30 shrink-0 flex gap-3">
                  <button type="button" disabled={isRescheduling} onClick={() => setRescheduleModal(null)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
                  <button 
                     type="button" 
-                    disabled={rescheduleValidation !== 'valid' || isRescheduling}
+                    disabled={rescheduleValidation !== 'valid' || isRescheduling || isExceeding30Days || !rescheduleModal.staffConfirmed}
                     onClick={async () => {
                       setIsRescheduling(true);
                       
                       try {
-                        const processReschedule = new Promise<void>((resolve) => {
-                          setTimeout(() => { 
-                            const rDate = new Date(rescheduleModal.newDate!);
-                            const [h,m] = rescheduleModal.newTimeSlot.split(':').map(Number);
-                            rDate.setHours(h, m, 0, 0);
-                            
-                            updateReservation(rescheduleModal.id, {
-                               date: rDate,
-                               timeSlot: rescheduleModal.newTimeSlot,
-                               durationHours: rescheduleModal.newDuration,
-                               tableId: rescheduleModal.newTableId!
-                            });
-                            resolve();
-                          }, 500); 
+                        const rDate = new Date(rescheduleModal.newDate!);
+                        const [h,m] = rescheduleModal.newTimeSlot.split(':').map(Number);
+                        rDate.setHours(h, m, 0, 0);
+                        
+                        // Execute Manual Reschedule via Staff Override
+                        updateReservation(rescheduleModal.id, {
+                           date: rDate,
+                           timeSlot: rescheduleModal.newTimeSlot,
+                           durationHours: rescheduleModal.newDuration,
+                           tableId: rescheduleModal.newTableId!
                         });
-
-                        const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 10000));
-                        const isTimeout = await Promise.race([ processReschedule.then(() => false), timeout ]);
-
-                        if (isTimeout) {
-                          flash("Session timed out (10s limit exceeded). Please check your connection and try again.", "error");
-                        } else {
-                          flash("Reservation successfully rescheduled.", "success");
-                          setRescheduleModal(null);
-                          setSelectedId(null);
-                        }
+                        
+                        addActivity('admin_action', `Staff manually rescheduled booking for ${rescheduleModal.customerName} (Res #${rescheduleModal.id}) after confirming via phone.`);
+                        
+                        flash("Reservation successfully rescheduled.", "success");
+                        setRescheduleModal(null);
+                        setSelectedId(null);
                       } catch (error) {
                         flash("An error occurred while rescheduling.", "error");
                       } finally {
                         setIsRescheduling(false);
                       }
                     }} 
-                    className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-amber-900/30 flex items-center justify-center gap-2"
+                    className="flex-1 px-4 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-violet-900/30 flex items-center justify-center gap-2"
                   >
                     {isRescheduling ? <><RefreshCw size={15} className="animate-spin" /> Processing...</> : 'Confirm Reschedule'}
                   </button>
@@ -1609,6 +1671,72 @@ export function Reservations() {
           <div className="relative w-full max-w-4xl flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
             <button onClick={() => setViewImage(null)} className="absolute -top-12 right-0 p-2 text-neutral-400 hover:text-rose-400 transition-colors bg-neutral-900 rounded-full" title="Close Image"><X size={24} /></button>
             <img src={viewImage} alt="GCash Receipt" className="max-w-full max-h-[85vh] object-contain rounded-xl border border-neutral-800 shadow-2xl" />
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 FULLY RESPONSIVE DIGITAL E-RECEIPT (RESERVATIONS VIEW) */}
+      {viewingEReceipt && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 sm:p-8"
+          onClick={() => setViewingEReceipt(null)}
+        >
+          <div 
+            className="w-full max-w-sm relative animate-in zoom-in-95 duration-200 max-h-full overflow-y-auto hide-scrollbar rounded-2xl" 
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Close Button */}
+            <button 
+              onClick={() => setViewingEReceipt(null)} 
+              className="absolute top-2 right-2 z-10 p-2 text-neutral-400 hover:text-white transition-colors bg-neutral-900/80 rounded-full" 
+              title="Close Receipt"
+            >
+              <X size={18} />
+            </button>
+
+            {/* The Ticket Graphic */}
+            <div className="bg-neutral-100 text-neutral-900 rounded-b-xl shadow-2xl relative overflow-hidden" style={{ filter: 'drop-shadow(0 10px 15px rgba(16,185,129,0.2))' }}>
+              <div className="h-4 w-full flex space-x-1 absolute top-0 left-0 bg-black">
+                {Array.from({ length: 30 }).map((_, i) => (
+                  <div key={i} className="w-3 h-3 bg-neutral-100 rounded-full -mt-1.5" />
+                ))}
+              </div>
+              
+              <div className="px-6 pt-10 pb-8 flex flex-col items-center font-mono">
+                <h2 className="text-3xl font-black tracking-tighter mb-1">ONE SHOT</h2>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-6">Bar & Billiards</p>
+                
+                <div className="w-full space-y-2 text-xs font-semibold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
+                  <div className="flex justify-between"><span>Booking ID:</span><span className="font-bold text-[10px]">{viewingEReceipt.id.toUpperCase()}</span></div>
+                  <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingEReceipt.date), 'MM/dd/yyyy')}</span></div>
+                  <div className="flex justify-between"><span>Time:</span><span>{formatTimeOnly(viewingEReceipt.timeSlot)}</span></div>
+                  <div className="flex justify-between"><span>Table:</span><span>{viewingEReceipt.tableId ? tables.find((t: any) => t.id === viewingEReceipt.tableId)?.name || 'Walk-In' : 'N/A'}</span></div>
+                  <div className="flex justify-between"><span>Customer:</span><span>{viewingEReceipt.customerName}</span></div>
+                </div>
+
+                <div className="w-full space-y-2 text-xs font-bold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
+                  <div className="flex justify-between"><span>Table Booked ({viewingEReceipt.durationHours}h)</span><span>{formatPHP(viewingEReceipt.totalAmount)}</span></div>
+                </div>
+
+                <div className="w-full space-y-1.5 text-sm">
+                  <div className="flex justify-between font-black text-base"><span>TOTAL DUE</span><span>{formatPHP(viewingEReceipt.totalAmount)}</span></div>
+                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Down Payment</span><span>-{formatPHP(viewingEReceipt.downPaymentAmount)}</span></div>
+                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Balance Paid</span><span>-{formatPHP(Math.max(0, viewingEReceipt.totalAmount - viewingEReceipt.downPaymentAmount))}</span></div>
+                </div>
+
+                <div className="w-full mt-4 pt-4 border-t-[3px] border-neutral-800 flex justify-between font-black text-xl">
+                  <span>STATUS</span>
+                  <span className="text-emerald-600">SETTLED</span>
+                </div>
+
+                <div className="mt-8 flex flex-col items-center">
+                   <div className="p-2 border-2 border-neutral-900 rounded-lg mb-2 opacity-80">
+                     <QrCode size={64} strokeWidth={1.5} />
+                   </div>
+                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-full">Completed Booking</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

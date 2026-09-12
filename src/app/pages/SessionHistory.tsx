@@ -1,52 +1,53 @@
 import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { History, Search, Calendar, Clock, DollarSign, ShoppingCart, CheckCircle, X, ChevronRight, Filter } from 'lucide-react';
+import { History, Search, Calendar, Clock, DollarSign, ShoppingCart, CheckCircle, X, ChevronRight, Filter, QrCode } from 'lucide-react';
 import { format, isToday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 
-const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+// 🟢 BULLETPROOF FORMATTER: Safely handles null/undefined amounts to prevent crashes
+const formatPHP = (amount: any) => `₱${(Number(amount) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 export function SessionHistory() {
-  const { sessionHistory, reservations, tables } = useAppContext();
+  const { sessionHistory, reservations, tables } = useAppContext() as any;
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'table_session' | 'reservation'>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
 
-  // Unify and format data
+  // Unify and format data safely
   const unifiedHistory = useMemo(() => {
-    const tableSessions = sessionHistory.map(sh => ({
+    const tableSessions = (sessionHistory || []).map((sh: any) => ({
       id: sh.id,
-      sortDate: new Date(sh.endTime),
+      sortDate: new Date(sh.endTime || new Date()),
       source: 'table_session',
-      customerName: sh.customerName,
-      tableName: sh.tableName,
-      startTime: new Date(sh.startTime),
-      endTime: new Date(sh.endTime),
-      durationLabel: `${sh.durationMinutes} mins`,
-      totalAmount: sh.totalAmount,
-      amountPaid: sh.amountPaid,
+      customerName: sh.customerName || 'Walk-in Guest',
+      tableName: sh.tableName || 'N/A',
+      startTime: sh.startTime ? new Date(sh.startTime) : new Date(),
+      endTime: sh.endTime ? new Date(sh.endTime) : new Date(),
+      durationLabel: `${sh.durationMinutes || 0} mins`,
+      totalAmount: Number(sh.totalAmount) || 0,
+      amountPaid: Number(sh.amountPaid) || 0,
       orders: sh.orders || [],
-      isFullyPaid: sh.amountPaid >= sh.totalAmount
+      isFullyPaid: (Number(sh.amountPaid) || 0) >= (Number(sh.totalAmount) || 0)
     }));
 
-    const completedReservations = reservations
-      .filter(r => r.status === 'completed')
-      .map(r => {
-        const paid = r.downPaymentAmount + (r.balancePaid ? (r.totalAmount - r.downPaymentAmount) : 0);
+    const completedReservations = (reservations || [])
+      .filter((r: any) => r.status === 'completed')
+      .map((r: any) => {
+        const paid = (Number(r.downPaymentAmount) || 0) + (r.balancePaid ? ((Number(r.totalAmount) || 0) - (Number(r.downPaymentAmount) || 0)) : 0);
         return {
           id: r.id,
-          sortDate: new Date(r.createdAt), // or date of event
+          sortDate: new Date(r.createdAt || new Date()),
           source: 'reservation',
-          customerName: r.customerName,
-          tableName: tables.find(t => t.id === r.tableId)?.name || r.tableId || 'N/A',
-          startTime: new Date(r.date),
-          endTime: null, // Reservations don't have explicit end time unless logged via table session
-          durationLabel: `${r.durationHours} hrs`,
-          totalAmount: r.totalAmount,
+          customerName: r.customerName || 'Guest',
+          tableName: tables?.find((t: any) => t.id === r.tableId)?.name || r.tableId || 'N/A',
+          startTime: r.date ? new Date(r.date) : new Date(),
+          endTime: null, 
+          durationLabel: `${r.durationHours || 0} hrs`,
+          totalAmount: Number(r.totalAmount) || 0,
           amountPaid: paid,
           orders: [],
-          isFullyPaid: r.balancePaid
+          isFullyPaid: !!r.balancePaid
         };
       });
 
@@ -74,7 +75,7 @@ export function SessionHistory() {
   });
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto pb-20">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-neutral-950 p-6 rounded-2xl border border-neutral-800">
         <div>
           <h2 className="text-2xl font-black text-white flex items-center gap-2"><History className="text-emerald-500" /> Session History</h2>
@@ -83,16 +84,16 @@ export function SessionHistory() {
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
           <div className="relative flex-1 min-w-[200px] lg:w-48">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-            <input type="text" placeholder="Search customer or ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:border-emerald-500 outline-none" />
+            <input type="text" placeholder="Search customer or ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:border-emerald-500 outline-none transition-colors" />
           </div>
           
-          <select value={filterType} onChange={e => setFilterType(e.target.value as any)} className="bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none">
+          <select value={filterType} onChange={e => setFilterType(e.target.value as any)} className="bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-emerald-500 transition-colors">
             <option value="all">All Records</option>
             <option value="table_session">Walk-ins</option>
             <option value="reservation">Reservations</option>
           </select>
 
-          <select value={dateFilter} onChange={e => setDateFilter(e.target.value as any)} className="bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none">
+          <select value={dateFilter} onChange={e => setDateFilter(e.target.value as any)} className="bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-emerald-500 transition-colors">
             <option value="all">All Time</option>
             <option value="today">Today</option>
             <option value="week">This Week</option>
@@ -106,11 +107,11 @@ export function SessionHistory() {
         <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-wrap items-end gap-4 animate-in slide-in-from-top-2">
           <div className="space-y-1.5">
             <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><Calendar size={12}/> Start Date</label>
-            <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))} className="bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" />
+            <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))} className="bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" style={{ colorScheme: 'dark' }} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><Calendar size={12}/> End Date</label>
-            <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))} className="bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" />
+            <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))} className="bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" style={{ colorScheme: 'dark' }} />
           </div>
           {(dateRange.start || dateRange.end) && (
             <button onClick={() => setDateRange({ start: '', end: '' })} className="px-3 py-2 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 rounded-lg transition-colors border border-transparent hover:border-rose-900/50">
@@ -120,8 +121,8 @@ export function SessionHistory() {
         </div>
       )}
 
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto min-h-[300px]">
           <table className="w-full">
             <thead>
               <tr className="border-b border-neutral-800 bg-neutral-900/50 text-left text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">
@@ -138,32 +139,32 @@ export function SessionHistory() {
               {filtered.length === 0 ? (
                 <tr><td colSpan={7} className="text-center py-12 text-neutral-500">No completed sessions found.</td></tr>
               ) : filtered.map((r, i) => (
-                <tr key={`${r.id}-${i}`} className="hover:bg-neutral-900/60 transition-colors">
+                <tr key={`${r.id}-${i}`} className="hover:bg-neutral-900/60 transition-colors cursor-pointer" onClick={() => setSelectedRecord(r)}>
                   <td className="px-4 py-3">
                     <p className="text-sm font-bold text-neutral-200">{r.customerName}</p>
                     <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${r.source === 'table_session' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
-                      {r.source === 'table_session' ? 'Table Session' : 'Reservation'}
+                      {r.source === 'table_session' ? 'Walk-In Session' : 'Reservation'}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <p className="text-sm text-neutral-300">{format(r.sortDate, 'MMM d, yyyy')}</p>
-                    <p className="text-[11px] text-neutral-500">
+                    <p className="text-sm text-neutral-300 font-medium">{format(r.sortDate, 'MMM d, yyyy')}</p>
+                    <p className="text-[10px] text-neutral-500">
                       {format(r.startTime, 'h:mm a')} {r.endTime ? `- ${format(r.endTime, 'h:mm a')}` : ''}
                     </p>
                   </td>
-                  <td className="px-4 py-3"><span className="text-sm text-neutral-300">{r.tableName}</span></td>
-                  <td className="px-4 py-3"><span className="text-sm text-neutral-300">{r.durationLabel}</span></td>
+                  <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.tableName}</span></td>
+                  <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.durationLabel}</span></td>
                   <td className="px-4 py-3"><span className="text-sm font-bold text-white">{formatPHP(r.totalAmount)}</span></td>
                   <td className="px-4 py-3">
                     {r.isFullyPaid ? (
-                      <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400"><CheckCircle size={12}/> Fully Paid</span>
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 uppercase"><CheckCircle size={12}/> Settled</span>
                     ) : (
-                      <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400">Paid: {formatPHP(r.amountPaid)}</span>
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-rose-400 uppercase">Unpaid / Debt</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <button onClick={() => setSelectedRecord(r)} className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg transition-colors">
-                      <ChevronRight size={16} />
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-lg text-xs font-semibold text-neutral-300 transition-colors">
+                      Receipt <ChevronRight size={14} />
                     </button>
                   </td>
                 </tr>
@@ -173,55 +174,115 @@ export function SessionHistory() {
         </div>
       </div>
 
-      {/* Details Modal */}
-      {selectedRecord && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setSelectedRecord(null)}>
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl p-6" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h3 className="text-lg font-black text-white">{selectedRecord.customerName}</h3>
-                <p className="text-xs text-neutral-500 mt-0.5">ID: {selectedRecord.id.toUpperCase()}</p>
-              </div>
-              <button onClick={() => setSelectedRecord(null)} className="text-neutral-500 hover:text-white"><X size={18}/></button>
-            </div>
-            
-            <div className="space-y-4 bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-              <div className="flex justify-between text-sm border-b border-neutral-800 pb-2">
-                <span className="text-neutral-500">Table</span>
-                <span className="text-white font-semibold">{selectedRecord.tableName}</span>
-              </div>
-              <div className="flex justify-between text-sm border-b border-neutral-800 pb-2">
-                <span className="text-neutral-500">Duration</span>
-                <span className="text-white font-semibold">{selectedRecord.durationLabel}</span>
-              </div>
-              <div className="flex justify-between text-sm border-b border-neutral-800 pb-2">
-                <span className="text-neutral-500">Total Bill</span>
-                <span className="text-white font-black">{formatPHP(selectedRecord.totalAmount)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-neutral-500">Amount Paid</span>
-                <span className={selectedRecord.isFullyPaid ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
-                  {formatPHP(selectedRecord.amountPaid)}
-                </span>
-              </div>
-            </div>
+      {/* 🟢 THERMAL E-RECEIPT VIEWER MODAL */}
+      {selectedRecord && (() => {
+        const rData = selectedRecord;
+        const posOrdersTotal = (rData.orders || []).reduce((sum: number, o: any) => sum + ((Number(o.price)||0) * (Number(o.qty)||0)), 0);
+        const tableCharge = Math.max(0, rData.totalAmount - posOrdersTotal);
+        const shortfall = Math.max(0, rData.totalAmount - rData.amountPaid);
+        const refundDue = Math.max(0, rData.amountPaid - rData.totalAmount);
+        const receiptDate = rData.endTime || rData.sortDate || new Date();
 
-            {selectedRecord.orders && selectedRecord.orders.length > 0 && (
-              <div className="mt-5">
-                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2 flex items-center gap-1.5"><ShoppingCart size={12}/> Food & Beverage Orders</p>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                  {selectedRecord.orders.map((o: any, i: number) => (
-                    <div key={i} className="flex justify-between text-xs bg-neutral-900 px-3 py-2 rounded-lg border border-neutral-800">
-                      <span className="text-neutral-300">{o.qty}x {o.name}</span>
-                      <span className="text-neutral-400 font-mono">{formatPHP(o.price * o.qty)}</span>
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 sm:p-8" onClick={() => setSelectedRecord(null)}>
+            <div className="w-full max-w-[340px] relative animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto hide-scrollbar rounded-xl drop-shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+              
+              <div className="pb-2 w-full"> 
+                {/* THERMAL PAPER UI */}
+                <div className="bg-[#f8f9fa] text-neutral-800 rounded-sm shadow-2xl relative overflow-hidden font-mono text-[11px] leading-tight w-full">
+                  {/* Torn Paper Top */}
+                  <div className="w-full h-3 bg-repeat-x flex" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
+                  
+                  <div className="px-5 pt-6 pb-8 flex flex-col">
+                    {/* Header */}
+                    <div className="text-center mb-5 space-y-1">
+                      <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold mb-2">History Record</p>
+                      <h2 className="text-xl font-black tracking-widest text-black">*** RECEIPT ***</h2>
                     </div>
-                  ))}
+                    
+                    {/* Meta Data */}
+                    <div className="flex justify-between items-center uppercase text-[9px] font-bold text-neutral-500 mb-3 border-b border-dashed border-neutral-400 pb-3">
+                      <span>CASHIER: ARCHIVE</span>
+                      <span>{format(receiptDate, 'dd/MM/yyyy - hh:mm a')}</span>
+                    </div>
+
+                    {/* Items List */}
+                    <div className="space-y-3 mb-4">
+                      <div className="flex justify-between font-bold text-black">
+                        <span>{rData.source === 'reservation' ? 'TABLE RENTAL' : 'TABLE PLAY'} ({rData.durationLabel})</span>
+                        <span>{formatPHP(tableCharge)}</span>
+                      </div>
+                      
+                      {rData.orders && rData.orders.length > 0 && rData.orders.map((o: any, i: number) => (
+                        <div key={i} className="flex flex-col">
+                          <div className="flex justify-between font-bold text-black">
+                            <span className="truncate pr-2">{o.name?.toUpperCase()}</span>
+                            <span>{formatPHP((Number(o.price)||0) * (Number(o.qty)||0))}</span>
+                          </div>
+                          <span className="text-[10px] text-neutral-500 ml-2">x{o.qty} @ {formatPHP(o.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-3" />
+
+                    {/* Subtotals */}
+                    <div className="space-y-1.5 font-bold mb-3 text-black">
+                      <div className="flex justify-between"><span>SUBTOTAL</span><span>{formatPHP(rData.totalAmount)}</span></div>
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-3" />
+
+                    {/* Totals */}
+                    <div className="space-y-1.5 text-black">
+                      <div className="flex justify-between font-black text-sm">
+                        <span>TOTAL DUE</span>
+                        <span>{formatPHP(rData.totalAmount)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-neutral-600 mt-2">
+                        <span>TENDERED</span>
+                        <span>{formatPHP(rData.amountPaid)}</span>
+                      </div>
+                      
+                      {/* DYNAMIC DEBT/CHANGE INDICATOR */}
+                      {shortfall > 0 ? (
+                        <div className="flex justify-between font-black text-rose-600 mt-1 border-t border-dashed border-neutral-400 pt-1.5">
+                          <span>UNPAID DEBT</span><span>{formatPHP(shortfall)}</span>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between font-bold text-neutral-600">
+                          <span>CHANGE</span><span>{formatPHP(refundDue)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-4" />
+
+                    {/* Footer */}
+                    <div className="text-center space-y-4">
+                      <p className="font-bold text-[10px] uppercase tracking-widest text-black">
+                        THANK YOU FOR PLAYING!
+                      </p>
+                      <div className="flex flex-col items-center opacity-80">
+                        <QrCode size={40} strokeWidth={1.5} className="mb-2" />
+                        <p className="text-[9px] tracking-widest">{rData.id}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Torn Paper Bottom */}
+                  <div className="w-full h-3 bg-repeat-x flex rotate-180" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
                 </div>
+
+                {/* Action Buttons */}
+                <button onClick={() => setSelectedRecord(null)} className="mt-4 w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3.5 rounded-xl transition-colors border border-neutral-700">
+                  Close Receipt
+                </button>
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

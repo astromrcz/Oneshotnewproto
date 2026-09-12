@@ -6,7 +6,7 @@ import {
   Calendar, Users, CheckCircle, ChevronRight,
   CreditCard, Banknote, AlertTriangle, CircleCheck,
   ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History, Info, RefreshCw, ArrowRightLeft,
-  QrCode
+  QrCode, FileText
 } from 'lucide-react';
 import { isToday, differenceInSeconds, addMinutes, isSameDay, format } from 'date-fns';
 
@@ -45,7 +45,8 @@ export function Tables() {
   const [useProrated,      setUseProrated]      = useState(false);
 
   const [completedReceipt, setCompletedReceipt] = useState<any | null>(null);
-  
+  const [viewingLiveReceiptId, setViewingLiveReceiptId] = useState<string | null>(null); // 🟢 NEW STATE
+
   // Migrate Session States
   const [migratingTableId, setMigratingTableId] = useState<string | null>(null);
   const [migrateTargetId,  setMigrateTargetId]  = useState<string>('');
@@ -533,8 +534,18 @@ export function Tables() {
     if (!endingTableId || !endInfo || !endingTable?.session) return;
     
     const partialPaid = parseFloat(endPartialAmount) || 0;
-    const totalPaidNow = endPayStatus === 'paid' ? endInfo.balance : endPayStatus === 'partial' ? partialPaid : 0;
+    
+    // 🟢 ENHANCED: Accurate Tendered & Change Calculations
+    let totalPaidNow = 0;
+    if (endPayStatus === 'paid') {
+      totalPaidNow = (endPayMethod === 'cash' && endCashTendered !== '') ? parseFloat(endCashTendered) : endInfo.balance;
+    } else if (endPayStatus === 'partial') {
+      totalPaidNow = partialPaid;
+    }
+
     const remainingBalance = endInfo.balance - totalPaidNow;
+    const shortfall = remainingBalance > 0 ? remainingBalance : 0;
+    const actualChange = endInfo.refundDue > 0 ? endInfo.refundDue : (totalPaidNow > endInfo.balance ? totalPaidNow - endInfo.balance : 0);
 
     if (remainingBalance > 0 && addWatchlistItem) {
       const targetName = debtName || endingTable.session.customerName;
@@ -577,25 +588,29 @@ export function Tables() {
       orders: endingTable.session.orders || [],
       status: sessionStatus,
       closureReason: reasonStr,
-      partySize: endingTable.session.partySize || 2, // 🟢 AI Telemetry
-      occupancyRate: occupied / Math.max(1, tables.length) // 🟢 AI Telemetry
+      partySize: endingTable.session.partySize || 2, 
+      occupancyRate: occupied / Math.max(1, tables.length) 
     });
 
-    // 🟢 TRIGGER E-RECEIPT INSTEAD OF FREEING THE TABLE IMMEDIATELY
     setCompletedReceipt({
       id: `REC-${Date.now().toString().slice(-6)}`,
       tableName: endingTable.name,
       customerName: endingTable.session.customerName,
       endTime: sessionEndTime,
+      isOpenTime: endInfo.isOpenTime,                  // 🟢 ADDED: Tracks if it was Open Time
+      bookedMins: endingTable.session.durationMinutes, // 🟢 ADDED: Tracks the exact hours bought
       elapsedMins: endInfo.elapsedMins,
       bookedCharge: endInfo.bookedCharge,
       overtimeCharge: endInfo.overtimeCharge,
       posOrdersTotal: endInfo.posOrdersTotal,
+      orders: endingTable.session.orders || [], 
+      staffName: staffProfile?.fullName || staffProfile?.username || 'Staff', 
       totalDue: endInfo.totalDue,
       alreadyPaid: endInfo.alreadyPaid,
       totalPaidNow: totalPaidNow,
       balance: endInfo.balance,
-      refundDue: endInfo.refundDue,
+      refundDue: actualChange,
+      shortfall: shortfall, 
       tableIdToFree: endingTableId
     });
 
@@ -1113,18 +1128,25 @@ export function Tables() {
             </div>
           </div>
 
-          <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex-none">
-            <div className="flex justify-between items-center mb-3">
+          <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex-none space-y-3">
+            <div className="flex justify-between items-center">
               <span className="text-sm font-bold text-neutral-400">Add to Bill:</span>
               <span className="text-lg font-black text-amber-400">{formatPHP(cartTotal)}</span>
             </div>
             {posTable.session ? (
-              <button 
-                disabled={posCart.length === 0} 
-                onClick={handleConfirmOrders}
-                className={`w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${posCart.length > 0 ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}>
-                <CheckCircle size={15} /> Confirm Order
-              </button>
+              <>
+                <button 
+                  disabled={posCart.length === 0} 
+                  onClick={handleConfirmOrders}
+                  className={`w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${posCart.length > 0 ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/30' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}>
+                  <CheckCircle size={15} /> Confirm Order
+                </button>
+                <button 
+                  onClick={() => setViewingLiveReceiptId(posTableId)}
+                  className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 border border-neutral-700">
+                  <FileText size={15} /> View Live Receipt
+                </button>
+              </>
             ) : (
               <p className="text-xs text-rose-400 text-center italic">Start a table session to add orders.</p>
             )}
@@ -1430,6 +1452,15 @@ export function Tables() {
                     <h4 className="text-xs font-bold text-blue-400 mb-1 flex items-center gap-1.5"><Info size={14}/> Early Departure Detected</h4>
                     <p className="text-[10px] text-blue-300/80">Customer played for {endInfo.elapsedMins}m out of {(endingTable.session.durationMinutes as number)}m.</p>
                   </div>
+
+                  {/* 🟢 DEFENSE: 1-Hour Minimum Policy Warning */}
+                  {endInfo.elapsedMins < 10 && (
+                    <div className="bg-amber-950/40 border border-amber-900/50 p-2.5 rounded-lg">
+                      <p className="text-[10px] text-amber-400/90 leading-relaxed font-bold">
+                        ⚠️ Game is under 10 mins. Per policy, the 1-hour minimum charge still applies. Refunds/Waived fees require an Admin Void override.
+                      </p>
+                    </div>
+                  )}
                   
                   {/* 🟢 ENHANCED: Void button triggers Admin Password Prompt */}
                   <button 
@@ -1461,18 +1492,18 @@ export function Tables() {
                 </div>
               )}
 
-              {/* 🟢 NEW: Always show Payment Status, but lock it down if Balance is 0 */}
+              {/* 🟢 ENHANCED: Payment Status (Always unlocked for real-world edge cases like walkouts) */}
               <>
                 <div className="space-y-2">
                   <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
                   <div className="flex gap-2">
                     <PayStatusBtn value="paid" current={endPayStatus} label="Fully Paid" onChange={setEndPayStatus} />
-                    <PayStatusBtn disabled={endInfo.balance <= 0} value="partial" current={endPayStatus} label="Partial" onChange={setEndPayStatus} />
-                    <PayStatusBtn disabled={endInfo.balance <= 0} value="unpaid" current={endPayStatus} label="Unpaid" onChange={setEndPayStatus} />
+                    <PayStatusBtn value="partial" current={endPayStatus} label="Partial" onChange={setEndPayStatus} />
+                    <PayStatusBtn value="unpaid" current={endPayStatus} label="Unpaid" onChange={setEndPayStatus} />
                   </div>
                 </div>
 
-                {endInfo.balance > 0 && endPayStatus !== 'unpaid' && (
+                {endPayStatus !== 'unpaid' && (
                   <div className="space-y-3 mt-3">
                       <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold block">Payment Method</label>
                       <div className="flex gap-2 mb-3">
@@ -1503,7 +1534,7 @@ export function Tables() {
                              if (actualTendered > endInfo.balance) {
                                return <p className="text-[11px] text-amber-400 mt-1 font-bold">Change: {formatPHP(actualTendered - endInfo.balance)}</p>;
                              }
-                             if (actualTendered >= 0 && actualTendered < endInfo.balance) {
+                             if (actualTendered >= 0 && actualTendered < endInfo.balance && endInfo.balance > 0) {
                                return <p className="text-[11px] text-rose-400 mt-1 font-bold flex items-center gap-1"><AlertTriangle size={10} /> Insufficient cash tendered.</p>;
                              }
                              return null;
@@ -1520,7 +1551,7 @@ export function Tables() {
                     </div>
                   )}
 
-                  {endInfo.balance > 0 && (endPayStatus === 'partial' || endPayStatus === 'unpaid') && (
+                  {(endPayStatus === 'partial' || endPayStatus === 'unpaid') && (
                     <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4 space-y-3 mt-3">
                       <div className="flex justify-between items-center">
                         <p className="text-[10px] text-amber-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><AlertTriangle size={11}/> Debt Tracking Required</p>
@@ -1534,29 +1565,29 @@ export function Tables() {
               {(() => {
                 let canEnd = true;
                 
-                if (endInfo.balance > 0) {
-                  if (endPayStatus === 'paid') {
+                if (endPayStatus === 'paid') {
+                  if (endInfo.balance > 0) {
                     if (endPayMethod === 'cash') {
                       const actualTendered = endCashTendered !== '' ? parseFloat(endCashTendered) : endInfo.balance;
                       canEnd = actualTendered >= endInfo.balance;
                     } else if (endPayMethod === 'gcash') {
                       canEnd = endGcashRef.length >= 13;
                     }
-                  } else if (endPayStatus === 'partial') {
-                    const partial = parseFloat(endPartialAmount) || 0;
-                    if (partial <= 0 || partial >= endInfo.balance) {
-                      canEnd = false;
-                    } else {
-                      if (endPayMethod === 'cash') {
-                        canEnd = true; 
-                      } else if (endPayMethod === 'gcash') {
-                        canEnd = endGcashRef.length >= 13;
-                      }
-                    }
-                    if (!debtName.trim()) canEnd = false; 
-                  } else if (endPayStatus === 'unpaid') {
-                    if (!debtName.trim()) canEnd = false;
                   }
+                } else if (endPayStatus === 'partial') {
+                  const partial = parseFloat(endPartialAmount) || 0;
+                  if (partial <= 0 || (endInfo.balance > 0 && partial >= endInfo.balance)) {
+                    canEnd = false;
+                  } else {
+                    if (endPayMethod === 'cash') {
+                      canEnd = true; 
+                    } else if (endPayMethod === 'gcash') {
+                      canEnd = endGcashRef.length >= 13;
+                    }
+                  }
+                  if (!debtName.trim()) canEnd = false; 
+                } else if (endPayStatus === 'unpaid') {
+                  if (!debtName.trim()) canEnd = false;
                 }
 
                 return (
@@ -1844,70 +1875,178 @@ export function Tables() {
       )}
 
       
-    {/* 🟢 DIGITAL RECEIPT MODAL */}
-      {completedReceipt && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm relative animate-in zoom-in-95 duration-200">
-            
-            {/* The Ticket Graphic */}
-            <div className="bg-neutral-100 text-neutral-900 rounded-b-xl shadow-2xl relative overflow-hidden" style={{ filter: 'drop-shadow(0 10px 15px rgba(16,185,129,0.2))' }}>
-              {/* Jagged Receipt Top */}
-              <div className="h-4 w-full flex space-x-1 absolute top-0 left-0 bg-black">
-                {Array.from({ length: 30 }).map((_, i) => (
-                  <div key={i} className="w-3 h-3 bg-neutral-100 rounded-full -mt-1.5" />
-                ))}
-              </div>
+    {/* 🟢 THERMAL E-RECEIPT ENGINE (Handles both Live & Completed) */}
+      {(completedReceipt || viewingLiveReceiptId) && (() => {
+        let rData = null;
+        let isLive = false;
+
+        if (completedReceipt) {
+          rData = completedReceipt;
+        } else if (viewingLiveReceiptId) {
+          const t = tables.find((x: any) => x.id === viewingLiveReceiptId);
+          if (!t?.session) return null;
+          isLive = true;
+          
+          const now = new Date();
+          const { startTime, durationMinutes: bookedMins, amountPaid, hourlyRate, orders = [], isOpenTime } = t.session;
+          const elapsedMins = Math.ceil(differenceInSeconds(now, new Date(startTime)) / 60);
+          
+          let bookedCharge = 0; let overtimeCharge = 0; let overtimeMins = 0;
+          
+          if (isOpenTime || bookedMins === null) {
+            const fullHours = Math.floor(elapsedMins / 60);
+            const remainingMins = elapsedMins % 60;
+            let extraCharge = 0;
+            if (remainingMins > 0 && remainingMins <= 30) extraCharge = hourlyRate / 2;
+            else if (remainingMins > 30) extraCharge = hourlyRate;
+            bookedCharge = (fullHours * hourlyRate) + extraCharge;
+          } else {
+            const endTime = addMinutes(new Date(startTime), bookedMins);
+            const isOvertime = now > endTime;
+            overtimeMins = isOvertime ? Math.ceil(differenceInSeconds(now, endTime) / 60) : 0;
+            bookedCharge = (bookedMins / 60) * hourlyRate;
+            overtimeCharge = (overtimeMins / 60) * hourlyRate;
+          }
+          
+          const posOrdersTotal = orders.reduce((sum: number, o: any) => sum + (o.price * o.qty), 0);
+          const totalDue = bookedCharge + overtimeCharge + posOrdersTotal;
+          
+          rData = {
+            id: `TAB-${t.id.toUpperCase()}`,
+            tableName: t.name, customerName: t.session.customerName, endTime: now,
+            isOpenTime: isOpenTime, // 🟢 Live Tab Tracking
+            bookedMins: bookedMins, // 🟢 Live Tab Tracking
+            elapsedMins, bookedCharge, overtimeCharge, overtimeMins,
+            posOrdersTotal, orders, totalDue: totalDue,
+            alreadyPaid: amountPaid, totalPaidNow: 0, balance: Math.max(0, totalDue - amountPaid),
+            refundDue: Math.max(0, amountPaid - totalDue),
+            shortfall: 0, 
+            staffName: staffProfile?.fullName || staffProfile?.username || 'Staff'
+          };
+        }
+
+        if (!rData) return null;
+
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 sm:p-8" onClick={() => isLive ? setViewingLiveReceiptId(null) : null}>
+            <div className="w-full max-w-[340px] relative animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto hide-scrollbar rounded-xl drop-shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
               
-              <div className="px-6 pt-10 pb-8 flex flex-col items-center font-mono">
-                <h2 className="text-3xl font-black tracking-tighter mb-1">ONE SHOT</h2>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-6">Bar & Billiards</p>
-                
-                <div className="w-full space-y-2 text-xs font-semibold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
-                  <div className="flex justify-between"><span>Date:</span><span>{format(completedReceipt.endTime, 'MM/dd/yyyy')}</span></div>
-                  <div className="flex justify-between"><span>Time:</span><span>{format(completedReceipt.endTime, 'hh:mm a')}</span></div>
-                  <div className="flex justify-between"><span>Table:</span><span>{completedReceipt.tableName}</span></div>
-                  <div className="flex justify-between"><span>Customer:</span><span>{completedReceipt.customerName}</span></div>
+              <div className="pb-2 w-full"> 
+                {/* THERMAL PAPER UI */}
+                <div className="bg-[#f8f9fa] text-neutral-800 rounded-sm shadow-2xl relative overflow-hidden font-mono text-[11px] leading-tight w-full">
+                  {/* Torn Paper Top */}
+                  <div className="w-full h-3 bg-repeat-x flex" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
+                  
+                  <div className="px-5 pt-6 pb-8 flex flex-col">
+                    {/* Header */}
+                    <div className="text-center mb-5 space-y-1">
+                      <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold mb-2">{isLive ? 'Running Tab' : 'Official Receipt'}</p>
+                      <h2 className="text-xl font-black tracking-widest text-black">*** RECEIPT ***</h2>
+                    </div>
+                    
+                    {/* Meta Data */}
+                    <div className="flex justify-between items-center uppercase text-[9px] font-bold text-neutral-500 mb-3 border-b border-dashed border-neutral-400 pb-3">
+                      <span>CASHIER: {rData.staffName.split(' ')[0]}</span>
+                      <span>{format(rData.endTime, 'dd/MM/yyyy - hh:mm a')}</span>
+                    </div>
+
+                    {/* Items List */}
+                    <div className="space-y-3 mb-4">
+                      
+                      {/* 🟢 DYNAMIC TABLE RENTAL VS PLAY TEXT */}
+                      <div className="flex justify-between font-bold text-black">
+                        <span>
+                          {rData.isOpenTime || !rData.bookedMins
+                            ? `TABLE PLAY (${rData.elapsedMins}m)`
+                            : `TABLE RENTAL (${rData.bookedMins >= 60 ? (rData.bookedMins / 60) + 'h' : rData.bookedMins + 'm'})`}
+                        </span>
+                        <span>{formatPHP(rData.bookedCharge)}</span>
+                      </div>
+                      
+                      {rData.overtimeCharge > 0 && (
+                        <div className="flex justify-between font-bold text-black">
+                          <span>OVERTIME ({rData.overtimeMins}m)</span>
+                          <span>{formatPHP(rData.overtimeCharge)}</span>
+                        </div>
+                      )}
+                      {rData.orders?.map((o: any, i: number) => (
+                        <div key={i} className="flex flex-col">
+                          <div className="flex justify-between font-bold text-black">
+                            <span className="truncate pr-2">{o.name.toUpperCase()}</span>
+                            <span>{formatPHP(o.price * o.qty)}</span>
+                          </div>
+                          <span className="text-[10px] text-neutral-500 ml-2">x{o.qty} @ {formatPHP(o.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-3" />
+
+                    {/* Subtotals */}
+                    <div className="space-y-1.5 font-bold mb-3 text-black">
+                      <div className="flex justify-between"><span>SUBTOTAL</span><span>{formatPHP(rData.totalDue)}</span></div>
+                      <div className="flex justify-between text-neutral-600"><span>PRIOR PAYMENT</span><span>-{formatPHP(rData.alreadyPaid)}</span></div>
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-3" />
+
+                    {/* Totals */}
+                    <div className="space-y-1.5 text-black">
+                      <div className="flex justify-between font-black text-sm">
+                        <span>TOTAL DUE</span>
+                        <span>{formatPHP(Math.max(0, rData.totalDue - rData.alreadyPaid))}</span>
+                      </div>
+                      {!isLive && (
+                        <>
+                          <div className="flex justify-between font-bold text-neutral-600 mt-2"><span>TENDERED NOW</span><span>{formatPHP(rData.totalPaidNow)}</span></div>
+                          
+                          {/* DYNAMIC DEBT/CHANGE INDICATOR */}
+                          {rData.shortfall > 0 ? (
+                            <div className="flex justify-between font-black text-rose-600 mt-1 border-t border-dashed border-neutral-400 pt-1.5">
+                              <span>Unpaid</span><span>{formatPHP(rData.shortfall)}</span>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between font-bold text-neutral-600"><span>CHANGE</span><span>{formatPHP(rData.refundDue)}</span></div>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-4" />
+
+                    {/* Footer */}
+                    <div className="text-center space-y-4">
+                      <p className="font-bold text-[10px] uppercase tracking-widest text-black">
+                        {isLive ? 'STILL PLAYING...' : 'THANK YOU FOR PLAYING!'}
+                      </p>
+                      <div className="flex flex-col items-center opacity-80">
+                        <svg width="180" height="40" viewBox="0 0 180 40" fill="black" xmlns="http://www.w3.org/2000/svg">
+                          <rect x="0" y="0" width="4" height="40"/><rect x="8" y="0" width="2" height="40"/><rect x="14" y="0" width="6" height="40"/><rect x="24" y="0" width="2" height="40"/><rect x="30" y="0" width="4" height="40"/><rect x="38" y="0" width="8" height="40"/><rect x="50" y="0" width="2" height="40"/><rect x="56" y="0" width="4" height="40"/><rect x="64" y="0" width="2" height="40"/><rect x="70" y="0" width="6" height="40"/><rect x="80" y="0" width="8" height="40"/><rect x="92" y="0" width="2" height="40"/><rect x="98" y="0" width="4" height="40"/><rect x="106" y="0" width="2" height="40"/><rect x="112" y="0" width="6" height="40"/><rect x="122" y="0" width="4" height="40"/><rect x="130" y="0" width="2" height="40"/><rect x="136" y="0" width="8" height="40"/><rect x="148" y="0" width="2" height="40"/><rect x="154" y="0" width="6" height="40"/><rect x="164" y="0" width="4" height="40"/><rect x="172" y="0" width="8" height="40"/>
+                        </svg>
+                        <p className="text-[9px] mt-1 tracking-widest">{rData.id}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Torn Paper Bottom */}
+                  <div className="w-full h-3 bg-repeat-x flex rotate-180" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
                 </div>
 
-                <div className="w-full space-y-2 text-xs font-bold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
-                  <div className="flex justify-between"><span>Table Play ({completedReceipt.elapsedMins}m)</span><span>{formatPHP(completedReceipt.bookedCharge)}</span></div>
-                  {completedReceipt.overtimeCharge > 0 && <div className="flex justify-between"><span>Overtime</span><span>{formatPHP(completedReceipt.overtimeCharge)}</span></div>}
-                  {completedReceipt.posOrdersTotal > 0 && <div className="flex justify-between"><span>F&B Orders</span><span>{formatPHP(completedReceipt.posOrdersTotal)}</span></div>}
-                </div>
-
-                <div className="w-full space-y-1.5 text-sm">
-                  <div className="flex justify-between font-black text-base"><span>TOTAL DUE</span><span>{formatPHP(completedReceipt.totalDue)}</span></div>
-                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Prior Payment</span><span>-{formatPHP(completedReceipt.alreadyPaid)}</span></div>
-                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Paid Now</span><span>-{formatPHP(completedReceipt.totalPaidNow)}</span></div>
-                </div>
-
-                <div className="w-full mt-4 pt-4 border-t-[3px] border-neutral-800 flex justify-between font-black text-xl">
-                  <span>{completedReceipt.refundDue > 0 ? 'CHANGE' : 'BALANCE'}</span>
-                  <span>{formatPHP(completedReceipt.refundDue > 0 ? completedReceipt.refundDue : Math.max(0, completedReceipt.balance - completedReceipt.totalPaidNow))}</span>
-                </div>
-
-                <div className="mt-8 flex flex-col items-center">
-                   <div className="p-2 border-2 border-neutral-900 rounded-lg mb-2 opacity-80">
-                     <QrCode size={64} strokeWidth={1.5} />
-                   </div>
-                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-full">Scan or Photograph</p>
-                </div>
-                <p className="text-[10px] text-neutral-500 mt-6 text-center font-semibold">This is an official digital receipt.<br/>Thank you for playing at One Shot!</p>
+                {/* Action Buttons */}
+                {isLive ? (
+                  <button onClick={() => setViewingLiveReceiptId(null)} className="mt-4 w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3.5 rounded-xl transition-colors border border-neutral-700">
+                    Close Receipt
+                  </button>
+                ) : (
+                  <button onClick={() => { freeTable(rData.tableIdToFree); setCompletedReceipt(null); }} className="mt-4 w-full bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.2)] transition-colors">
+                    <CheckCircle size={18} /> Customer Done (Free Table)
+                  </button>
+                )}
               </div>
             </div>
-
-            <button 
-              onClick={() => {
-                freeTable(completedReceipt.tableIdToFree);
-                setCompletedReceipt(null);
-              }}
-              className="mt-6 w-full bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 rounded-2xl flex items-center justify-center gap-2 shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all hover:scale-[1.02]"
-            >
-              <CheckCircle size={18} /> Customer Done (Free Table)
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
     </div>
   );

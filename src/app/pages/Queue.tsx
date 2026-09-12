@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, 
-  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Info, Plus, Minus,
-  RefreshCw, AlertTriangle
+  Calendar as CalendarIcon, AlertCircle, Star, Sparkles, Plus, Minus,
+  RefreshCw, AlertTriangle, Cpu
 } from 'lucide-react';
 import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, addMinutes, differenceInSeconds } from 'date-fns';
 import { useNavigate } from 'react-router';
@@ -12,7 +12,7 @@ export function Queue() {
   const { queue, addToQueue, removeFromQueue, callQueueItem, tables, reservations, cancelReservation, reservationTerms } = useAppContext() as any;
   const navigate = useNavigate();
   
-  // 🟢 NEW: Calculate the dynamic max party size based on the current day
+  // 🟢 Dynamic max party size based on the current day
   const currentDay = new Date().getDay();
   const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
   const maxAllowedPartySize = isWeekend ? (reservationTerms?.weekendMaxPartySize || 20) : (reservationTerms?.weekdayMaxPartySize || 20);
@@ -38,7 +38,7 @@ export function Queue() {
     }
   };
 
-  // Live clock for AI calculation
+  // Live clock
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -52,29 +52,72 @@ export function Queue() {
   const called = queue.filter((q: any) => q.status === 'called');
   const availableTables = tables.filter((t: any) => t.status === 'available');
 
-  // --- AI WAIT-TIME ESTIMATOR (PROTOTYPE LOGIC) ---
-  const calculateAIWaitTime = () => {
-    if (waiting.length === 0) return "No wait";
+  // ========================================================================
+  // 🧠 NEURAL NETWORK AI INTEGRATION
+  // ========================================================================
+  const [aiWaitTime, setAiWaitTime] = useState<string>('Analyzing data...');
+  const [isAILoading, setIsAILoading] = useState(true);
 
-    // Get all occupied tables and find how many minutes they have left
-    const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
-    if (activeTables.length === 0) return "Available immediately";
+  const fetchAIPrediction = useCallback(async () => {
+    setIsAILoading(true);
+    try {
+      const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
+      const freeTables = tables.filter((t: any) => t.status === 'available').length;
+      
+      // 1. If there are enough free tables for everyone waiting PLUS a new walk-in:
+      if (freeTables > waiting.length) {
+        setAiWaitTime("Available Now");
+        setIsAILoading(false);
+        return;
+      }
 
-    const remainingTimes = activeTables.map((t: any) => {
-      const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
-      return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
-    }).sort((a: number, b: number) => a - b); // Sort from ending soonest to longest
+      const currentOccupancyRate = activeTables.length / Math.max(1, tables.length);
+      const nextPartySize = waiting[0]?.partySize || 2;
+      
+      // 2. Send local venue state to the Brain.js Neural Network
+      const res = await fetch('http://localhost:3001/api/ai/predict-wait-time', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          partySize: nextPartySize, 
+          hasOrders: true, // Conservative prediction assumes customers will order
+          currentOccupancyRate 
+        })
+      });
+      
+      const data = await res.json();
+      
+      // 3. Find the table finishing closest to now
+      const elapsedTimes = activeTables.map((t: any) => differenceInMinutes(now, new Date(t.session.startTime)));
+      const maxElapsed = Math.max(...elapsedTimes, 0); 
+      
+      // 4. Calculate Base Wait (AI Prediction minus Time Already Spent)
+      let baseWait = Math.max(0, data.estimatedMinutes - maxElapsed);
+      
+      // 5. Add Queue Friction (Only for people who don't fit in the free tables)
+      const unseatedQueue = Math.max(0, waiting.length - freeTables);
+      const totalWait = baseWait + (unseatedQueue * 10) + 2; // +2 mins for physical table cleanup
+      
+      if (totalWait < 60) {
+        setAiWaitTime(`~${Math.round(totalWait)} mins`);
+      } else {
+        setAiWaitTime(`~${Math.floor(totalWait / 60)}h ${Math.round(totalWait % 60)}m`);
+      }
+      
+    } catch (e) {
+      console.error("AI Predict Error:", e);
+      setAiWaitTime("~45 mins (Fallback)"); 
+    }
+    setIsAILoading(false);
+  }, [tables, waiting, now]);
 
-    // Prototype "AI" Math: Grab the table ending soonest, add 2 mins for cleaning, 
-    // and add 15 mins penalty for every person ahead in the queue.
-    const baseWait = remainingTimes[0] !== undefined ? remainingTimes[0] : 0;
-    const estimatedMinutes = baseWait + 2 + (waiting.length * 15);
+  // Poll the AI engine every 30 seconds for dynamic adjustments
+  useEffect(() => {
+    fetchAIPrediction();
+    const aiInterval = setInterval(fetchAIPrediction, 30000);
+    return () => clearInterval(aiInterval);
+  }, [fetchAIPrediction]);
 
-    if (estimatedMinutes < 60) return `~${estimatedMinutes} mins`;
-    const hrs = Math.floor(estimatedMinutes / 60);
-    const mins = estimatedMinutes % 60;
-    return `~${hrs}h ${mins}m`;
-  };
 
   // Get upcoming reservations (today and future)
   const todayStart = new Date();
@@ -106,7 +149,6 @@ export function Queue() {
       return;
     }
     
-    // 🟢 ENHANCED: Hard stop if party size violates admin policy
     if (partySize > maxAllowedPartySize) {
       flash(`The maximum walk-in party size allowed today is ${maxAllowedPartySize} based on store policy.`, "error");
       return;
@@ -123,25 +165,47 @@ export function Queue() {
   };
 
   const handleCallCustomer = (customerId: string, customerName: string) => {
+    // 🟢 NEW: Zero Tables Validation Warning
+    if (availableTables.length === 0) {
+      if (!window.confirm(`⚠️ Wait! There are NO available tables right now.\n\nAre you sure you want to call ${customerName} to the counter? (e.g., A table is currently packing up)`)) {
+        return;
+      }
+    }
+
     callQueueItem(customerId);
     flash(`Called ${customerName} from the queue.`, "success");
     
-    // Voice generation using Web Speech API
     if ('speechSynthesis' in window) {
-      // Cancel any ongoing speech
       window.speechSynthesis.cancel();
-      
       const utterance = new SpeechSynthesisUtterance(`${customerName}, your table is ready. Please proceed to the counter.`);
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
-      
       window.speechSynthesis.speak(utterance);
     }
   };
 
+  // 🟢 NEW: Calculate exact physical time until the closest table finishes
+  const getNearestEndTime = () => {
+    const active = tables.filter((t: any) => t.status === 'occupied' && t.session && !t.session.isOpenTime && t.session.durationMinutes);
+    if (active.length === 0) return null;
+    
+    const remainingTimes = active.map((t: any) => {
+      const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
+      return differenceInMinutes(endTime, now);
+    }).sort((a, b) => a - b);
+    
+    const nearest = remainingTimes[0];
+    if (nearest <= 0) return "Table finishing now";
+    
+    const hrs = Math.floor(nearest / 60);
+    const mins = nearest % 60;
+    if (hrs > 0) return `Next table ends in ${hrs}h ${mins}m`;
+    return `Next table ends in ~${mins}m`;
+  };
+
   return (
-    <div className="space-y-5 relative">
+    <div className="space-y-5 relative pb-20">
 
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toastState && (
@@ -213,7 +277,7 @@ export function Queue() {
 
       {/* Add Form */}
       {showAddForm && (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 shadow-xl">
           <h3 className="text-sm font-semibold text-neutral-300 mb-4 flex items-center gap-2">
             <UserPlus size={15} className="text-emerald-500" /> Register Walk-in Customer (FCFS)
           </h3>
@@ -325,17 +389,40 @@ export function Queue() {
             </h2>
           </div>
 
-          {/* AI WAIT TIME CARD */}
-          <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles size={14} className="text-emerald-400" />
-              <span className="text-xs text-emerald-300 font-semibold">AI Est. Wait Time</span>
+          {/* 🟢 NEURAL NETWORK PREDICTION BADGE */}
+          <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 mb-4 flex items-center justify-between shadow-[0_0_20px_rgba(16,185,129,0.05)] relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
+            <div className="flex items-center gap-4 relative z-10">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shadow-inner">
+                {isAILoading ? (
+                  <RefreshCw size={18} className="text-emerald-400 animate-spin" />
+                ) : (
+                  <Cpu size={18} className="text-emerald-400 animate-pulse" />
+                )}
+              </div>
+              <div>
+                <span className="text-[10px] text-emerald-400/80 font-black uppercase tracking-widest block mb-0.5">Neural Network AI</span>
+                <span className="text-sm text-emerald-100 font-semibold tracking-tight">Estimated Wait Time</span>
+              </div>
             </div>
-            <span className="text-sm font-black text-emerald-400">{calculateAIWaitTime()}</span>
+            <div className="text-right relative z-10 flex flex-col items-end">
+              <span className="text-3xl font-black text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.3)]">
+                {aiWaitTime}
+              </span>
+              <div className="flex flex-col items-end mt-1 space-y-1.5">
+                <span className="text-[9px] text-emerald-500/60 font-medium uppercase">Updates Live</span>
+                {/* 🟢 THE NEAREST END TIME BADGE */}
+                {getNearestEndTime() && availableTables.length === 0 && (
+                  <span className="text-[10px] text-emerald-300/90 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50 flex items-center gap-1.5 shadow-sm">
+                    <Clock size={10} className="text-emerald-400" /> {getNearestEndTime()}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           {waiting.length === 0 ? (
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 text-center">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 text-center shadow-sm">
               <CheckCircle size={32} className="mx-auto text-emerald-500/40 mb-3" />
               <p className="text-neutral-400 font-semibold">No customers in queue</p>
               <p className="text-xs text-neutral-600 mt-1">Add walk-in customers using the button above</p>
@@ -360,7 +447,6 @@ export function Queue() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-semibold text-neutral-200 truncate">{item.customerName}</p>
-                      {/* Queue number badge */}
                       {item.queueNumber && (
                         <span className="px-1.5 py-0.5 bg-neutral-800 text-neutral-500 text-[10px] font-mono font-bold rounded border border-neutral-700 flex-shrink-0">
                           #{String(item.queueNumber).padStart(3, '0')}
@@ -402,8 +488,11 @@ export function Queue() {
                     </button>
                     <button
                       onClick={() => {
-                        removeFromQueue(item.id);
-                        flash("Customer removed from queue.", "success");
+                        // 🟢 NEW: Delete Confirmation
+                        if (window.confirm(`Are you sure you want to remove ${item.customerName} from the queue?`)) {
+                          removeFromQueue(item.id);
+                          flash("Customer removed from queue.", "success");
+                        }
                       }}
                       title="Remove from queue"
                       className="p-2 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 rounded-lg transition-colors border border-rose-700/30"
@@ -437,8 +526,11 @@ export function Queue() {
                   </button>
                   <button
                     onClick={() => {
-                      removeFromQueue(item.id);
-                      flash("Customer removed from queue.", "success");
+                      // 🟢 NEW: Delete Confirmation
+                      if (window.confirm(`Are you sure you want to remove ${item.customerName} from the queue?`)) {
+                        removeFromQueue(item.id);
+                        flash("Customer removed from queue.", "success");
+                      }
                     }}
                     className="p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors flex-none"
                     title="Remove"
@@ -459,17 +551,17 @@ export function Queue() {
           {availableTables.length === 0 ? (
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-6 text-center">
               <p className="text-sm text-neutral-500">No tables available</p>
-              <button onClick={() => navigate('/staff/tables')} className="text-xs text-emerald-500 hover:text-emerald-400 mt-2 font-semibold">
+              <button onClick={() => navigate('/staff/tables')} className="text-xs text-emerald-500 hover:text-emerald-400 mt-2 font-semibold transition-colors">
                 View Table Monitor →
               </button>
             </div>
           ) : (
             <div className="space-y-2">
               {availableTables.map((table: any) => (
-                <div key={table.id} className="bg-neutral-950 border border-emerald-800/30 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-2">
+                <div key={table.id} className="bg-neutral-950 border border-emerald-800/30 rounded-xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold text-neutral-200">{table.name}</p>
-                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-bold px-1.5 py-0.5 rounded uppercase">Free</span>
+                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-bold px-2 py-0.5 rounded uppercase border border-emerald-500/20">Free</span>
                   </div>
                   {(called.length > 0 || waiting.length > 0) && (
                     <button
@@ -486,9 +578,10 @@ export function Queue() {
                         sessionStorage.setItem('assignTableId', table.id);
                         navigate('/staff/tables');
                       }}
-                      className="w-full text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-700/30 py-2 rounded-lg transition-colors font-medium"
+                      className="w-full text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-700/30 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-1.5"
                     >
-                      Assign {called.length > 0 ? called[0].customerName : waiting[0]?.customerName} to {table.name}
+                      <UserPlus size={12} />
+                      Assign {called.length > 0 ? called[0].customerName : waiting[0]?.customerName}
                     </button>
                   )}
                 </div>
@@ -497,7 +590,7 @@ export function Queue() {
           )}
           <button
             onClick={() => navigate('/staff/tables')}
-            className="w-full text-xs text-neutral-500 hover:text-neutral-300 py-2 border border-neutral-800 rounded-lg hover:border-neutral-700 transition-colors"
+            className="w-full text-xs text-neutral-500 hover:text-neutral-300 py-2.5 border border-neutral-800 rounded-xl hover:bg-neutral-900 transition-colors"
           >
             Go to Table Monitor →
           </button>
@@ -505,26 +598,26 @@ export function Queue() {
       </div>
 
       {/* Upcoming Reservations Calendar */}
-      <div className="space-y-3">
+      <div className="space-y-3 mt-8 border-t border-neutral-800/50 pt-6">
         <div className="flex items-center justify-between">
           <h2 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-2">
             <CalendarIcon size={14} /> Upcoming Reservations ({upcomingReservations.length})
           </h2>
           <button
             onClick={() => navigate('/staff/reservations')}
-            className="text-xs text-emerald-500 hover:text-emerald-400 font-semibold"
+            className="text-xs text-emerald-500 hover:text-emerald-400 font-semibold transition-colors"
           >
             View all →
           </button>
         </div>
 
         {upcomingReservations.length === 0 ? (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 text-center">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 text-center shadow-sm">
             <CalendarIcon size={32} className="mx-auto text-neutral-700 mb-3" />
             <p className="text-neutral-500">No upcoming reservations</p>
           </div>
         ) : (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden shadow-sm">
             <div className="divide-y divide-neutral-800/50">
               {upcomingReservations.map((reservation: any) => {
                 const minsUntil = differenceInMinutes(new Date(reservation.date), new Date());
@@ -557,8 +650,8 @@ export function Queue() {
                           <span>{reservation.partySize} pax</span>
                           {tableName && (
                             <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                isNearTime ? 'bg-amber-500/20 text-amber-400 animate-pulse' : 'bg-neutral-800 text-neutral-400'
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold border ${
+                                isNearTime ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 animate-pulse' : 'bg-neutral-800 text-neutral-400 border-neutral-700'
                               }`}
                             >
                               {tableName}
@@ -594,7 +687,7 @@ export function Queue() {
                 <h2 className="text-base font-bold text-neutral-100">Cancel Reservation</h2>
                 <p className="text-xs text-neutral-500">Are you sure?</p>
               </div>
-              <button onClick={() => setShowCancelDialog(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg">
+              <button onClick={() => setShowCancelDialog(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -604,7 +697,7 @@ export function Queue() {
                 <select
                   value={cancelReason}
                   onChange={e => setCancelReason(e.target.value)}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 >
                   <option value="">Select reason...</option>
                   <option value="Customer no-show">Customer no-show</option>
@@ -615,9 +708,9 @@ export function Queue() {
                   <option value="Other">Other</option>
                 </select>
               </div>
-              <div className="flex gap-3">
-                <button type="button" onClick={() => setShowCancelDialog(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">
-                  Cancel
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowCancelDialog(false)} className="px-4 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl font-bold transition-colors">
+                  Keep Booking
                 </button>
                 <button
                   type="button"
@@ -630,7 +723,7 @@ export function Queue() {
                       flash("Reservation cancelled successfully.", "success");
                     }
                   }}
-                  className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2"
                 >
                   <X size={15} /> Confirm Cancel
                 </button>

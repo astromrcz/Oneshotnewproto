@@ -9,6 +9,7 @@ const sqlite3Pkg = require('sqlite3');
 const path = require('path');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
+const brain = require('brain.js'); // 🧠 QUEUE AI LIBRARY
 
 // 🟢 GLOBAL CRASH GUARDS: Prevent server shutdowns from unhandled errors
 process.on('uncaughtException', (err) => {
@@ -99,6 +100,9 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`CREATE TABLE IF NOT EXISTS lost_and_found (id TEXT PRIMARY KEY, itemName TEXT, description TEXT, foundDate DATETIME, status TEXT, image TEXT, claimedBy TEXT, claimedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
       db.run(`CREATE TABLE IF NOT EXISTS watchlist (id TEXT PRIMARY KEY, name TEXT, reason TEXT, description TEXT, status TEXT, evidenceLink TEXT, dateAdded DATETIME, resolvedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
       db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`);
+      
+      // 🟢 e-RECEIPTS TABLE FOR PAPERLESS CHECKOUTS
+      db.run(`CREATE TABLE IF NOT EXISTS e_receipts (id TEXT PRIMARY KEY, receipt_no TEXT UNIQUE NOT NULL, reservation_id TEXT, customer_name TEXT NOT NULL, customer_email TEXT, customer_phone TEXT, table_id TEXT, table_name TEXT NOT NULL, play_start_time TEXT, play_end_time TEXT, duration_minutes INTEGER DEFAULT 0, table_rate REAL DEFAULT 0, table_charge REAL DEFAULT 0, overtime_charge REAL DEFAULT 0, fnb_charge REAL DEFAULT 0, subtotal REAL DEFAULT 0, discount_amount REAL DEFAULT 0, total_amount REAL DEFAULT 0, amount_paid REAL DEFAULT 0, balance_due REAL DEFAULT 0, payment_method TEXT DEFAULT 'cash', payment_status TEXT DEFAULT 'paid', created_at TEXT DEFAULT (datetime('now')))`);
 
       // 🟢 SAFE SELF-HEALING COLUMN MIGRATIONS (No non-constant defaults to avoid SQLite errors)
       const resCols = [
@@ -122,7 +126,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
         db.run(`ALTER TABLE reservations ADD COLUMN ${col}`, () => {});
       });
 
-     const newEventCols = [
+      const newEventCols = [
         'duration TEXT',
         'bracketLink TEXT',
         'minParticipants INTEGER DEFAULT 8',
@@ -141,9 +145,13 @@ const db = new sqlite3.Database(dbPath, (err) => {
       newEventCols.forEach(col => {
         db.run(`ALTER TABLE events ADD COLUMN ${col}`, () => {});
       });
+
+      // 🟢 AI TRAINING TELEMETRY COLUMNS IN SESSION HISTORY
       const historyCols = [
         'status TEXT DEFAULT \'completed\'',
-        'closureReason TEXT'
+        'closureReason TEXT',
+        'partySize INTEGER DEFAULT 2',
+        'occupancyRate REAL DEFAULT 0.5'
       ];
       historyCols.forEach(col => {
         db.run(`ALTER TABLE session_history ADD COLUMN ${col}`, () => {});
@@ -173,6 +181,63 @@ const db = new sqlite3.Database(dbPath, (err) => {
     });
   }
 });
+
+
+// ====================================================================
+// 🧠 ARTIFICIAL NEURAL NETWORK (QUEUE AI ENGINE)
+// ====================================================================
+let waitTimeNet = new brain.NeuralNetwork({ hiddenLayers: [5, 5] });
+let isAITrained = false;
+
+const trainQueueAI = () => {
+  db.all(`SELECT * FROM session_history WHERE status = 'completed'`, [], (err, rows) => {
+    if (err) {
+      console.error('❌ [Queue AI] Database error during training pull:', err);
+      return;
+    }
+
+    // 🟢 SYNTHETIC BASELINE: Prevents "empty dataset" crash and establishes logical starting weights
+    let trainingData = [
+      { input: { dayOfWeek: 0.8, timeOfDay: 0.8, partySize: 0.4, hasOrders: 1, occupancy: 0.8 }, output: { duration: 0.5 } },  // Friday Night, 4 pax, food, busy -> ~3 hrs
+      { input: { dayOfWeek: 0.2, timeOfDay: 0.3, partySize: 0.2, hasOrders: 0, occupancy: 0.2 }, output: { duration: 0.16 } }, // Mon Morning, 2 pax, no food, dead -> ~1 hr
+      { input: { dayOfWeek: 0.9, timeOfDay: 0.5, partySize: 0.6, hasOrders: 1, occupancy: 0.9 }, output: { duration: 0.66 } }, // Sat Afternoon, 6 pax, food, packed -> ~4 hrs
+    ];
+
+    if (rows && rows.length > 0) {
+      const historicalData = rows.map(r => {
+        const d = new Date(r.startTime);
+        return {
+          input: {
+            dayOfWeek: d.getDay() / 6, // 0 to 1
+            timeOfDay: d.getHours() / 24, // 0 to 1
+            partySize: Math.min((r.partySize || 2) / 10, 1), // Normalized against 10 max
+            hasOrders: (r.orders && r.orders !== '[]' && r.orders !== 'null') ? 1 : 0,
+            occupancy: r.occupancyRate || 0.5 // 0 to 1
+          },
+          output: { 
+            duration: Math.min((r.durationMinutes || 60) / 360, 1) // Normalized against max 6 hours
+          } 
+        };
+      });
+      trainingData = [...trainingData, ...historicalData];
+    }
+
+    // Train the network
+    waitTimeNet.train(trainingData, {
+      iterations: 2000, 
+      errorThresh: 0.01,
+      log: false
+    });
+    
+    isAITrained = true;
+    console.log(`🧠 [Queue AI] Successfully trained/re-calibrated on ${trainingData.length} data vectors.`);
+  });
+};
+
+// Train the AI 5 seconds after server boot, and re-train every 6 hours
+setTimeout(trainQueueAI, 5000);
+setInterval(trainQueueAI, 1000 * 60 * 60 * 6);
+
 
 // ====================================================================
 // 🚀 READ ROUTES (GET)
@@ -222,15 +287,9 @@ app.get('/api/tables', (req, res) => {
   });
 });
 
-// 🟢 CRASH-PROOF RESERVATIONS GET ROUTE
-// Uses ORDER BY rowid DESC to prevent "no such column: createdAt" SQLite errors
 app.get('/api/reservations', (req, res) => {
   db.all(`SELECT * FROM reservations ORDER BY rowid DESC`, [], (err, rows) => {
-    if (err) {
-      console.error("❌ CRASH IN /api/reservations:", err.message);
-      return res.status(500).json({ error: err.message });
-    }
-    // Safe normalization so frontend always gets camelCase keys regardless of underlying column name
+    if (err) return res.status(500).json({ error: err.message });
     const normalized = rows.map(r => ({
       ...r,
       id: r.id,
@@ -325,7 +384,13 @@ app.get('/api/session-history', (req, res) => {
   });
 });
 
-// 🟢 GET SETTINGS (Works for /api/settings/rates and /api/settings/terms)
+app.get('/api/e-receipts', (req, res) => {
+  db.all(`SELECT * FROM e_receipts ORDER BY created_at DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
 const getSettingsHandler = (req, res) => {
   db.all(`SELECT keyName, settingValue FROM systemSettings`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -374,6 +439,37 @@ app.get('/api/watchlist', (req, res) => {
 });
 
 // ====================================================================
+// 🧠 AI INFERENCE ROUTE (POST)
+// ====================================================================
+app.post('/api/ai/predict-wait-time', (req, res) => {
+  if (!isAITrained) {
+    // Fallback if network hasn't trained yet
+    return res.json({ estimatedMinutes: 45, confidence: 'baseline' });
+  }
+  
+  const { partySize, hasOrders, currentOccupancyRate } = req.body;
+  const now = new Date();
+  
+  const inputVector = {
+    dayOfWeek: now.getDay() / 6,
+    timeOfDay: now.getHours() / 24,
+    partySize: Math.min((partySize || 2) / 10, 1),
+    hasOrders: hasOrders ? 1 : 0,
+    occupancy: currentOccupancyRate || 0.5
+  };
+
+  const result = waitTimeNet.run(inputVector);
+  
+  // result.duration is 0-1. Multiply by max duration limit (360 mins / 6 hrs)
+  const estimatedMinutes = Math.round((result.duration || 0.16) * 360);
+  
+  res.json({
+    estimatedMinutes: Math.max(15, estimatedMinutes), // Set 15m absolute minimum boundary
+    rawPrediction: result.duration
+  });
+});
+
+// ====================================================================
 // 📥 WRITE ROUTES (POST/PUT/DELETE)
 // ====================================================================
 app.put('/api/cms', (req, res) => {
@@ -390,7 +486,6 @@ app.put('/api/cms', (req, res) => {
     }
     const key = keys[index];
     const rawVal = payload[key];
-    // Automatically serialize arrays/objects (like heroImages array) into JSON strings for SQLite
     const value = (typeof rawVal === 'object' && rawVal !== null) ? JSON.stringify(rawVal) : String(rawVal ?? '');
     
     db.run(
@@ -407,8 +502,6 @@ app.put('/api/cms', (req, res) => {
   processNextKey();
 });
 
-// 🟢 NEW: HYBRID CACHE ARCHITECTURE
-// Receives the primary fetch from Supabase and overwrites the local SQLite database for offline fallback.
 app.post('/api/cache-reservations', (req, res) => {
   const { reservations } = req.body;
   if (!Array.isArray(reservations)) return res.status(400).json({ error: 'Invalid payload' });
@@ -450,83 +543,34 @@ app.post('/api/sync-to-cloud', async (req, res) => {
     };
 
    await Promise.all([
-      // 🟢 SITE SETTINGS & CMS
-      syncTable('cms', 'cms', r => ({ 
-        keyName: r.keyName, 
-        settingValue: r.settingValue 
-      }), 'keyName'),
+      syncTable('cms', 'cms', r => ({ keyName: r.keyName, settingValue: r.settingValue }), 'keyName'),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
-      
-      // 🟢 TABLE MANAGEMENT & SESSIONS
       syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
-      syncTable('session_history', 'session_history', r => ({ id: r.id, customerName: r.customerName, tableId: r.tableId, tableName: r.tableName, startTime: r.startTime, endTime: r.endTime, durationMinutes: r.durationMinutes, totalAmount: r.totalAmount, amountPaid: r.amountPaid, orders: r.orders, status: r.status || 'completed', closureReason: r.closureReason || null }), 'id'),
+      
+      // 🟢 AI FEATURES ADDED TO HISTORY SYNC
+      syncTable('session_history', 'session_history', r => ({ 
+        id: r.id, customerName: r.customerName, tableId: r.tableId, tableName: r.tableName, 
+        startTime: r.startTime, endTime: r.endTime, durationMinutes: r.durationMinutes, 
+        totalAmount: r.totalAmount, amountPaid: r.amountPaid, orders: r.orders, 
+        status: r.status || 'completed', closureReason: r.closureReason || null,
+        partySize: r.partySize || 2, occupancyRate: r.occupancyRate || 0.5 
+      }), 'id'),
+      
       syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime || new Date().toISOString() }), 'id'),
-      
-      // 🟢 PROMOS, EVENTS, ANNOUNCEMENTS & CLOSURES
-      syncTable('promo_codes', 'promo_codes', r => ({ 
-      id: r.id, 
-      code: r.code, 
-      discount_percent: r.discount_percent, 
-      description: r.description, 
-      is_active: !!r.is_active,             // Converts 1/0 to true/false
-      is_limited_uses: !!r.is_limited_uses, // Converts 1/0 to true/false
-      max_usage: r.max_usage, 
-      usage_count: r.usage_count, 
-      start_date: r.start_date || null, 
-      expires_at: r.expires_at || null 
-    }), 'id'),
-      syncTable('events', 'events', r => ({ 
-        id: r.id, 
-        title: r.title, 
-        date: r.date || null, 
-        type: r.type, 
-        description: r.description || '', 
-        duration: r.duration || 'Whole Day',
-        registrationLink: r.registrationLink || null, 
-        bracketLink: r.bracketLink || null,
-        minParticipants: r.minParticipants || 8,
-        maxParticipants: r.maxParticipants || 32,
-        slotsFull: r.slotsFull ? 1 : 0, 
-        attachments: r.attachments || null, 
-        allowReservations: r.allowReservations !== 0 ? 1 : 0, 
-        reservationTableCount: r.reservationTableCount || 4,
-        caterWalkIns: r.caterWalkIns !== 0 ? 1 : 0, 
-        walkInTableCount: r.walkInTableCount || 4,
-        isCancelled: r.isCancelled ? 1 : 0,
-        cancelReason: r.cancelReason || null
-      }), 'id'),
-      syncTable('announcements', 'announcements', r => ({ 
-        id: r.id, 
-        title: r.title, 
-        content: r.content, 
-        type: r.type, 
-        isActive: r.isActive ? 1 : 0, 
-        expiresAt: r.expiresAt || null, 
-        createdAt: r.createdAt || new Date().toISOString()
-        // 🟢 REMOVED startDate from cloud sync to prevent Supabase 500 crashes
-      }), 'id'),
-            syncTable('closed_dates', 'closed_dates', r => ({ 
-        id: r.id, 
-        closed_date: r.closed_date || null, 
-        type: r.type, 
-        day_of_week: r.day_of_week, 
-        reason: r.reason, 
-        is_full_day: !!r.is_full_day,         // Converts 1/0 to true/false
-        open_time: r.open_time, 
-        close_time: r.close_time 
-      }), 'id'),
-      
-      // 🟢 MENU INVENTORY
+      syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: !!r.is_active, is_limited_uses: !!r.is_limited_uses, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
+      syncTable('events', 'events', r => ({ id: r.id, title: r.title, date: r.date || null, type: r.type, description: r.description || '', duration: r.duration || 'Whole Day', registrationLink: r.registrationLink || null, bracketLink: r.bracketLink || null, minParticipants: r.minParticipants || 8, maxParticipants: r.maxParticipants || 32, slotsFull: r.slotsFull ? 1 : 0, attachments: r.attachments || null, allowReservations: r.allowReservations !== 0 ? 1 : 0, reservationTableCount: r.reservationTableCount || 4, caterWalkIns: r.caterWalkIns !== 0 ? 1 : 0, walkInTableCount: r.walkInTableCount || 4, isCancelled: r.isCancelled ? 1 : 0, cancelReason: r.cancelReason || null }), 'id'),
+      syncTable('announcements', 'announcements', r => ({ id: r.id, title: r.title, content: r.content, type: r.type, isActive: r.isActive ? 1 : 0, expiresAt: r.expiresAt || null, createdAt: r.createdAt || new Date().toISOString() }), 'id'),
+      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: !!r.is_full_day, open_time: r.open_time, close_time: r.close_time }), 'id'),
       syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id'),
-      
-      // 🟢 CUSTOMER RELATIONS & LOGS
       syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date || new Date().toISOString() }), 'id'),
       syncTable('lost_and_found', 'lost_and_found', r => ({ id: r.id, itemName: r.itemName, description: r.description, foundDate: r.foundDate || null, status: r.status, image: r.image || null, claimedBy: r.claimedBy || null, claimedDate: r.claimedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
       syncTable('watchlist', 'watchlist', r => ({ id: r.id, name: r.name, reason: r.reason, description: r.description, status: r.status, evidenceLink: r.evidenceLink || null, dateAdded: r.dateAdded || null, resolvedDate: r.resolvedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
-      syncTable('activities', 'activities', r => ({ id: r.id, type: r.type, description: r.description, timestamp: r.timestamp || new Date().toISOString(), metadata: r.metadata || null }), 'id')
+      syncTable('activities', 'activities', r => ({ id: r.id, type: r.type, description: r.description, timestamp: r.timestamp || new Date().toISOString(), metadata: r.metadata || null }), 'id'),
       
-      // ❌ EXCLUDED: 'reservations' (Source of Truth is Supabase)
-      // ❌ EXCLUDED: 'staff' (Stored strictly on Local Machine)
+      // 🟢 e-RECEIPTS CLOUD SYNC
+      syncTable('e_receipts', 'e_receipts', r => ({
+        id: r.id, receipt_no: r.receipt_no, reservation_id: r.reservation_id, customer_name: r.customer_name, customer_email: r.customer_email, customer_phone: r.customer_phone, table_id: r.table_id, table_name: r.table_name, play_start_time: r.play_start_time, play_end_time: r.play_end_time, duration_minutes: r.duration_minutes, table_rate: r.table_rate, table_charge: r.table_charge, overtime_charge: r.overtime_charge, fnb_charge: r.fnb_charge, subtotal: r.subtotal, discount_amount: r.discount_amount, total_amount: r.total_amount, amount_paid: r.amount_paid, balance_due: r.balance_due, payment_method: r.payment_method, payment_status: r.payment_status, created_at: r.created_at || new Date().toISOString()
+      }), 'id')
     ]);
 
     if (syncErrors.length > 0) {
@@ -558,11 +602,20 @@ app.post('/api/watchlist', (req, res) => {
 });
 
 app.post('/api/session-history', (req, res) => {
-  const { id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, orders } = req.body;
-  db.run(`INSERT INTO session_history (id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, orders) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  [id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, JSON.stringify(orders || [])], function(err) {
+  const { id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, orders, partySize, occupancyRate } = req.body;
+  db.run(`INSERT INTO session_history (id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, orders, partySize, occupancyRate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, JSON.stringify(orders || []), partySize || 2, occupancyRate || 0.5], function(err) {
     if (err) return res.status(500).json({ error: err.message });
-    res.status(201).json({ message: "Session history logged." });
+    res.status(201).json({ message: "Session history logged with AI telemetry." });
+  });
+});
+
+app.post('/api/e-receipts', (req, res) => {
+  const { id, receipt_no, reservation_id, customer_name, customer_email, customer_phone, table_id, table_name, play_start_time, play_end_time, duration_minutes, table_rate, table_charge, overtime_charge, fnb_charge, subtotal, discount_amount, total_amount, amount_paid, balance_due, payment_method, payment_status } = req.body;
+  db.run(`INSERT INTO e_receipts (id, receipt_no, reservation_id, customer_name, customer_email, customer_phone, table_id, table_name, play_start_time, play_end_time, duration_minutes, table_rate, table_charge, overtime_charge, fnb_charge, subtotal, discount_amount, total_amount, amount_paid, balance_due, payment_method, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, receipt_no, reservation_id, customer_name, customer_email, customer_phone, table_id, table_name, play_start_time, play_end_time, duration_minutes, table_rate, table_charge, overtime_charge, fnb_charge, subtotal, discount_amount, total_amount, amount_paid, balance_due, payment_method, payment_status], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "e-Receipt saved." });
   });
 });
 
@@ -622,7 +675,6 @@ app.post('/api/queue', (req, res) => {
   });
 });
 
-// 🟢 MISSING QUEUE ROUTES
 app.put('/api/queue/:id', (req, res) => {
   const updates = req.body;
   const keys = Object.keys(updates);
@@ -645,7 +697,6 @@ app.delete('/api/queue/:id', (req, res) => {
   });
 });
 
-// 🟢 MISSING WATCHLIST ROUTES
 app.put('/api/watchlist/:id', (req, res) => {
   const updates = req.body;
   const keys = Object.keys(updates);
@@ -666,14 +717,12 @@ app.put('/api/watchlist/:id', (req, res) => {
 });
 
 app.delete('/api/watchlist/:id', (req, res) => {
-  // Watchlist delete acts as an archive to retain history on Supabase
   db.run(`UPDATE watchlist SET isArchived = 1 WHERE id = ?`, [req.params.id], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Watchlist item archived." });
   });
 });
 
-// 🟢 MISSING LOST & FOUND ROUTES
 app.put('/api/lost-and-found/:id', (req, res) => {
   const updates = req.body;
   const keys = Object.keys(updates);
@@ -694,7 +743,6 @@ app.put('/api/lost-and-found/:id', (req, res) => {
 });
 
 app.delete('/api/lost-and-found/:id', (req, res) => {
-  // Lost & Found delete acts as an archive to retain history on Supabase
   db.run(`UPDATE lost_and_found SET isArchived = 1 WHERE id = ?`, [req.params.id], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Lost and found item archived." });
@@ -719,7 +767,6 @@ app.post('/api/events', (req, res) => {
     reservationTableIds, eventTableIds 
   } = req.body;
 
-  // Auto-generate ID if not provided by frontend
   const id = req.body.id || ('ev_' + Date.now() + '_' + Math.round(Math.random() * 1000));
   const createdAt = new Date().toISOString();
 
@@ -738,10 +785,7 @@ app.post('/api/events', (req, res) => {
       createdAt
     ],
     function (err) {
-      if (err) {
-        console.error("❌ CRASH IN /api/events POST:", err.message);
-        return res.status(500).json({ error: err.message });
-      }
+      if (err) return res.status(500).json({ error: err.message });
       res.status(201).json({ message: "Event created.", id });
     }
   );
@@ -898,19 +942,7 @@ app.post('/api/staff', (req, res) => {
   const { id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin } = req.body;
   db.run(
     `INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      username,
-      password,
-      fullName,
-      role || 'cashier',
-      phone || '',
-      joinedDate || new Date().toISOString(),
-      avatarImg || '',
-      isActive ? 1 : 0,
-      isAdmin ? 1 : 0,
-      recoveryPin || ''
-    ],
+    [id, username, password, fullName, role || 'cashier', phone || '', joinedDate || new Date().toISOString(), avatarImg || '', isActive ? 1 : 0, isAdmin ? 1 : 0, recoveryPin || ''],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.status(201).json({ message: "Staff user created successfully.", id });
@@ -984,7 +1016,6 @@ app.post('/api/inventory', (req, res) => {
   });
 });
 
-// 🟢 PUT SETTINGS (Supports both /api/settings/rates and /api/settings/terms)
 const updateSettingsHandler = (req, res) => {
   const payload = req.body;
   const keys = Object.keys(payload);

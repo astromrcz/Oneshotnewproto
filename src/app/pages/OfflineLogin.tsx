@@ -51,8 +51,14 @@ export function OfflineLogin() {
   const [pinSaved, setPinSaved] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const sliderImages = siteConfig?.heroImages && siteConfig.heroImages.length > 0 
-    ? siteConfig.heroImages 
+  // 🟢 SAFE PARSER: Prevents the .map() crash if database returns a string
+  let parsedImages: any[] = [];
+  try {
+    parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
+  } catch (e) {}
+
+  const sliderImages = Array.isArray(parsedImages) && parsedImages.length > 0 
+    ? parsedImages 
     : [
         'https://images.unsplash.com/photo-1595079676339-1534801ad6cb?q=80&w=2000&auto=format&fit=crop',
         'https://images.unsplash.com/photo-1514933651103-005eec06c04b?q=80&w=2000&auto=format&fit=crop',

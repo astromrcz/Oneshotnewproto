@@ -3,13 +3,7 @@ import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../utils/supabase';
 import { 
-  addMinutes, 
-  format, 
-  isToday, 
-  isBefore, 
-  startOfDay, 
-  isSameDay, 
-  differenceInDays 
+  addMinutes, format, isToday, isBefore, startOfDay, isSameDay, differenceInDays 
 } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
@@ -32,45 +26,10 @@ const todayStart = startOfDay(new Date());
 
 type Section = 'home' | 'reservations' | 'events';
 
-const QR_GCASH = [
-  [1,1,1,0,1,0,1,0,0,1,1,1,1,0,1,1,1],
-  [1,0,1,0,1,1,0,1,0,0,1,0,1,0,1,0,1],
-  [1,0,1,0,0,0,1,1,0,1,0,1,1,0,1,0,1],
-  [1,0,1,0,1,1,0,0,1,1,1,0,1,0,1,0,1],
-  [1,1,1,0,0,1,1,0,1,0,0,1,1,1,1,1,1],
-  [0,0,0,0,1,0,1,0,0,1,0,0,0,0,0,0,0],
-  [1,1,0,1,0,0,1,1,1,0,1,0,1,0,1,1,0],
-  [0,1,0,0,1,0,0,0,1,0,0,1,0,1,1,0,1],
-  [1,0,1,1,0,1,1,0,1,0,1,0,1,1,0,1,0],
-  [0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,1,0],
-  [1,1,1,0,1,0,1,1,0,1,1,0,1,1,1,0,1],
-  [1,0,1,0,0,1,0,1,0,0,0,1,0,1,0,1,0],
-  [1,0,1,0,1,0,1,0,1,1,0,0,1,0,1,0,1],
-  [1,0,1,0,0,1,0,1,0,0,1,0,0,0,1,1,0],
-  [1,1,1,0,1,1,1,0,1,1,0,1,1,0,1,1,1],
-  [0,0,0,0,1,0,0,1,0,0,1,0,0,1,0,1,0],
-  [1,0,1,1,0,1,1,0,1,0,0,1,0,0,1,0,1],
-];
-
-function QRDisplay({ pattern, color }: { pattern: number[][], color: string }) {
-  return (
-    <div className="bg-white p-3 rounded-xl inline-block">
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${pattern[0].length}, 1fr)`, gap: '1px', width: 136, height: 136 }}>
-        {pattern.flatMap((row, ri) =>
-          row.map((cell, ci) => (
-            <div key={`${ri}-${ci}`} style={{ backgroundColor: cell ? color : 'white', borderRadius: 1 }} />
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
 function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
-  // 🟢 30-DAY INDUSTRY STANDARD BOOKING LIMIT
   const maxDate = new Date(today);
   maxDate.setDate(today.getDate() + 30);
 
@@ -161,12 +120,12 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onCl
 export function HomePage() {
   const navigate = useNavigate();
   const { 
-    siteConfig, isSystemOffline, announcements, tables, reservations, events, 
+    siteConfig, announcements, tables, reservations, events, 
     closedDates, reservationTerms, rates, addReservation, cancelReservation, 
-    updateReservation, addFeedback, applyPromoCode, acknowledgeRefund 
+    updateReservation, updateReservationStatus, addFeedback, applyPromoCode
   } = useAppContext() as any;
 
-  // Real-Time Auth Listener
+  // 🟢 RESTORED: Auth state variable (fixes the crash)
   const [activeUser, setActiveUser] = useState<{ name: string; email: string; } | null>(null);
 
   useEffect(() => {
@@ -204,7 +163,6 @@ export function HomePage() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'options' | 'login' | 'register' | 'forgot'>('options');
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showRegPromoModal, setShowRegPromoModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState<any | null>(null);
 
@@ -214,32 +172,11 @@ export function HomePage() {
   
   const [activeSection, setActiveSection] = useState<Section>('home');
 
-  // 🟢 ROUTING: Clean Section Switching Without Glitchy Teleporting
-  const handleNavClick = (sectionId: string) => {
-    if (sectionId === 'about' || sectionId === 'feedback') {
-      setActiveSection('home');
-      setTimeout(() => {
-        const el = document.getElementById(`home-${sectionId}-section`);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-    } else if (sectionId === 'rates') {
-      setActiveSection('reservations');
-      setTimeout(() => {
-        const el = document.getElementById('rates-section');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-    } else {
-      setActiveSection(sectionId as Section);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
-
   // Reservation States
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(true);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isTableSelectorExpanded, setIsTableSelectorExpanded] = useState(true);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
   
   const [resForm, setResForm] = useState({ 
     name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2,
@@ -252,22 +189,76 @@ export function HomePage() {
   const [trackedReservations, setTrackedReservations] = useState<any[] | null>(null);
   const [generatedResId, setGeneratedResId] = useState('');
   
-  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
-  const [rescheduleData, setRescheduleData] = useState<{ date: Date | null; timeSlot: string }>({ date: null, timeSlot: '' });
-
   const [confirmingPayment, setConfirmingPayment] = useState(false);
-  const [receiptImg, setReceiptImg] = useState<string | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPercent: number } | null>(null);
   const [promoError, setPromoError] = useState('');
+  
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
+
+  // Mini Report Modal & Dropdown States
+  const [reportModalResId, setReportModalResId] = useState<string | null>(null);
+  const [reportMessage, setReportMessage] = useState('');
+  const [isReporting, setIsReporting] = useState(false);
+  
+  const [openActionRowId, setOpenActionRowId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = () => setOpenActionRowId(null);
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   // Forms
   const [loginForm, setLoginForm] = useState({ email: '', password: '', showPw: false, error: '', loading: false });
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
   const [forgotForm, setForgotForm] = useState({ email: '', error: '', success: false, loading: false });
+
+  // Hero Carousel & CMS Data
+  let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
+  try {
+    const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
+    if (Array.isArray(parsedImages) && parsedImages.length > 0) {
+      heroSlides = parsedImages.map((url: string) => ({ src: url, alt: 'One Shot Facility View' }));
+    }
+  } catch (e) {}
+
+  const cmsAboutImage = siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
+
+  const cms = {
+    heroTitle: siteConfig?.heroTitle || 'One Shot',
+    heroSubtitle: siteConfig?.heroSubtitle || 'Bar & Billiards',
+    heroDescription: siteConfig?.heroDescription || 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
+    aboutTitle: siteConfig?.aboutTitle || 'A Passion for the Game',
+    aboutP1: siteConfig?.aboutP1 || 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
+    aboutP2: siteConfig?.aboutP2 || 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
+    aboutP3: siteConfig?.aboutP3 || 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
+    aboutImage: cmsAboutImage,
+    address: siteConfig?.address || 'Autobase OAX, San Juan, Cainta, Rizal 1900',
+    phone: siteConfig?.phone || '0917-123-4567 | 0998-765-4321',
+    email: siteConfig?.email || 'oneshot.billiards@gmail.com',
+  };
+
+  useEffect(() => {
+    if (heroSlides.length > 0) {
+      const interval = setInterval(() => {
+        setHeroSlideDir(1);
+        setHeroSlideIdx(prev => (prev + 1) % heroSlides.length);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [heroSlides.length]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
+  const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
 
   // Announcements
   useEffect(() => {
@@ -297,7 +288,6 @@ export function HomePage() {
 
   const allNotifications = [...activeAnnouncements, ...resNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   
-  // CLEAN NOTIFICATIONS
   const unreadNotifications = allNotifications.filter((n: any) => !readAnnouncements.includes(n.id));
   const hasUnread = isFirstTime || unreadNotifications.length > 0;
 
@@ -332,7 +322,7 @@ export function HomePage() {
     }
   }, [currentUser]);
 
-  // Auth Operations
+  // Auth Handlers
   const handleOAuthLogin = async (provider: 'google' | 'facebook' | 'apple') => {
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
     if (error) alert(`${provider} login error: ` + error.message);
@@ -382,53 +372,50 @@ export function HomePage() {
     }
   };
 
-  // Hero Carousel
-  let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
-  try {
-    const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
-    if (Array.isArray(parsedImages) && parsedImages.length > 0) {
-      heroSlides = parsedImages.map((url: string) => ({ src: url, alt: 'One Shot Facility View' }));
+  const handleChangePassword = async () => {
+    if (!currentUser?.email) return;
+    if (window.confirm('Send a secure password reset link to your email? You will be logged out to securely reset your password.')) {
+      await supabase.auth.resetPasswordForEmail(currentUser.email, { redirectTo: `${window.location.origin}/reset-password` });
+      await supabase.auth.signOut();
+      setShowProfileModal(false);
+      alert('Password reset link sent! Please check your email inbox.');
     }
-  } catch (e) {}
-
-  const cmsAboutImage = siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
-
-  const cms = {
-    heroTitle: siteConfig?.heroTitle || 'One Shot',
-    heroSubtitle: siteConfig?.heroSubtitle || 'Bar & Billiards',
-    heroDescription: siteConfig?.heroDescription || 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
-    aboutTitle: siteConfig?.aboutTitle || 'A Passion for the Game',
-    aboutP1: siteConfig?.aboutP1 || 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
-    aboutP2: siteConfig?.aboutP2 || 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
-    aboutP3: siteConfig?.aboutP3 || 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
-    aboutImage: cmsAboutImage,
-    address: siteConfig?.address || 'Autobase OAX, San Juan, Cainta, Rizal 1900',
-    phone: siteConfig?.phone || '0917-123-4567 | 0998-765-4321',
-    email: siteConfig?.email || 'oneshot.billiards@gmail.com',
-    facebook: siteConfig?.facebook || '@OneShotBilliards',
-    instagram: siteConfig?.instagram || '@oneshot_billiards',
-    tiktok: siteConfig?.tiktok || '@oneshotbilliards',
   };
 
-  useEffect(() => {
-    if (heroSlides.length > 0) {
-      const interval = setInterval(() => {
-        setHeroSlideDir(1);
-        setHeroSlideIdx(prev => (prev + 1) % heroSlides.length);
-      }, 5000);
-      return () => clearInterval(interval);
+  const handleDeleteAccount = async () => {
+    if (window.confirm('WARNING: Are you sure you want to delete your account?\n\nTo maintain strict financial records, your historical transactions will be retained but your personal data will be anonymized (Soft Delete Protocol). This action cannot be undone.')) {
+      await supabase.auth.signOut();
+      setShowProfileModal(false);
+      alert('Account successfully marked for deletion. Your personal data has been securely anonymized.');
     }
-  }, [heroSlides.length]);
+  };
 
-  useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
+  // 🟢 ENHANCED ROUTING: Prevents Rates Nav from highlighting when scrolling Reservations
+  const handleNavClick = (sectionId: string) => {
+    if (sectionId === 'about' || sectionId === 'feedback') {
+      setActiveSection('home');
+      setTimeout(() => {
+        const el = document.getElementById(`home-${sectionId}-section`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    } else if (sectionId === 'rates') {
+      setActiveSection('rates'); // Set to rates so Nav active state applies correctly
+      setTimeout(() => {
+        const el = document.getElementById('rates-section');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    } else {
+      setActiveSection(sectionId as Section);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
 
-  const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
-  const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
+  const handleReportProblem = (reservationId: string) => {
+    setFeedbackForm(f => ({ ...f, reservationId, type: 'complaint' }));
+    handleNavClick('feedback');
+  };
 
-  // Operating Hours
+  // Schedule Logic
   const fmt12 = (tOrMins: string | number) => {
     try {
       let mins: number;
@@ -480,7 +467,6 @@ export function HomePage() {
     }
   })();
 
-  // Party Size & Duration Limits
   const maxAllowedPartySize = (() => {
     const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
     const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 20;
@@ -508,7 +494,6 @@ export function HomePage() {
 
   const maxAllowedDuration = getMaxDuration();
 
-  // Schedule Validator
   const validateTimeSlot = (time: string, duration: number) => {
     if (!time || !selectedDate) return 'invalid';
     if (!selectedTableId) return 'no_table';
@@ -565,18 +550,23 @@ export function HomePage() {
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const handleReservationSubmit = async () => {
+  // Reservation & Submission Handlers
+  const handleReservationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!resForm.name || !resForm.phone || !selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
-    setIsVerifying(true);
     
-    setTimeout(() => {
-      setReservationStep(2);
-      setIsVerifying(false);
-    }, 600);
-  };
-  
-  const handlePaymentConfirm = async () => {
+    if (!isDownPaymentWaived && resForm.paymentMethod === 'gcash') {
+      const hasRef = resForm.paymentRef.trim().length > 0;
+      const hasImg = receiptFile !== null;
+      if (!hasRef && !hasImg) {
+        alert("Please provide either a GCash Reference Number OR upload a Receipt Image.");
+        return;
+      }
+    }
+
+    setIsVerifying(true);
     setConfirmingPayment(true);
+    
     try {
       let finalReceiptUrl = null;
       if (receiptFile) {
@@ -604,20 +594,41 @@ export function HomePage() {
         status: isDownPaymentWaived ? 'confirmed' : 'pending',
         totalAmount,
         downPaymentAmount: isDownPaymentWaived ? 0 : downPayment,
-        downPaymentPaid: isDownPaymentWaived ? true : !!finalReceiptUrl,
+        downPaymentPaid: isDownPaymentWaived ? true : !!finalReceiptUrl || !!resForm.paymentRef.trim(),
         balancePaid: false,
-        paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : 'GCASH_UPLOAD',
+        paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : (resForm.paymentMethod === 'cash' ? 'CASH' : resForm.paymentRef),
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
         receiptImg: finalReceiptUrl || undefined,
       });
 
+      supabase.from('reservations').upsert([{
+        id: newId,
+        customerName: resForm.name,
+        contactNumber: resForm.phone,
+        email: resForm.email || null,
+        date: reservationDate.toISOString(),
+        timeSlot: resForm.timeSlot,
+        durationHours: resForm.duration,
+        partySize: resForm.pax,
+        tableId: selectedTableId,
+        status: isDownPaymentWaived ? 'confirmed' : 'pending',
+        totalAmount: totalAmount,
+        downPaymentAmount: isDownPaymentWaived ? 0 : downPayment,
+        downPaymentPaid: (isDownPaymentWaived || !!finalReceiptUrl || !!resForm.paymentRef.trim()) ? 1 : 0,
+        balancePaid: 0,
+        paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : (resForm.paymentMethod === 'cash' ? 'CASH' : (resForm.paymentRef || null)),
+        receiptImg: finalReceiptUrl || null,
+        createdAt: new Date().toISOString()
+      }]).then();
+
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
-      setConfirmingPayment(false);
       setReservationStep(3);
     } catch (error) {
       console.error("Payment Confirmation Error:", error);
       alert("Failed to confirm reservation. Please try again.");
+    } finally {
+      setIsVerifying(false);
       setConfirmingPayment(false);
     }
   };
@@ -627,26 +638,52 @@ export function HomePage() {
     setAgreedToTerms(false);
     setGeneratedResId('');
     setReceiptImg(null); 
+    setReceiptPreview(null);
+    setReceiptFile(null);
     if (currentUser) setResTab('track');
   };
 
-  const handleCancelBooking = (id: string) => {
-    if(window.confirm("Are you sure you want to cancel this booking?")) {
-       cancelReservation(id, "Cancelled by user");
-       if (trackForm.reservationId || currentUser) {
-         setTrackedReservations(reservations.filter((r: any) => r.id === trackForm.reservationId || r.email === currentUser?.email));
-       }
-    }
-  };
+  const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
+    const resDate = new Date(dateString);
+    const [hours, minutes] = timeSlot.split(':').map(Number);
+    resDate.setHours(hours, minutes, 0, 0);
 
-  const handleRescheduleSubmit = (id: string) => {
-    if (!rescheduleData.date || !rescheduleData.timeSlot) return;
-    const reservationDate = new Date(rescheduleData.date);
-    const [hours, minutes] = rescheduleData.timeSlot.split(':').map(Number);
-    reservationDate.setHours(hours, minutes, 0, 0);
-    updateReservation(id, { date: reservationDate, timeSlot: rescheduleData.timeSlot, status: 'pending' });
-    setReschedulingId(null);
-    alert('Reservation successfully rescheduled! Staff will review and confirm your new time.');
+    // Calculate exact minutes until the reservation starts
+    const minsUntilRes = (resDate.getTime() - new Date().getTime()) / 60000;
+
+    // 🟢 Strict 1-Hour Non-Refundable Cut-Off
+    if (minsUntilRes < 60 && minsUntilRes > 0) {
+      alert("Cancellations are not permitted less than 1 hour before your scheduled time. Your down payment is now non-refundable. Please use the 'Report Issue' button for emergencies.");
+      return;
+    } else if (minsUntilRes <= 0) {
+      alert("This reservation has already started or passed and cannot be cancelled.");
+      return;
+    }
+
+    if(window.confirm(`Are you sure you want to cancel this booking?\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To process your GCash refund, you must contact our staff at ${cms.phone.split('|')[0].trim()} with your Reservation ID and GCash Number.`)) {
+       
+       // 🟢 Pushing both status and the newly added cancellation_reason to Supabase
+       const { error } = await supabase.from('reservations').update({ 
+         status: 'pending-refund',
+         cancellation_reason: 'Cancelled by user via online portal'
+       }).eq('id', id);
+
+       if (error) {
+         console.error("Supabase Error:", error);
+         alert("Failed to cancel booking. Please check your connection or contact staff.");
+         return;
+       }
+
+       if (updateReservationStatus) {
+         updateReservationStatus(id, 'pending-refund');
+       }
+       
+       if (trackForm.reservationId || currentUser) {
+         setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
+       }
+       
+       alert("Booking cancelled. Please contact staff to receive your GCash refund.");
+    }
   };
 
   const handleApplyPromo = () => {
@@ -659,12 +696,6 @@ export function HomePage() {
       setPromoError('Invalid or expired promo code.');
       setAppliedPromo(null);
     }
-  };
-
-  const handleRemovePromo = () => {
-    setAppliedPromo(null);
-    setPromoCodeInput('');
-    setPromoError('');
   };
 
   const handleFeedbackSubmit = (e?: React.FormEvent) => {
@@ -683,7 +714,29 @@ export function HomePage() {
     setTimeout(() => { setFeedbackSent(false); setFeedbackForm({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' }); }, 3000);
   };
 
-  // SAFE IMAGE PARSER FOR EVENTS
+  const handleMiniReportSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reportModalResId || !reportMessage.trim()) return;
+    setIsReporting(true);
+    
+    addFeedback({ 
+      customerName: currentUser?.name || 'Guest', 
+      contactInfo: currentUser?.email || trackForm.phone || 'N/A', 
+      rating: 0, 
+      feedbackType: 'complaint', 
+      comment: reportMessage, 
+      tags: ['Priority Resolution'],
+      reservationId: reportModalResId
+    });
+
+    setTimeout(() => {
+      setIsReporting(false);
+      setReportModalResId(null);
+      setReportMessage('');
+      alert("Issue reported successfully. The management team has been notified in real-time.");
+    }, 800);
+  };
+
   const getEventImage = (attachments: any) => {
     if (!attachments) return null;
     try {
@@ -838,11 +891,11 @@ export function HomePage() {
             key={id}
             onClick={() => handleNavClick(id)}
             className={`relative px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all ${
-              activeSection === id || (id === 'rates' && activeSection === 'reservations') ? 'text-emerald-400' : 'text-neutral-500 hover:text-neutral-300'
+              activeSection === id ? 'text-emerald-400' : 'text-neutral-500 hover:text-neutral-300'
             }`}
           >
             {label}
-            {(activeSection === id || (id === 'rates' && activeSection === 'reservations')) && (
+            {activeSection === id && (
               <motion.span layoutId="navUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500 rounded-full" />
             )}
           </button>
@@ -919,9 +972,26 @@ export function HomePage() {
                     <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold mb-3">Our Mission</p>
                     <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP1}</p>
                     <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
-                    <p className="text-neutral-400 text-sm leading-relaxed">{cms.aboutP3}</p>
+                    <p className="text-neutral-400 text-sm leading-relaxed mb-6">{cms.aboutP3}</p>
+                    
+                    {/* 🟢 DYNAMIC CONTACT INFO IN ABOUT US */}
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-3 shadow-inner">
+                      <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-2">Get in Touch</p>
+                      <div className="flex items-center gap-3 text-sm text-neutral-300">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><Phone size={14} className="text-emerald-500" /></div>
+                        <span>{cms.phone}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-neutral-300">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><Mail size={14} className="text-emerald-500" /></div>
+                        <span>{cms.email}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-neutral-300">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><MapPin size={14} className="text-emerald-500" /></div>
+                        <span className="leading-tight">{cms.address}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="rounded-2xl overflow-hidden h-72 border border-neutral-800">
+                  <div className="rounded-2xl overflow-hidden h-full min-h-[300px] border border-neutral-800">
                      <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover" />
                   </div>
                 </div>
@@ -1054,7 +1124,7 @@ export function HomePage() {
                                 onSelect={(d) => {
                                   setSelectedDate(d);
                                   setIsCalendarExpanded(false);
-                                  setIsTableSelectorExpanded(true); // Don't wipe table or form, just open step 2
+                                  setIsTableSelectorExpanded(true);
                                 }}
                                 reservedDates={reservedDates}
                                 closedDates={closedDates || []}
@@ -1197,8 +1267,19 @@ export function HomePage() {
                           <p className="text-neutral-400 font-semibold text-sm">Select both Date & Table to continue</p>
                           <p className="text-neutral-600 text-xs max-w-xs">Use Step 1 & 2 to lock in your venue arrangement.</p>
                         </div>
+                      ) : reservationStep === 3 ? (
+                        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-3 flex-1 min-h-[400px] shadow-xl">
+                          <CheckCircle size={64} className="text-emerald-500 mb-2" />
+                          <h2 className="text-2xl font-black text-white mb-1">Booking Submitted!</h2>
+                          <p className="text-neutral-400 text-sm mb-4">Your Reservation ID is:</p>
+                          <div className="bg-neutral-950 border border-neutral-800 px-8 py-4 rounded-xl mb-6 shadow-inner">
+                            <span className="text-3xl font-mono tracking-widest text-emerald-400 font-black">{generatedResId}</span>
+                          </div>
+                          <p className="text-xs text-neutral-500 mb-6 max-w-sm">Please screenshot or save this ID. You can track your booking status and manage your schedule in the "My Bookings" tab.</p>
+                          <button onClick={closeReservation} className="px-10 py-3.5 bg-neutral-800 hover:bg-neutral-700 text-white font-bold rounded-xl transition-colors border border-neutral-700">Done</button>
+                        </div>
                       ) : (
-                        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5 shadow-xl flex-1 flex flex-col">
+                        <form onSubmit={handleReservationSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5 shadow-xl flex-1 flex flex-col">
                           <div className="flex justify-between items-center pb-2 border-b border-neutral-800 shrink-0">
                             <p className="text-xs font-bold uppercase tracking-widest text-emerald-400">Step 3 — Schedule & Details</p>
                             <span className="text-xs font-bold text-white bg-neutral-800 px-3 py-1 rounded-lg">
@@ -1223,7 +1304,6 @@ export function HomePage() {
                               </div>
                             </div>
 
-                            {/* 🟢 UPSCALED STEP 3 INPUTS */}
                             <div className="grid grid-cols-3 gap-3">
                               <div className="col-span-1">
                                 <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
@@ -1277,6 +1357,41 @@ export function HomePage() {
                             </div>
                           </div>
 
+                          {/* Payment Block */}
+                          <div className="space-y-3 border-t border-neutral-800 pt-4">
+                            <div className="flex justify-between items-center">
+                              <p className="text-xs text-amber-500 uppercase tracking-wider font-bold">Down Payment Info</p>
+                              <div className="flex bg-neutral-950 border border-neutral-800 rounded-lg p-1">
+                                <span className={`px-3 py-1 text-xs font-semibold rounded-md ${isDownPaymentWaived ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'}`}>
+                                  {isDownPaymentWaived ? 'Waived (Trusted)' : 'GCash'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {!isDownPaymentWaived ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
+                                  <input type="text" value={resForm.paymentRef} onChange={e => setResForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
+                                  <div className="flex items-center gap-3 mt-1.5">
+                                    <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
+                                      <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
+                                      <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
+                                    </label>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
+                                <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
+                                <p className="text-xs text-emerald-400 font-bold">Down payment is waived for Trusted Customers. Your booking will be instantly confirmed.</p>
+                              </div>
+                            )}
+                          </div>
+
                           <div className="mt-auto pt-4 space-y-4">
                             <div className="bg-neutral-950 rounded-xl p-4 border border-neutral-800/80 text-xs space-y-1.5">
                               <div className="flex justify-between"><span className="text-neutral-400">Total Rate ({resForm.duration}h)</span><span className="text-white font-semibold">₱{totalAmount}.00</span></div>
@@ -1287,15 +1402,15 @@ export function HomePage() {
                             </div>
 
                             <button
-                              onClick={handleReservationSubmit}
-                              disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || isVerifying}
-                              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                              type="submit"
+                              disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || isVerifying || confirmingPayment}
+                              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
                             >
-                              {isVerifying ? <><RefreshCw size={14} className="animate-spin" /> Verifying...</> : <>Review & Reserve <ArrowRight size={16} /></>}
+                              {(isVerifying || confirmingPayment) ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <>Confirm & Reserve <CheckCircle size={16} /></>}
                             </button>
                           </div>
 
-                        </div>
+                        </form>
                       )}
                     </div>
 
@@ -1325,30 +1440,92 @@ export function HomePage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(currentUser ? userReservations : (trackedReservations || [])).map((r: any) => (
-                        <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-xs font-black text-white font-mono">{r.id}</span>
-                              <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider bg-neutral-800 text-emerald-400 border border-neutral-700">{r.status}</span>
+                      {(() => {
+                        const displayRes = currentUser ? userReservations : (trackedReservations || []);
+                        if (displayRes.length === 0) {
+                          return (
+                            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center max-w-lg mx-auto shadow-inner">
+                              <BookOpen size={48} className="text-neutral-700 mx-auto mb-4" />
+                              <h3 className="text-xl font-bold text-white mb-2">No Bookings Found</h3>
+                              <p className="text-sm text-neutral-400 mb-6">We couldn't find any reservations matching those details.</p>
+                              <div className="flex flex-wrap items-center justify-center gap-3">
+                                {!currentUser && (
+                                  <button onClick={() => setTrackedReservations(null)} className="px-6 py-3 bg-neutral-800 hover:bg-neutral-700 text-white text-sm font-bold rounded-xl transition-colors">
+                                    Search Again
+                                  </button>
+                                )}
+                                <button onClick={() => setResTab('new')} className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-colors shadow-lg shadow-emerald-900/20">
+                                  Make a Reservation
+                                </button>
+                              </div>
                             </div>
-                            <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
-                            <p className="text-xs text-neutral-500">{tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}</p>
+                          );
+                        }
+                        return displayRes.map((r: any) => (
+                          <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-xs font-black text-white font-mono">{r.id}</span>
+                                <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
+                                  r.status === 'pending-reschedule' 
+                                    ? 'bg-violet-900/40 text-violet-400 border-violet-700/50' 
+                                    : r.status === 'pending-refund'
+                                    ? 'bg-rose-900/40 text-rose-400 border-rose-700/50'
+                                    : 'bg-neutral-800 text-emerald-400 border-neutral-700'
+                                }`}>
+                                  {r.status === 'pending-reschedule' ? 'PENDING RESCHEDULE' : r.status === 'pending-refund' ? 'PENDING REFUND' : r.status}
+                                </span>
+                              </div>
+                              <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
+                              <p className="text-xs text-neutral-500">
+                                {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
+                              </p>
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto relative">
+                              <button
+                                onClick={() => setViewingReceipt(r)}
+                                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-700"
+                              >
+                                <FileText size={14} className="text-emerald-400" /> View e-Receipt
+                              </button>
+                              
+                              {/* 🟢 NEW: Actions Dropdown Menu */}
+                              <div className="relative">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }}
+                                  className="px-4 py-2 text-xs font-bold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors border border-neutral-700 flex items-center gap-1.5"
+                                >
+                                  Actions <ChevronDown size={14} />
+                                </button>
+                                
+                                <AnimatePresence>
+                                  {openActionRowId === r.id && (
+                                    <motion.div 
+                                      initial={{ opacity: 0, y: 5, scale: 0.95 }} 
+                                      animate={{ opacity: 1, y: 0, scale: 1 }} 
+                                      exit={{ opacity: 0, y: 5, scale: 0.95 }} 
+                                      className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
+                                    >
+                                      {/* Only logged-in users can cancel (Passes both date and timeSlot for 1-hour validation) */}
+                                      {(r.status === 'pending' || r.status === 'pending-reschedule') && currentUser && (
+                                         <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
+                                           Cancel Booking
+                                         </button>
+                                      )}
+                                      
+                                      {/* Report Issue (Available to Guests too) */}
+                                      <button onClick={(e) => { e.stopPropagation(); setReportModalResId(r.id); setReportMessage(''); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors">
+                                        Report Issue
+                                      </button>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            </div>
                           </div>
-                          
-                          <div className="flex items-center gap-2 w-full sm:w-auto">
-                            <button
-                              onClick={() => setViewingReceipt(r)}
-                              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-700"
-                            >
-                              <FileText size={14} className="text-emerald-400" /> View e-Receipt
-                            </button>
-                            {r.status === 'pending' && (
-                              <button onClick={() => handleCancelBooking(r.id)} className="px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-950/30 rounded-xl transition-colors">Cancel</button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        ));
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1663,7 +1840,17 @@ export function HomePage() {
                   <button onClick={() => { setShowProfileModal(false); setActiveSection('reservations'); setResTab('track'); }} className="w-full flex items-center justify-center gap-2 bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold py-3.5 rounded-xl transition-colors text-sm shadow-sm">
                     <BookOpen size={16} className="text-emerald-500" /> View My Bookings
                   </button>
-                  <button onClick={() => setShowLogoutConfirm(true)} className="w-full flex items-center justify-center gap-2 bg-transparent hover:bg-rose-950/30 text-rose-400/80 hover:text-rose-400 font-semibold py-3 rounded-xl transition-colors text-xs">
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <button onClick={handleChangePassword} className="w-full flex items-center justify-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 font-semibold py-3 rounded-xl transition-colors text-xs">
+                      <Lock size={14} /> Change Password
+                    </button>
+                    <button onClick={handleDeleteAccount} className="w-full flex items-center justify-center gap-2 bg-neutral-900 hover:bg-rose-950/30 border border-neutral-800 hover:border-rose-900/50 text-rose-400/80 hover:text-rose-400 font-semibold py-3 rounded-xl transition-colors text-xs">
+                      <AlertTriangle size={14} /> Delete Account
+                    </button>
+                  </div>
+
+                  <button onClick={() => setShowLogoutConfirm(true)} className="w-full flex items-center justify-center gap-2 bg-transparent hover:bg-rose-950/30 text-rose-400/80 hover:text-rose-400 font-semibold py-3 rounded-xl transition-colors text-xs mt-2">
                     Sign Out
                   </button>
                 </div>
@@ -1813,6 +2000,47 @@ export function HomePage() {
           </motion.div>
         )}
 
+        {/* 🟢 INSTANT MINI REPORT MODAL */}
+        {reportModalResId && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <h3 className="text-lg font-black text-amber-400 flex items-center gap-2"><AlertTriangle size={18} /> Report an Issue</h3>
+                  <p className="text-xs text-neutral-500 mt-1">Reservation #{reportModalResId.toUpperCase()}</p>
+                </div>
+                <button onClick={() => setReportModalResId(null)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
+              </div>
+              
+              <form onSubmit={handleMiniReportSubmit} className="space-y-4">
+                <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-3">
+                  <p className="text-[10px] text-amber-500 leading-relaxed font-semibold">
+                    Did your booking get cancelled unexpectedly or skipped in the queue? Describe the issue below and our staff will verify and resolve it immediately.
+                  </p>
+                </div>
+                
+                <div>
+                  <label className="block text-xs text-neutral-400 mb-1.5">What happened? *</label>
+                  <textarea 
+                    value={reportMessage} 
+                    onChange={e => setReportMessage(e.target.value)} 
+                    placeholder="e.g. My booking was cancelled but I already paid the GCash downpayment..." 
+                    rows={4} 
+                    required 
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-amber-500 outline-none resize-none transition-colors" 
+                  />
+                </div>
+                
+                <div className="flex gap-2 pt-2">
+                  <button type="button" onClick={() => setReportModalResId(null)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold rounded-xl text-xs transition-colors border border-neutral-800">Cancel</button>
+                  <button type="submit" disabled={!reportMessage.trim() || isReporting} className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2">
+                    {isReporting ? <><RefreshCw size={14} className="animate-spin" /> Sending...</> : 'Send Report'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );

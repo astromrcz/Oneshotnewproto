@@ -6,7 +6,7 @@ import {
   Menu, X, Bell, ChevronRight,
   LogOut, Settings,
   Monitor, ShieldCheck, Lock, ShieldAlert, Package, History,
-  AlertTriangle, Sparkles
+  AlertTriangle, Sparkles, MessageSquare
 } from 'lucide-react';
 import { addMinutes, differenceInSeconds } from 'date-fns';
 import { useAppContext } from './context/AppContext';
@@ -15,15 +15,16 @@ import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import { FirstTimeLoginModal } from './components/FirstTimeLoginModal';
 
 const navItems = [
-  { to: '/staff',                     icon: CheckCircle, label: 'Overview',            exact: true },
-  { to: '/staff/tables',              icon: Clock,       label: 'Table Monitor' },
-  { to: '/staff/reservations',        icon: Calendar,    label: 'Reservations' },
-  { to: '/staff/queue',               icon: UserPlus,    label: 'Queue' },
-  { to: '/staff/promo-codes',         icon: Tag,         label: 'Promo Codes' },
-  { to: '/staff/history',             icon: History,     label: 'Session History' }, 
-  { to: '/staff/lost-found',          icon: Package,     label: 'Lost & Found' },
-  { to: '/staff/watchlist',           icon: ShieldAlert, label: 'Security Watchlist' },
-  { to: '/staff/settings',            icon: Settings,    label: 'Settings' },
+  { to: '/staff',                     icon: CheckCircle,   label: 'Overview',            exact: true },
+  { to: '/staff/tables',              icon: Clock,         label: 'Table Monitor' },
+  { to: '/staff/reservations',        icon: Calendar,      label: 'Reservations' },
+  { to: '/staff/queue',               icon: UserPlus,      label: 'Queue' },
+  { to: '/staff/promo-codes',         icon: Tag,           label: 'Promo Codes' },
+  { to: '/staff/history',             icon: History,       label: 'Session History' }, 
+  { to: '/staff/lost-found',          icon: Package,       label: 'Lost & Found' },
+  { to: '/staff/watchlist',           icon: ShieldAlert,   label: 'Security Watchlist' },
+  { to: '/staff/feedback',            icon: MessageSquare, label: 'Feedback' }, // 🟢 NEW: Added Feedback Link
+  { to: '/staff/settings',            icon: Settings,      label: 'Settings' },
 ];
 
 const pageTitles: Record<string, string> = {
@@ -35,6 +36,7 @@ const pageTitles: Record<string, string> = {
   '/staff/watchlist': 'Security Watchlist',
   '/staff/promo-codes': 'Promo Codes',
   '/staff/history': 'Session History',
+  '/staff/feedback': 'Customer Feedback', // 🟢 NEW: Page Title
   '/staff/settings': 'Settings',
 };
 

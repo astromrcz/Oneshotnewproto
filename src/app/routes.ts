@@ -50,6 +50,7 @@ export const router = createBrowserRouter([
           { path: 'history', Component: SessionHistory },
           { path: 'lost-found', Component: LostAndFound },
           { path: 'watchlist', Component: Watchlist },
+          { path: 'feedback', Component: FeedbackPage }, // 🟢 NEW: Added Feedback to Staff Routes
           { path: 'settings', Component: SettingsPage },
         ],
       },

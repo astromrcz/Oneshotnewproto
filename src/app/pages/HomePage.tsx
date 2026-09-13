@@ -24,7 +24,7 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 
 const todayStart = startOfDay(new Date());
 
-type Section = 'home' | 'reservations' | 'events';
+type Section = 'home' | 'reservations' | 'events' | 'rates';
 
 function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; }) {
   const today = new Date();
@@ -205,6 +205,32 @@ export function HomePage() {
   const [isReporting, setIsReporting] = useState(false);
   
   const [openActionRowId, setOpenActionRowId] = useState<string | null>(null);
+  
+  // 🟢 NEW: Toast, Scroll, and Terms Modal States
+  const [toastMsg, setToastMsg] = useState<{title: string, desc: string, type: 'success'|'error'} | null>(null);
+  const [pendingScroll, setPendingScroll] = useState<string | null>(null);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [receiptImg, setReceiptImg] = useState<string | null>(null);
+
+
+  useEffect(() => {
+    if (toastMsg) {
+      const timer = setTimeout(() => setToastMsg(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMsg]);
+
+  useEffect(() => {
+    if (activeSection === 'home' && pendingScroll) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`home-${pendingScroll}-section`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setPendingScroll(null);
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [activeSection, pendingScroll]);
 
   useEffect(() => {
     const handleClickOutside = () => setOpenActionRowId(null);
@@ -391,21 +417,13 @@ export function HomePage() {
   };
 
   // 🟢 ENHANCED ROUTING: Prevents Rates Nav from highlighting when scrolling Reservations
+  // 🟢 ENHANCED ROUTING: Smooth cross-tab anchor scrolling
   const handleNavClick = (sectionId: string) => {
     if (sectionId === 'about' || sectionId === 'feedback') {
       setActiveSection('home');
-      setTimeout(() => {
-        const el = document.getElementById(`home-${sectionId}-section`);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-    } else if (sectionId === 'rates') {
-      setActiveSection('rates'); // Set to rates so Nav active state applies correctly
-      setTimeout(() => {
-        const el = document.getElementById('rates-section');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
+      setPendingScroll(sectionId);
     } else {
-      setActiveSection(sectionId as Section);
+      setActiveSection(sectionId as Section | 'rates');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
@@ -551,7 +569,8 @@ export function HomePage() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   // Reservation & Submission Handlers
-  const handleReservationSubmit = async (e: React.FormEvent) => {
+  // Reservation & Submission Handlers
+  const handleReservationSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resForm.name || !resForm.phone || !selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
     
@@ -563,7 +582,12 @@ export function HomePage() {
         return;
       }
     }
+    // 🟢 Open the Terms & Conditions Modal instead of submitting directly
+    setShowTermsModal(true);
+  };
 
+  const executeReservation = async () => {
+    setShowTermsModal(false);
     setIsVerifying(true);
     setConfirmingPayment(true);
     
@@ -602,7 +626,7 @@ export function HomePage() {
         receiptImg: finalReceiptUrl || undefined,
       });
 
-      supabase.from('reservations').upsert([{
+      await supabase.from('reservations').upsert([{
         id: newId,
         customerName: resForm.name,
         contactNumber: resForm.phone,
@@ -620,13 +644,14 @@ export function HomePage() {
         paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : (resForm.paymentMethod === 'cash' ? 'CASH' : (resForm.paymentRef || null)),
         receiptImg: finalReceiptUrl || null,
         createdAt: new Date().toISOString()
-      }]).then();
+      }]);
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
       setReservationStep(3);
+      setToastMsg({ title: "Booking Successful", desc: `Reservation ${newId} confirmed!`, type: 'success' });
     } catch (error) {
       console.error("Payment Confirmation Error:", error);
-      alert("Failed to confirm reservation. Please try again.");
+      setToastMsg({ title: "Error", desc: "Failed to confirm reservation. Please try again.", type: 'error' });
     } finally {
       setIsVerifying(false);
       setConfirmingPayment(false);
@@ -648,41 +673,50 @@ export function HomePage() {
     const [hours, minutes] = timeSlot.split(':').map(Number);
     resDate.setHours(hours, minutes, 0, 0);
 
-    // Calculate exact minutes until the reservation starts
     const minsUntilRes = (resDate.getTime() - new Date().getTime()) / 60000;
 
     // 🟢 Strict 1-Hour Non-Refundable Cut-Off
     if (minsUntilRes < 60 && minsUntilRes > 0) {
-      alert("Cancellations are not permitted less than 1 hour before your scheduled time. Your down payment is now non-refundable. Please use the 'Report Issue' button for emergencies.");
+      setToastMsg({ title: "Action Denied", desc: "Cancellations within 1 hour are non-refundable. Please use 'Report Issue'.", type: 'error' });
       return;
     } else if (minsUntilRes <= 0) {
-      alert("This reservation has already started or passed and cannot be cancelled.");
+      setToastMsg({ title: "Action Denied", desc: "This reservation has already started or passed.", type: 'error' });
       return;
     }
 
     if(window.confirm(`Are you sure you want to cancel this booking?\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To process your GCash refund, you must contact our staff at ${cms.phone.split('|')[0].trim()} with your Reservation ID and GCash Number.`)) {
        
-       // 🟢 Pushing both status and the newly added cancellation_reason to Supabase
+       // 🟢 Directly updating Supabase without relying on missing context functions
        const { error } = await supabase.from('reservations').update({ 
-         status: 'pending-refund',
-         cancellation_reason: 'Cancelled by user via online portal'
+         status: 'pending-refund'
        }).eq('id', id);
 
        if (error) {
-         console.error("Supabase Error:", error);
-         alert("Failed to cancel booking. Please check your connection or contact staff.");
+         setToastMsg({ title: "Error", desc: "Failed to cancel booking. Please check connection.", type: 'error' });
          return;
-       }
-
-       if (updateReservationStatus) {
-         updateReservationStatus(id, 'pending-refund');
        }
        
        if (trackForm.reservationId || currentUser) {
          setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
        }
        
-       alert("Booking cancelled. Please contact staff to receive your GCash refund.");
+       setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff.", type: 'success' });
+    }
+  };
+
+  const handleRequestReschedule = async (id: string) => {
+    if(window.confirm("Are you sure you want to request a reschedule? Staff will review your request.")) {
+       const { error } = await supabase.from('reservations').update({ status: 'pending-reschedule' }).eq('id', id);
+       
+       if (error) {
+         setToastMsg({ title: "Error", desc: "Failed to request reschedule.", type: 'error' });
+         return;
+       }
+
+       if (trackForm.reservationId || currentUser) {
+         setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-reschedule' } : r) : null);
+       }
+       setToastMsg({ title: "Request Sent", desc: "Reschedule request sent to staff successfully.", type: 'success' });
     }
   };
 
@@ -1095,10 +1129,11 @@ export function HomePage() {
                 </div>
 
                 {resTab === 'new' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start relative pb-20">
-                    
-                    {/* LEFT COLUMN: Collapsible Date & All-In-One Collapsible Table Status Board */}
-                    <div className="lg:col-span-6 flex flex-col gap-4 h-full">
+                  <div className="pb-20">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start relative">
+                      
+                      {/* LEFT COLUMN: Collapsible Date & All-In-One Collapsible Table Status Board */}
+                      <div className="lg:col-span-6 flex flex-col gap-4 h-full">
                       
                       {/* STEP 1: DATE PICKER COLLAPSIBLE ACCORDION */}
                       <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl shrink-0">
@@ -1310,18 +1345,18 @@ export function HomePage() {
                                   <span>Pax</span>
                                   <span className="text-[9px] text-emerald-500 font-bold ml-1">Max {maxAllowedPartySize}</span>
                                 </label>
-                                <input type="number" min={1} max={maxAllowedPartySize} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-lg font-bold text-neutral-100 text-center outline-none focus:border-emerald-500 h-[52px]" />
+                                <input type="number" min={1} max={maxAllowedPartySize} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" />
                               </div>
                               <div className="col-span-1">
                                 <label className="block text-xs text-neutral-400 mb-1.5">Start Time *</label>
-                                <input type="time" style={{ colorScheme: 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-3 text-lg font-bold text-neutral-100 text-center outline-none h-[52px] ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
+                                <input type="time" style={{ colorScheme: 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
                               </div>
                               <div className="col-span-1">
                                 <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
                                   <span>Duration</span>
                                   {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h</span>}
                                 </label>
-                                <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-3 text-lg font-bold text-neutral-100 outline-none focus:border-emerald-500 h-[52px] text-center appearance-none">
+                                <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 text-center appearance-none">
                                   {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
                                     <option key={h} value={h}>{h}h</option>
                                   ))}
@@ -1415,6 +1450,49 @@ export function HomePage() {
                     </div>
 
                   </div>
+                  {/* 🟢 NEW: Dynamic Support Banner (New Booking Tab) */}
+                  <div className="relative overflow-hidden mt-8 bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-inner flex flex-col sm:flex-row gap-6 justify-between items-start sm:items-center">
+                    
+                    {/* 🟢 Faded Diagonally-Sliced Background Watermark */}
+                    <div className="absolute -left-6 md:-left-12 top-1/2 -translate-y-1/2 opacity-[0.15] pointer-events-none mix-blend-plus-lighter">
+                      <img 
+                        src={logoImg} 
+                        alt="One Shot Watermark" 
+                        className="w-40 h-40 md:w-56 md:h-56 object-contain"
+                        style={{ 
+                          WebkitMaskImage: 'linear-gradient(105deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 75%)',
+                          maskImage: 'linear-gradient(105deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 75%)' 
+                        }}
+                      />
+                    </div>
+
+                    <div className="relative z-10">
+                      <p className="text-lg font-black text-white flex items-center gap-2 mb-1">
+                        <Info size={18} className="text-emerald-500" /> Have a question?
+                      </p>
+                      <p className="text-xs text-neutral-400 max-w-sm leading-relaxed">
+                        Need help with a large party, private event, or special arrangement? Contact us directly.
+                      </p>
+                    </div>
+                    
+                    <div className="relative z-10 space-y-3 min-w-[200px]">
+                      <a href={`tel:${cms.phone.split('|')[0].trim()}`} className="flex items-center gap-3 text-sm text-neutral-300 hover:text-white transition-colors group">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 group-hover:bg-emerald-900/80 transition-colors"><Phone size={14} className="text-emerald-500" /></div>
+                        <span>{cms.phone.split('|')[0].trim()}</span>
+                      </a>
+                      <a href={`mailto:${cms.email}`} className="flex items-center gap-3 text-sm text-neutral-300 hover:text-white transition-colors group">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 group-hover:bg-emerald-900/80 transition-colors"><Mail size={14} className="text-emerald-500" /></div>
+                        <span>{cms.email}</span>
+                      </a>
+                      <a href="https://www.facebook.com/oneshotcainta" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-neutral-300 hover:text-white transition-colors group">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 group-hover:bg-emerald-900/80 transition-colors">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-emerald-500" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.477 2 2 6.145 2 11.25c0 2.91 1.506 5.503 3.868 7.158V22l3.522-1.94c1.558.423 3.228.647 4.966.647 5.523 0 10-4.145 10-9.25S17.523 2 12 2zm1.093 12.35l-2.82-3.008-5.495 3.008 6.04-6.42 2.906 3.007 5.41-3.007-6.041 6.42z"/></svg>
+                        </div>
+                        <span>Messenger</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
                 )}
 
               {/* Guest & User Bookings View with e-Receipt Access */}
@@ -1461,80 +1539,193 @@ export function HomePage() {
                             </div>
                           );
                         }
-                        return displayRes.map((r: any) => (
-                          <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-xs font-black text-white font-mono">{r.id}</span>
-                                <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
-                                  r.status === 'pending-reschedule' 
-                                    ? 'bg-violet-900/40 text-violet-400 border-violet-700/50' 
-                                    : r.status === 'pending-refund'
-                                    ? 'bg-rose-900/40 text-rose-400 border-rose-700/50'
-                                    : 'bg-neutral-800 text-emerald-400 border-neutral-700'
-                                }`}>
-                                  {r.status === 'pending-reschedule' ? 'PENDING RESCHEDULE' : r.status === 'pending-refund' ? 'PENDING REFUND' : r.status}
-                                </span>
-                              </div>
-                              <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
-                              <p className="text-xs text-neutral-500">
-                                {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
-                              </p>
-                            </div>
-                            
-                            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto relative">
-                              <button
-                                onClick={() => setViewingReceipt(r)}
-                                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-700"
-                              >
-                                <FileText size={14} className="text-emerald-400" /> View e-Receipt
-                              </button>
-                              
-                              {/* 🟢 NEW: Actions Dropdown Menu */}
-                              <div className="relative">
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }}
-                                  className="px-4 py-2 text-xs font-bold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors border border-neutral-700 flex items-center gap-1.5"
-                                >
-                                  Actions <ChevronDown size={14} />
-                                </button>
+                        return (
+                          <>
+                            {displayRes.map((r: any) => (
+                              <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-xs font-black text-white font-mono">{r.id}</span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
+                                      r.status === 'pending-reschedule' 
+                                        ? 'bg-violet-900/40 text-violet-400 border-violet-700/50' 
+                                        : r.status === 'pending-refund'
+                                        ? 'bg-rose-900/40 text-rose-400 border-rose-700/50'
+                                        : 'bg-neutral-800 text-emerald-400 border-neutral-700'
+                                    }`}>
+                                      {r.status === 'pending-reschedule' ? 'PENDING RESCHEDULE' : r.status === 'pending-refund' ? 'PENDING REFUND' : r.status}
+                                    </span>
+                                  </div>
+                                  <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
+                                  <p className="text-xs text-neutral-500">
+                                    {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
+                                  </p>
+                                </div>
                                 
-                                <AnimatePresence>
-                                  {openActionRowId === r.id && (
-                                    <motion.div 
-                                      initial={{ opacity: 0, y: 5, scale: 0.95 }} 
-                                      animate={{ opacity: 1, y: 0, scale: 1 }} 
-                                      exit={{ opacity: 0, y: 5, scale: 0.95 }} 
-                                      className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
+                                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto relative">
+                                  <button
+                                    onClick={() => setViewingReceipt(r)}
+                                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-700"
+                                  >
+                                    <FileText size={14} className="text-emerald-400" /> View e-Receipt
+                                  </button>
+                                  
+                                  {/* 🟢 NEW: Actions Dropdown Menu */}
+                                  <div className="relative">
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }}
+                                      className="px-4 py-2 text-xs font-bold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors border border-neutral-700 flex items-center gap-1.5"
                                     >
-                                      {/* Only logged-in users can cancel (Passes both date and timeSlot for 1-hour validation) */}
-                                      {(r.status === 'pending' || r.status === 'pending-reschedule') && currentUser && (
-                                         <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
-                                           Cancel Booking
-                                         </button>
+                                      Actions <ChevronDown size={14} />
+                                    </button>
+                                    
+                                    <AnimatePresence>
+                                      {openActionRowId === r.id && (
+                                        <motion.div 
+                                          initial={{ opacity: 0, y: 5, scale: 0.95 }} 
+                                          animate={{ opacity: 1, y: 0, scale: 1 }} 
+                                          exit={{ opacity: 0, y: 5, scale: 0.95 }} 
+                                          className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
+                                        >
+                                          {/* Only logged-in users can cancel (Passes both date and timeSlot for 1-hour validation) */}
+                                          {(r.status === 'pending' || r.status === 'pending-reschedule') && currentUser && (
+                                             <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
+                                               Cancel Booking
+                                             </button>
+                                          )}
+                                          
+                                          {/* Request Reschedule */}
+                                          {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
+                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
+                                               Request Reschedule
+                                             </button>
+                                          )}
+                                          
+                                          {/* Report Issue (Available to Guests too) */}
+                                          <button onClick={(e) => { e.stopPropagation(); setReportModalResId(r.id); setReportMessage(''); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors">
+                                            Report Issue
+                                          </button>
+                                        </motion.div>
                                       )}
-                                      
-                                      {/* Report Issue (Available to Guests too) */}
-                                      <button onClick={(e) => { e.stopPropagation(); setReportModalResId(r.id); setReportMessage(''); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors">
-                                        Report Issue
-                                      </button>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
+                                    </AnimatePresence>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+
+                            {/* 🟢 ENHANCED: Dynamic Support Banner (About Us Style) */}
+                            <div className="relative overflow-hidden mt-8 bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-inner flex flex-col sm:flex-row gap-6 justify-between items-start sm:items-center">
+                              
+                              {/* 🟢 Faded Diagonally-Sliced Background Watermark */}
+                              <div className="absolute -left-6 md:-left-12 top-1/2 -translate-y-1/2 opacity-[0.07] pointer-events-none mix-blend-plus-lighter">
+                                <img 
+                                  src={logoImg} 
+                                  alt="One Shot Watermark" 
+                                  className="w-40 h-40 md:w-56 md:h-56 object-contain"
+                                  style={{ 
+                                    WebkitMaskImage: 'linear-gradient(105deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 75%)',
+                                    maskImage: 'linear-gradient(105deg, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 75%)' 
+                                  }}
+                                />
+                              </div>
+
+                              <div className="relative z-10">
+                                <p className="text-lg font-black text-white flex items-center gap-2 mb-1">
+                                  <Info size={18} className="text-emerald-500" /> Have a problem?
+                                </p>
+                                <p className="text-xs text-neutral-400 max-w-sm leading-relaxed">
+                                  Contact us directly regarding refunds, manual rescheduling, or emergency cancellations.
+                                </p>
+                              </div>
+                              
+                              <div className="relative z-10 space-y-3 min-w-[200px]">
+                                <a href={`tel:${cms.phone.split('|')[0].trim()}`} className="flex items-center gap-3 text-sm text-neutral-300 hover:text-white transition-colors group">
+                                  <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 group-hover:bg-emerald-900/80 transition-colors"><Phone size={14} className="text-emerald-500" /></div>
+                                  <span>{cms.phone.split('|')[0].trim()}</span>
+                                </a>
+                                <a href={`mailto:${cms.email}`} className="flex items-center gap-3 text-sm text-neutral-300 hover:text-white transition-colors group">
+                                  <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 group-hover:bg-emerald-900/80 transition-colors"><Mail size={14} className="text-emerald-500" /></div>
+                                  <span>{cms.email}</span>
+                                </a>
+                                <a href="https://www.facebook.com/oneshotcainta" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-neutral-300 hover:text-white transition-colors group">
+                                  <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 group-hover:bg-emerald-900/80 transition-colors">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-emerald-500" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.477 2 2 6.145 2 11.25c0 2.91 1.506 5.503 3.868 7.158V22l3.522-1.94c1.558.423 3.228.647 4.966.647 5.523 0 10-4.145 10-9.25S17.523 2 12 2zm1.093 12.35l-2.82-3.008-5.495 3.008 6.04-6.42 2.906 3.007 5.41-3.007-6.041 6.42z"/></svg>
+                                  </div>
+                                  <span>Messenger</span>
+                                </a>
                               </div>
                             </div>
-                          </div>
-                        ));
+                          </>
+                        );
                       })()}
                     </div>
                   )}
                 </div>
               )}
-
               </div>
-              
-              {/* 🟢 RATES APPENDED DIRECTLY UNDER RESERVATIONS */}
-              <div id="rates-section" className="max-w-4xl mx-auto px-6 py-16 border-t border-neutral-800">
+            </motion.div>
+          )}
+
+          {/* ════ EVENTS SECTION (WITH 7-DAY PAST RETENTION) ════ */}
+          {activeSection === 'events' && (
+            <motion.div key="events" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-screen-md mx-auto px-5 pb-20">
+              <div className="text-center mb-10 mt-6">
+                <h2 className="text-3xl font-black text-white tracking-tight uppercase mb-2">Events & Tournaments</h2>
+                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Official competitions, exhibitions, and venue schedules.</p>
+              </div>
+
+              {upcomingEvents.length > 0 && (
+                <div className="mb-10 space-y-4">
+                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={14} /> Upcoming Events</h3>
+                  {upcomingEvents.map((event: any) => (
+                    <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden p-6">
+                      {getEventImage(event.attachments) && (
+                        <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative mb-4 rounded-xl">
+                          <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
+                        <span className="text-xs font-bold text-neutral-400">{event.date}</span>
+                      </div>
+                      <h4 className="text-lg font-bold text-white mb-2">{event.title}</h4>
+                      <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {pastEvents.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2"><Clock size={14} /> Event Archive</h3>
+                  {pastEvents.map((event: any) => {
+                    const isOver7Days = isEventOver7DaysOld(event.date);
+                    return (
+                      <div 
+                        key={event.id} 
+                        className={`rounded-2xl border p-5 transition-all ${
+                          isOver7Days 
+                            ? 'bg-neutral-950/40 border-neutral-900 text-neutral-600 grayscale opacity-40 select-none' 
+                            : 'bg-neutral-900/50 border-neutral-800/80 text-neutral-400'
+                        }`}
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-[9px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded font-bold uppercase">{event.type}</span>
+                          <span className="text-[10px] font-semibold">{isOver7Days ? 'Archived (>7d ago)' : event.date}</span>
+                        </div>
+                        <h4 className={`text-sm font-bold mb-1 ${isOver7Days ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>{event.title}</h4>
+                        <p className="text-xs line-clamp-2">{event.description}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
+          )}
+          {/* ════ RATES SECTION ════ */}
+          {activeSection === 'rates' && (
+            <motion.div key="rates" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
+              <div id="rates-section" className="max-w-4xl mx-auto px-6 py-16">
                 <div className="text-center mb-10">
                   <h2 className="text-3xl font-black text-white mb-2">Facility Rates</h2>
                   <p className="text-neutral-400 text-sm">Competitive table fees and advance booking packages.</p>
@@ -1600,64 +1791,6 @@ export function HomePage() {
                   </div>
                 </div>
               </div>
-
-            </motion.div>
-          )}
-
-          {/* ════ EVENTS SECTION (WITH 7-DAY PAST RETENTION) ════ */}
-          {activeSection === 'events' && (
-            <motion.div key="events" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-screen-md mx-auto px-5 pb-20">
-              <div className="text-center mb-10 mt-6">
-                <h2 className="text-3xl font-black text-white tracking-tight uppercase mb-2">Events & Tournaments</h2>
-                <p className="text-neutral-400 max-w-sm mx-auto text-sm">Official competitions, exhibitions, and venue schedules.</p>
-              </div>
-
-              {upcomingEvents.length > 0 && (
-                <div className="mb-10 space-y-4">
-                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={14} /> Upcoming Events</h3>
-                  {upcomingEvents.map((event: any) => (
-                    <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden p-6">
-                      {getEventImage(event.attachments) && (
-                        <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative mb-4 rounded-xl">
-                          <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
-                        </div>
-                      )}
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
-                        <span className="text-xs font-bold text-neutral-400">{event.date}</span>
-                      </div>
-                      <h4 className="text-lg font-bold text-white mb-2">{event.title}</h4>
-                      <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {pastEvents.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2"><Clock size={14} /> Event Archive</h3>
-                  {pastEvents.map((event: any) => {
-                    const isOver7Days = isEventOver7DaysOld(event.date);
-                    return (
-                      <div 
-                        key={event.id} 
-                        className={`rounded-2xl border p-5 transition-all ${
-                          isOver7Days 
-                            ? 'bg-neutral-950/40 border-neutral-900 text-neutral-600 grayscale opacity-40 select-none' 
-                            : 'bg-neutral-900/50 border-neutral-800/80 text-neutral-400'
-                        }`}
-                      >
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-[9px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded font-bold uppercase">{event.type}</span>
-                          <span className="text-[10px] font-semibold">{isOver7Days ? 'Archived (>7d ago)' : event.date}</span>
-                        </div>
-                        <h4 className={`text-sm font-bold mb-1 ${isOver7Days ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>{event.title}</h4>
-                        <p className="text-xs line-clamp-2">{event.description}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </motion.div>
           )}
 
@@ -2041,7 +2174,62 @@ export function HomePage() {
             </motion.div>
           </motion.div>
         )}
+        /* 🟢 TERMS AND CONDITIONS MODAL */
+        {showTermsModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4">
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <h3 className="text-lg font-black text-white flex items-center gap-2"><CheckCircle size={18} className="text-emerald-500"/> Payment Terms & Conditions</h3>
+                </div>
+                <button onClick={() => setShowTermsModal(false)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
+              </div>
+              
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 max-h-60 overflow-y-auto">
+                <p className="text-xs text-neutral-300 leading-relaxed">
+                  By proceeding with this payment, you acknowledge and agree that all payments and down payments made for reservations are final and non-refundable. Once your payment has been confirmed, it cannot be canceled, refunded, or exchanged for cash, except in cases where the reservation cannot be fulfilled.
+                  <br /><br />
+                  <strong className="text-white">Cancellation Policy:</strong> You may request a refund for your reservation as long as the cancellation is made <strong>at least 1 hour prior</strong> to your scheduled start time. Cancellations made less than 1 hour before the reservation are strictly non-refundable.
+                </p>
+              </div>
+              
+              <label className="flex items-start gap-3 cursor-pointer mt-4">
+                <div className="pt-0.5">
+                  <input type="checkbox" checked={agreedToTerms} onChange={e => setAgreedToTerms(e.target.checked)} className="w-4 h-4 rounded border-neutral-700 bg-neutral-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950" />
+                </div>
+                <span className="text-xs text-neutral-400 select-none">I have read and agree to the Payment Terms & Conditions.</span>
+              </label>
+              
+              <div className="flex gap-2 pt-4 border-t border-neutral-800/80">
+                <button onClick={() => setShowTermsModal(false)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold rounded-xl text-xs transition-colors border border-neutral-800">Cancel</button>
+                <button onClick={executeReservation} disabled={!agreedToTerms || isVerifying} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2">
+                  {isVerifying ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : 'I Agree & Reserve'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🟢 FLOATING TOAST NOTIFICATION */}
+      <AnimatePresence>
+        {toastMsg && (
+          <motion.div 
+            initial={{ opacity: 0, x: 50 }} 
+            animate={{ opacity: 1, x: 0 }} 
+            exit={{ opacity: 0, x: 50 }} 
+            className={`fixed top-24 right-5 z-[200] p-4 rounded-xl shadow-2xl border flex items-start gap-3 max-w-sm ${toastMsg.type === 'success' ? 'bg-emerald-950/90 border-emerald-900/50' : 'bg-rose-950/90 border-rose-900/50'}`}
+          >
+            {toastMsg.type === 'success' ? <CheckCircle size={20} className="text-emerald-400 mt-0.5 flex-shrink-0" /> : <XCircle size={20} className="text-rose-400 mt-0.5 flex-shrink-0" />}
+            <div>
+              <p className={`text-sm font-bold ${toastMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{toastMsg.title}</p>
+              <p className="text-xs text-neutral-300 mt-0.5 leading-relaxed">{toastMsg.desc}</p>
+            </div>
+            <button onClick={() => setToastMsg(null)} className="text-neutral-400 hover:text-white ml-2 flex-shrink-0"><X size={14} /></button>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );
 }
+    

@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect, } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Calendar as CalendarIcon, Plus, Trash2, Edit2, Tag, Paperclip, X, Link,
   Users, ToggleLeft, ToggleRight, ChevronDown, ChevronUp,
   Wand2, Copy, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight,
   RefreshCw, CalendarX2, List, Network, Clock, Mail, SlidersHorizontal,
-  MoreVertical, Power, PowerOff
+  MoreVertical, Power, PowerOff, Phone
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -12,6 +12,7 @@ import { Input } from '../components/ui/input';
 import { useAppContext, generateRandomPromoCode } from '../context/AppContext';
 import type { Event, PromoCode, ClosedDate, Reservation } from '../context/AppContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
+import { supabase } from '../utils/supabase';
 
 const EVENT_TYPES = ['Tournament', 'League', 'Other']; 
 const todayStart = startOfDay(new Date());
@@ -23,14 +24,7 @@ type FormState = {
   minParticipants: string; maxParticipants: string;
   slotsFull: boolean;
   attachments: string[];
-  allowReservations: boolean; 
-  reservationTableCount: number;
-  caterWalkIns: boolean;       
-  walkInTableCount: number;
-  eventTableCount: number;    
-  walkInTableIds: string[];
-  reservationTableIds: string[];
-  eventTableIds: string[];
+  selectedTableIds: string[];
 };
 
 type PromoForm = {
@@ -45,6 +39,11 @@ type ClosureForm = {
   type: 'specific' | 'weekly'; dayOfWeek: number; 
 };
 
+type ActionModalData = {
+  type: 'receipt' | 'refund' | 'reschedule';
+  reservation: any;
+};
+
 const emptyClosureForm: ClosureForm = { reason: '', isFullDay: true, openTime: '12:00', closeTime: '22:00', type: 'specific', dayOfWeek: 0 };
 
 const emptyEventForm: FormState = { 
@@ -52,10 +51,7 @@ const emptyEventForm: FormState = {
   startTime: '18:00', endTime: '22:00', registrationLink: '', bracketLink: '', 
   minParticipants: '8', maxParticipants: '32',
   slotsFull: false, attachments: [],
-  allowReservations: true, reservationTableCount: 3,
-  caterWalkIns: true, walkInTableCount: 3,
-  eventTableCount: 4,
-  walkInTableIds: [], reservationTableIds: [], eventTableIds: []
+  selectedTableIds: []
 };
 
 const emptyPromoForm: PromoForm = { code: '', discountPercent: 10, description: '', isLimitedUses: true, maxUsage: 100, deleteWhenDepleted: false, isActive: true, hasExpiry: false, expiresAt: '', hasStart: false, startDate: '' };
@@ -74,6 +70,7 @@ export function AdminEvents() {
   const [dayActionDate, setDayActionDate] = useState<Date | null>(null);
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+  
   // Event Form State
   const [showEventModal, setShowEventModal] = useState(false);
   const [cancelEventModal, setCancelEventModal] = useState<{ id: string; title: string; date: string } | null>(null);
@@ -99,6 +96,48 @@ export function AdminEvents() {
   const [closureForm, setClosureForm] = useState<ClosureForm>(emptyClosureForm);
   const [closureDateStr, setClosureDateStr] = useState('');
 
+  // Action/Contact Modal State
+  const [actionModal, setActionModal] = useState<ActionModalData | null>(null);
+  const [callSummary, setCallSummary] = useState('');
+  const [showDenyInput, setShowDenyInput] = useState(false);
+
+  // 🟢 HOLIDAY FETCHER
+  const [fetchedHolidays, setFetchedHolidays] = useState<any[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchHolidays = async () => {
+      try {
+        const year = new Date().getFullYear();
+        const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/PH`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data) && isMounted) {
+          const mapped = data.map((h: any) => ({
+            id: `hol-${h.date}`,
+            title: h.name,
+            date: h.date,
+            type: 'Holiday',
+            description: 'Official Public Holiday in the Philippines',
+            isWholeDay: true,
+            duration: 'Whole Day'
+          }));
+          setFetchedHolidays(mapped);
+        }
+      } catch (e) {
+        console.error("Failed to fetch holidays", e);
+      }
+    };
+    fetchHolidays();
+    return () => { isMounted = false; };
+  }, []);
+
+  const allEvents = useMemo(() => {
+    const existingIds = new Set(events.map((e: any) => e.id));
+    const hols = fetchedHolidays.filter(h => !existingIds.has(h.id));
+    return [...events, ...hols];
+  }, [events, fetchedHolidays]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (promoDropdownRef.current && !promoDropdownRef.current.contains(event.target as Node)) {
@@ -112,7 +151,7 @@ export function AdminEvents() {
   const flash = (msg: string, type: 'success' | 'error' = 'success') => {
       if (toastTimeout.current) clearTimeout(toastTimeout.current);
       setToast({ msg, type });
-      toastTimeout.current = setTimeout(() => setToast(null), 5000); // 5 seconds
+      toastTimeout.current = setTimeout(() => setToast(null), 5000);
     };
   const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
   
@@ -132,7 +171,7 @@ export function AdminEvents() {
     return acc;
   }, {} as Record<string, Reservation[]>);
 
-  const eventsMap = events.reduce((acc: any, e: any) => {
+  const eventsMap = allEvents.reduce((acc: any, e: any) => {
     if (!e.date) return acc;
     const datesArray = e.date.split(',');
     datesArray.forEach((d: any) => {
@@ -163,26 +202,10 @@ export function AdminEvents() {
     setEditingEventId(null);
     const initialDates = prefillDate ? [dateKey(prefillDate)] : [];
     
-    // Automatically sequentialize table assignments starting from Table 1
-    const activeTables = tables.filter((t: any) => t.isActive);
-    const allIds = activeTables.map((t: any) => t.id);
-    const eCount = Math.floor(allIds.length * 0.4);
-    const rCount = Math.floor(allIds.length * 0.3);
-    const wCount = Math.floor(allIds.length * 0.3);
-
-    const eIds = allIds.slice(0, eCount);
-    const rIds = allIds.slice(eCount, eCount + rCount);
-    const wIds = allIds.slice(eCount + rCount, eCount + rCount + wCount);
-
     setEventForm({
       ...emptyEventForm,
       dates: initialDates,
-      eventTableCount: eIds.length,
-      reservationTableCount: rIds.length,
-      walkInTableCount: wIds.length,
-      eventTableIds: eIds,
-      reservationTableIds: rIds,
-      walkInTableIds: wIds
+      selectedTableIds: []
     });
     setModalMonth(prefillDate || new Date());
     setDayActionDate(null);
@@ -218,14 +241,7 @@ export function AdminEvents() {
       maxParticipants: ev.maxParticipants?.toString() ?? '32',
       slotsFull: ev.slotsFull ?? false, 
       attachments: ev.attachments ?? [],
-      allowReservations: ev.allowReservations !== false,
-      reservationTableCount: ev.reservationTableCount ?? 3,
-      caterWalkIns: ev.caterWalkIns !== false,
-      walkInTableCount: ev.walkInTableCount ?? 3,
-      eventTableCount: ev.eventTableIds?.length ?? 4,
-      walkInTableIds: ev.walkInTableIds ?? [],
-      reservationTableIds: ev.reservationTableIds ?? [],
-      eventTableIds: ev.eventTableIds ?? []
+      selectedTableIds: ev.eventTableIds ?? []
     });
     
     if (savedDates.length > 0) setModalMonth(new Date(savedDates[0]));
@@ -274,96 +290,26 @@ export function AdminEvents() {
     setDayActionDate(null); setShowPromoModal(true);
   };
 
-  // 🟢 STRICT AUTOMATIC SEQUENTIAL SLIDER HANDLER
-  const handleAllocationSlider = (category: 'reservation' | 'walkIn' | 'event', targetCount: number) => {
-    setEventForm(prev => {
-      const activeTables = tables.filter((t: any) => t.isActive);
-      const allIds = activeTables.map((t: any) => t.id);
-
-      let resIds = [...prev.reservationTableIds];
-      let walkIds = [...prev.walkInTableIds];
-      let evIds = [...prev.eventTableIds];
-
-      let currentIds =
-        category === 'reservation' ? resIds :
-        category === 'walkIn' ? walkIds : evIds;
-
-      if (targetCount > currentIds.length) {
-        // Grab sequentially from Table 1 onwards for tables not yet assigned
-        const assignedSet = new Set([...resIds, ...walkIds, ...evIds]);
-        const needed = targetCount - currentIds.length;
-        let added = 0;
-        for (const id of allIds) {
-          if (!assignedSet.has(id) && added < needed) {
-            currentIds.push(id);
-            assignedSet.add(id);
-            added++;
-          }
-        }
-      } else if (targetCount < currentIds.length) {
-        // Remove from the end when sliding backward
-        currentIds = currentIds.slice(0, targetCount);
-      }
-
-      if (category === 'reservation') resIds = currentIds;
-      else if (category === 'walkIn') walkIds = currentIds;
-      else evIds = currentIds;
-
-      return {
-        ...prev,
-        reservationTableIds: resIds,
-        walkInTableIds: walkIds,
-        eventTableIds: evIds,
-        reservationTableCount: resIds.length,
-        walkInTableCount: walkIds.length,
-        eventTableCount: evIds.length
-      };
-    });
-  };
-
-  // 🟢 CLICK TABLE BUTTON TO CYCLE PURPOSE (Unassigned -> Event -> Rsv -> Walk-In)
-  const toggleTableSelection = (tableId: string) => {
-    setEventForm(prev => {
-      let eIds = [...prev.eventTableIds];
-      let rIds = [...prev.reservationTableIds];
-      let wIds = [...prev.walkInTableIds];
-
-      const isEvent = eIds.includes(tableId);
-      const isRes = rIds.includes(tableId);
-      const isWalkIn = wIds.includes(tableId);
-
-      eIds = eIds.filter(id => id !== tableId);
-      rIds = rIds.filter(id => id !== tableId);
-      wIds = wIds.filter(id => id !== tableId);
-
-      if (!isEvent && !isRes && !isWalkIn) {
-        eIds.push(tableId);
-      } else if (isEvent) {
-        rIds.push(tableId);
-      } else if (isRes) {
-        wIds.push(tableId);
-      } // if was walkIn, stays unassigned
-
-      return {
-        ...prev,
-        eventTableIds: eIds,
-        reservationTableIds: rIds,
-        walkInTableIds: wIds,
-        eventTableCount: eIds.length,
-        reservationTableCount: rIds.length,
-        walkInTableCount: wIds.length
-      };
-    });
-  };
-
-  const saveEvent = () => {
+  const saveEvent = async () => {
     if (!eventForm.title || eventForm.dates.length === 0) { 
-    flash("Please provide a title and select at least one date.", "error"); return; 
-  }
+      flash("Please provide a title and select at least one date.", "error"); return; 
+    }
+
+    if (!eventForm.description || !eventForm.description.trim()) {
+      flash("Please provide an event description. It is required.", "error");
+      return;
+    }
 
     if (!eventForm.isWholeDay) {
       if (eventForm.startTime === eventForm.endTime) {
         alert("Start time and End time cannot be exactly the same.");
+        return;
+      }
+    }
+
+    if (eventForm.type === 'Tournament') {
+      if (!eventForm.registrationLink || !eventForm.bracketLink) {
+        flash("Registration and Bracket links are strictly mandatory for Tournaments.", "error");
         return;
       }
     }
@@ -402,41 +348,34 @@ export function AdminEvents() {
     };
 
     for (const d of eventForm.dates) {
-      const conflictingEvent = events.find((ev: any) => {
-        // Ignore the event currently being edited
+      const conflictingEvent = allEvents.find((ev: any) => {
         if (editingEventId && ev.id === editingEventId) return false;
-
-        // 🟢 FIX: Ignore System Holidays so they don't block your custom events
         if (ev.type?.toLowerCase() === 'holiday' || eventForm.type?.toLowerCase() === 'holiday') return false;
 
-        // Check if the existing event occurs on this date
         const evDates = ev.date ? ev.date.split(',').map((str: string) => str.trim()) : [];
         if (!evDates.includes(d)) return false;
 
-        // If either the new event OR the existing event is "Whole Day", it is an instant conflict
         const isEvWholeDay = ev.duration === 'Whole Day' || !ev.duration;
         if (eventForm.isWholeDay || isEvWholeDay) {
           return true;
         }
 
-        // Both are specific time slots -> check if the hours overlap
         const [evStartStr = '18:00', evEndStr = '22:00'] = ev.duration.split('-').map((s: string) => s.trim());
         
         const newStart = parseTime(eventForm.startTime);
         let newEnd = parseTime(eventForm.endTime);
-        if (newEnd <= newStart) newEnd += 24 * 60; // Handles schedules crossing midnight
+        if (newEnd <= newStart) newEnd += 24 * 60; 
 
         const evStart = parseTime(evStartStr);
         let evEnd = parseTime(evEndStr);
-        if (evEnd <= evStart) evEnd += 24 * 60; // Handles schedules crossing midnight
+        if (evEnd <= evStart) evEnd += 24 * 60; 
 
-        // Returns true if the two time ranges overlap
         return newStart < evEnd && newEnd > evStart;
       });
 
      if (conflictingEvent) { 
       flash(`Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${conflictingEvent.duration || 'Whole Day'}). Please pick a different date or time.`, "error"); return; 
-    }
+     }
     }
 
     if (!editingEventId) {
@@ -471,17 +410,61 @@ export function AdminEvents() {
       maxParticipants: eventForm.maxParticipants ? parseInt(eventForm.maxParticipants) : undefined,
       slotsFull: eventForm.slotsFull, 
       attachments: eventForm.attachments.length ? eventForm.attachments : undefined,
-      allowReservations: eventForm.allowReservations, 
-      reservationTableCount: eventForm.allowReservations ? eventForm.reservationTableCount : 0,
-      caterWalkIns: eventForm.caterWalkIns,           
-      walkInTableCount: eventForm.caterWalkIns ? eventForm.walkInTableCount : 0,
-      walkInTableIds: eventForm.walkInTableIds,
-      reservationTableIds: eventForm.reservationTableIds,
-      eventTableIds: eventForm.eventTableIds
+      eventTableIds: eventForm.selectedTableIds
     };
 
-    if (editingEventId) updateEvent(editingEventId, payload);
-    else addEvent(payload);
+    if (editingEventId) {
+      updateEvent(editingEventId, payload);
+    } else {
+      addEvent(payload);
+      
+      // 🟢 Tag event as verified booking in the database for each selected table
+      if (eventForm.selectedTableIds.length > 0) {
+        const reservationsToCreate: any[] = [];
+        for (const d of eventForm.dates) {
+          for (const tId of eventForm.selectedTableIds) {
+            const resId = `EVT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*1000)}`;
+            
+            let durationHours = 10;
+            if (!eventForm.isWholeDay) {
+              const startMins = parseTime(eventForm.startTime);
+              let endMins = parseTime(eventForm.endTime);
+              if (endMins <= startMins) endMins += 24 * 60;
+              durationHours = Math.max(1, Math.round((endMins - startMins) / 60));
+            }
+
+            reservationsToCreate.push({
+              id: resId,
+              customerName: `EVENT: ${eventForm.title}`,
+              contactNumber: 'ADMIN',
+              email: 'admin@oneshot.com',
+              date: new Date(d).toISOString(),
+              timeSlot: eventForm.isWholeDay ? '12:00' : eventForm.startTime,
+              durationHours: durationHours,
+              partySize: parseInt(eventForm.maxParticipants) || 10,
+              tableId: tId,
+              status: 'confirmed',
+              totalAmount: 0,
+              downPaymentAmount: 0,
+              downPaymentPaid: 1,
+              balancePaid: 1,
+              paymentRef: 'EVENT',
+              rescheduleCount: 0,
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+
+        if (reservationsToCreate.length > 0) {
+          const { error } = await supabase.from('reservations').insert(reservationsToCreate);
+          if (error) {
+            console.error("Failed to tag event reservations:", error);
+          } else {
+            flash("Event created and automatically tagged as confirmed bookings on selected tables.", "success");
+          }
+        }
+      }
+    }
     
     setShowEventModal(false);
     flash('Event saved successfully!');
@@ -694,7 +677,7 @@ export function AdminEvents() {
   };
 
   const renderEventsGrid = () => {
-    const customEvents = events
+    const customEvents = allEvents
       .filter((e: any) => e.type !== 'Holiday')
       .sort((a: any, b: any) => {
         const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -702,7 +685,7 @@ export function AdminEvents() {
         if (timeA !== timeB) return timeB - timeA;
         return String(b.id || '').localeCompare(String(a.id || ''));
       });
-    const holidays = events.filter((e: any) => e.type === 'Holiday');
+    const holidays = allEvents.filter((e: any) => e.type === 'Holiday');
 
     return (
       <div className="space-y-8">
@@ -749,15 +732,9 @@ export function AdminEvents() {
 
                   <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800/60 mb-3 space-y-1.5 text-xs text-neutral-400">
                     <div className="flex justify-between">
-                      <span>Online Bookings:</span>
-                      <span className={ev.allowReservations !== false ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                        {ev.allowReservations !== false ? `${ev.reservationTableCount || 3} Tables` : 'Disabled'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Walk-Ins Setup:</span>
-                      <span className="text-neutral-200 font-medium">
-                        {ev.caterWalkIns !== false ? `${ev.walkInTableCount || 3} Tables` : 'Blocked'}
+                      <span>Venue Allocation:</span>
+                      <span className="text-amber-400 font-bold">
+                        {ev.eventTableIds?.length > 0 ? `${ev.eventTableIds.length} Tables Reserved` : 'None specified'}
                       </span>
                     </div>
                   </div>
@@ -1048,7 +1025,8 @@ export function AdminEvents() {
             {(() => {
               const pendingActions = reservations.filter((r: any) => 
                 r.status === 'pending' || 
-                (r.status === 'cancelled' && r.cancellationReason === 'Closure Refund Request')
+                r.status === 'pending-refund' ||
+                r.status === 'pending-reschedule'
               ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
               if (pendingActions.length === 0) return null;
@@ -1064,23 +1042,49 @@ export function AdminEvents() {
                             <p className="text-xs font-bold text-white">{r.customerName}</p>
                             <p className="text-[10px] text-neutral-500 font-mono">{r.id}</p>
                           </div>
-                          <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${r.status === 'cancelled' ? 'bg-rose-900/30 text-rose-400 border-rose-800' : 'bg-amber-900/30 text-amber-400 border-amber-800'}`}>
-                            {r.status === 'cancelled' ? 'Refund Req.' : 'Verify Resched.'}
+                          <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                            r.status === 'pending-refund' ? 'bg-rose-900/30 text-rose-400 border-rose-800' : 
+                            r.status === 'pending-reschedule' ? 'bg-violet-900/30 text-violet-400 border-violet-800' :
+                            'bg-amber-900/30 text-amber-400 border-amber-800'
+                          }`}>
+                            {r.status === 'pending-refund' ? 'Refund Req.' : r.status === 'pending-reschedule' ? 'Resched. Req.' : 'Verify Receipt'}
                           </span>
                         </div>
                         
-                        {r.status === 'cancelled' ? (
+                        {r.status === 'pending-refund' ? (
                           <>
-                            <p className="text-[10px] text-neutral-400 mb-2">Needs ₱{r.downPaymentAmount.toFixed(2)} GCash refund due to closure.</p>
-                            <button onClick={() => updateReservation(r.id, { cancellationReason: 'Refund Settled' })} className="w-full bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-700/50 text-[10px] font-bold py-1.5 rounded transition-colors">
-                              Mark Refund Settled
+                            <p className="text-[10px] text-neutral-400 mb-2 leading-relaxed">
+                              Needs ₱{r.downPaymentAmount?.toFixed(2) || '0.00'} GCash refund.<br/>
+                              Contact: <strong className="text-amber-400 bg-amber-500/10 px-1 rounded">{r.contactNumber}</strong>
+                            </p>
+                            <button onClick={() => { setActionModal({ type: 'refund', reservation: r }); setCallSummary(''); setShowDenyInput(false); }} 
+                              className="w-full bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-700/50 text-[10px] font-bold py-1.5 rounded transition-colors"
+                            >
+                              Process Refund
+                            </button>
+                          </>
+                        ) : r.status === 'pending-reschedule' ? (
+                          <>
+                            <p className="text-[10px] text-neutral-400 mb-2 leading-relaxed">
+                              Requested manual reschedule.<br/>
+                              Contact: <strong className="text-amber-400 bg-amber-500/10 px-1 rounded">{r.contactNumber}</strong>
+                            </p>
+                            <button onClick={() => { setActionModal({ type: 'reschedule', reservation: r }); setCallSummary(''); setShowDenyInput(false); }} 
+                              className="w-full bg-violet-600/20 hover:bg-violet-600/40 text-violet-400 border border-violet-700/50 text-[10px] font-bold py-1.5 rounded transition-colors"
+                            >
+                              Process Reschedule
                             </button>
                           </>
                         ) : (
                           <>
-                            <p className="text-[10px] text-neutral-400 mb-2">Requested new date: {format(new Date(r.date), 'MMM d, h:mm a')}</p>
-                            <button onClick={() => updateReservationStatus(r.id, 'confirmed')} className="w-full bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-700/50 text-[10px] font-bold py-1.5 rounded transition-colors">
-                              Approve Reschedule
+                            <p className="text-[10px] text-neutral-400 mb-2 leading-relaxed">
+                              Action: Verify GCash Payment<br/>
+                              Contact: <strong className="text-amber-400 bg-amber-500/10 px-1 rounded">{r.contactNumber}</strong>
+                            </p>
+                            <button onClick={() => { setActionModal({ type: 'receipt', reservation: r }); setCallSummary(''); setShowDenyInput(false); }}
+                              className="w-full bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-700/50 text-[10px] font-bold py-1.5 rounded transition-colors"
+                            >
+                              Review Receipt
                             </button>
                           </>
                         )}
@@ -1097,7 +1101,7 @@ export function AdminEvents() {
                 <h3 className="text-xs font-bold text-neutral-300 uppercase tracking-widest">Upcoming Agenda</h3>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {events.filter((e: any) => e.date && !isBefore(new Date(e.date.split(',')[0]), todayStart)).sort((a: any,b: any)=>a.date.localeCompare(b.date)).slice(0,5).map((e: any) => (
+                {allEvents.filter((e: any) => e.date && !isBefore(new Date(e.date.split(',')[0]), todayStart)).sort((a: any,b: any)=>a.date.localeCompare(b.date)).slice(0,5).map((e: any) => (
                   <div key={e.id} className="flex gap-3">
                     <div className={`w-1 rounded-full ${e.type === 'Holiday' ? 'bg-sky-500' : 'bg-amber-500'}`} />
                     <div>
@@ -1147,6 +1151,132 @@ export function AdminEvents() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 UNIFIED ACTION MODAL (RECEIPTS, REFUNDS, RESCHEDULES) */}
+      {actionModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <h3 className="font-bold text-neutral-200">
+                {actionModal.type === 'receipt' ? 'Verify Receipt' : actionModal.type === 'refund' ? 'Process Refund Request' : 'Process Reschedule Request'}
+              </h3>
+              <button onClick={() => setActionModal(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
+            </div>
+            
+            <div className="p-5 flex-1 overflow-y-auto space-y-4">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300">
+                <p><strong>Customer:</strong> {actionModal.reservation.customerName}</p>
+                <p className="mt-1">
+                  <strong>Contact:</strong> 
+                  <span className="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold ml-1 tracking-wider inline-flex items-center gap-1">
+                    <Phone size={10}/> {actionModal.reservation.contactNumber}
+                  </span>
+                </p>
+                {actionModal.reservation.email && <p className="mt-1"><strong>Email:</strong> {actionModal.reservation.email}</p>}
+              </div>
+
+              {actionModal.type === 'receipt' && (
+                <>
+                  {actionModal.reservation.receiptImg ? (
+                    <div className="w-full bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden flex items-center justify-center">
+                      <img src={actionModal.reservation.receiptImg} alt="Uploaded Receipt" className="max-w-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="w-full h-32 bg-neutral-900 rounded-xl border border-neutral-800 flex items-center justify-center text-neutral-500 text-xs italic">
+                      No image provided. Ref number might have been used instead.
+                    </div>
+                  )}
+                  {showDenyInput && (
+                    <div className="bg-rose-950/20 border border-rose-900/40 p-4 rounded-xl space-y-3 mt-4 animate-in slide-in-from-top-2">
+                      <label className="text-xs text-rose-400 font-bold uppercase tracking-wider block">Reason for Cancellation</label>
+                      <Input 
+                        autoFocus
+                        value={callSummary} 
+                        onChange={e => setCallSummary(e.target.value)} 
+                        placeholder="e.g. Invalid receipt, amount mismatch" 
+                        className="bg-neutral-950 border-rose-800 text-neutral-200 text-xs h-10" 
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowDenyInput(false)} className="flex-1 py-2 bg-neutral-900 text-neutral-400 rounded-lg text-xs font-semibold hover:bg-neutral-800 transition-colors">Back</button>
+                        <button onClick={() => {
+                            if (!callSummary.trim()) { flash("Cancellation reason is required.", "error"); return; }
+                            updateReservation(actionModal.reservation.id, { status: 'cancelled', cancellationReason: callSummary });
+                            flash("Reservation has been cancelled.");
+                            setActionModal(null);
+                            setShowDenyInput(false);
+                            setCallSummary('');
+                          }} 
+                          className="flex-1 py-2 bg-rose-600 text-white rounded-lg text-xs font-bold shadow-lg hover:bg-rose-500 transition-colors"
+                        >
+                          Confirm Deny
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {(actionModal.type === 'refund' || actionModal.type === 'reschedule') && (
+                <div className="space-y-3">
+                  <div className={`p-3 rounded-lg border text-xs leading-relaxed ${actionModal.type === 'refund' ? 'bg-rose-950/20 border-rose-900/40 text-rose-300' : 'bg-violet-950/20 border-violet-900/40 text-violet-300'}`}>
+                    {actionModal.type === 'refund' ? (
+                       <p>Please contact the customer to manually settle the GCash refund of <strong>₱{actionModal.reservation.downPaymentAmount?.toFixed(2) || '0.00'}</strong>.</p>
+                    ) : (
+                       <p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{actionModal.reservation.timeSlot}</strong>.</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs text-neutral-400 font-bold uppercase tracking-wider block mb-2">Call Summary / Admin Notes <span className="text-rose-500">*</span></label>
+                    <textarea 
+                      autoFocus
+                      value={callSummary} 
+                      onChange={e => setCallSummary(e.target.value)} 
+                      placeholder={actionModal.type === 'refund' ? "e.g. Customer requested refund via GCash. Sent ₱500 to 09123456789." : "e.g. Customer requested reschedule to Friday 8PM."} 
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-xl p-3 text-xs text-neutral-200 focus:border-amber-500 outline-none resize-none h-24" 
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {!showDenyInput && (
+              <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex gap-3">
+                {actionModal.type === 'receipt' ? (
+                  <>
+                    <button onClick={() => setShowDenyInput(true)} className="flex-1 py-2.5 bg-neutral-800 hover:bg-rose-950/40 border border-neutral-700 hover:border-rose-800 text-rose-400 rounded-xl text-xs font-bold transition-colors">
+                      Deny & Cancel
+                    </button>
+                    <button onClick={() => {
+                        updateReservationStatus(actionModal.reservation.id, 'confirmed');
+                        flash("Receipt verified and booking confirmed.");
+                        setActionModal(null);
+                      }} 
+                      className="flex-[2] py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-900/30 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle size={14}/> Verify & Approve
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => {
+                      if (!callSummary.trim()) { flash("Call summary is required to proceed.", "error"); return; }
+                      if (actionModal.type === 'refund') {
+                         updateReservation(actionModal.reservation.id, { status: 'cancelled', cancellationReason: `Refund Settled: ${callSummary}` });
+                      } else {
+                         updateReservation(actionModal.reservation.id, { status: 'confirmed', cancellationReason: `Rescheduled: ${callSummary}` });
+                      }
+                      flash("Marked as contacted and reservation updated successfully.");
+                      setActionModal(null);
+                    }} 
+                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-lg transition-colors flex justify-center items-center gap-2"
+                  >
+                    <CheckCircle size={14} /> Mark as Contacted & Resolved
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1241,7 +1371,7 @@ export function AdminEvents() {
                               <div className="flex items-center gap-2 text-[10px] text-neutral-500">
                                 <span className="flex items-center gap-1"><Clock size={10}/> {r.timeSlot} ({r.durationHours}h)</span>
                                 <span>·</span>
-                                <span>{r.partySize} pax</span>
+                                <span className="font-bold text-amber-400">{r.contactNumber}</span>
                                 <span>·</span>
                                 <span className="text-emerald-500/80 font-medium truncate">
                                   {r.tableId ? `Table ${r.tableId.replace('t', '')}` : 'Any Table'}
@@ -1303,7 +1433,7 @@ export function AdminEvents() {
         </div>
       )}
 
-      {/* 2. Event Modal (Compact & Strict Venue Allocation Setup) */}
+      {/* 2. Event Modal */}
       {showEventModal && (
         <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[92vh]">
@@ -1313,6 +1443,23 @@ export function AdminEvents() {
             </div>
             
             <div className="p-6 overflow-y-auto flex-1">
+              {(() => {
+                const conflicts = eventForm.dates.reduce((acc, d) => acc + (resMap[d] || []).length, 0);
+                if (conflicts > 0) {
+                  return (
+                    <div className="bg-amber-950/40 border border-amber-800/50 rounded-xl p-3 mb-4 flex items-start gap-2">
+                       <AlertTriangle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                       <div>
+                         <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Reservations Detected</p>
+                         <p className="text-[10px] text-amber-300/80 leading-relaxed">
+                           There are {conflicts} reservation(s) on the selected date(s). Creating this event won't block them automatically, but you may need to manually contact customers to reschedule or refund if tables conflict.
+                         </p>
+                       </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 
                 {/* Left Column: Calendar & Times */}
@@ -1349,80 +1496,65 @@ export function AdminEvents() {
                     )}
                   </div>
 
-                  {/* 🟢 COMPACT & STRICT VENUE ALLOCATION SETUP */}
-                  {/* 🟢 SIMPLIFIED DEFENSIBLE VENUE ALLOCATION */}
+                  {/* 🟢 NEW TABLE SELECTOR FOR EVENT VENUE ALLOCATION WITH RESERVATIONS DISPLAY */}
                   {(eventForm.type === 'Tournament' || eventForm.type === 'League') && (
                     <div className="bg-neutral-950 p-4 rounded-xl border border-amber-900/30 space-y-4">
                       <div className="flex justify-between items-center">
                         <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-1.5">
-                          <SlidersHorizontal size={12}/> Venue Allocation Policy
+                          <SlidersHorizontal size={12}/> Select Tables for Event
                         </p>
-                        <span className="text-[10px] font-mono text-neutral-400 bg-neutral-900 px-2 py-0.5 rounded border border-neutral-800">
-                          Total Venue: {tables.filter((t: any) => t.isActive).length || 10} Tables
-                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {tables.filter((t:any) => t.isActive).map((table:any) => {
+                          const isSelected = eventForm.selectedTableIds.includes(table.id);
+                          return (
+                            <button
+                              type="button"
+                              key={table.id}
+                              onClick={() => {
+                                setEventForm(prev => {
+                                  const s = new Set(prev.selectedTableIds);
+                                  if (s.has(table.id)) s.delete(table.id);
+                                  else s.add(table.id);
+                                  return { ...prev, selectedTableIds: Array.from(s) };
+                                })
+                              }}
+                              className={`p-2 rounded-lg text-xs font-bold border transition-colors ${isSelected ? 'bg-amber-500 text-neutral-950 border-amber-500' : 'bg-neutral-900 text-neutral-400 border-neutral-800'}`}
+                            >
+                              {table.name}
+                            </button>
+                          )
+                        })}
                       </div>
 
-                      <div className="grid grid-cols-1 gap-2.5">
-                        {/* Option A: Full Takeover */}
-                        <label className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition-colors ${
-                          !eventForm.allowReservations && !eventForm.caterWalkIns
-                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                            : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:bg-neutral-800'
-                        }`}>
-                          <input 
-                            type="radio" 
-                            name="venuePolicy"
-                            checked={!eventForm.allowReservations && !eventForm.caterWalkIns}
-                            onChange={() => setEventForm(f => ({ ...f, allowReservations: false, caterWalkIns: false }))}
-                            className="mt-0.5 accent-amber-500"
-                          />
-                          <div>
-                            <p className="font-bold text-white">Full Venue Takeover (Exclusive)</p>
-                            <p className="text-[10px] text-neutral-500 mt-0.5">Closes all online bookings and walk-ins for the event duration.</p>
-                          </div>
-                        </label>
+                      {/* Show Reservations for Selected Tables */}
+                      {eventForm.selectedTableIds.length > 0 && eventForm.dates.length > 0 && (
+                        <div className="mt-4 bg-neutral-900 border border-neutral-800 rounded-xl p-3 max-h-40 overflow-y-auto">
+                           <p className="text-[10px] font-bold text-neutral-400 uppercase mb-2">Existing Reservations on Selected Tables</p>
+                           {eventForm.selectedTableIds.map(tId => {
+                              const tableReservations = eventForm.dates.flatMap(d => (resMap[d] || []).filter((r:any) => r.tableId === tId && r.status !== 'cancelled'));
+                              if (tableReservations.length === 0) return null;
+                              return (
+                                 <div key={tId} className="mb-2 last:mb-0">
+                                    <p className="text-xs text-amber-500 font-semibold mb-1">Table {tId.replace('t','')}</p>
+                                    {tableReservations.map((r:any) => (
+                                       <div key={r.id} className="text-[10px] text-neutral-300 flex justify-between bg-neutral-950 p-1.5 rounded border border-neutral-800 mb-1">
+                                          <span>{format(new Date(r.date), 'MMM d')} - {r.timeSlot} ({r.durationHours}h)</span>
+                                          <span className="text-neutral-500">{r.customerName}</span>
+                                       </div>
+                                    ))}
+                                 </div>
+                              );
+                           })}
+                           {eventForm.selectedTableIds.every(tId => eventForm.dates.flatMap(d => (resMap[d] || []).filter((r:any) => r.tableId === tId && r.status !== 'cancelled')).length === 0) && (
+                              <p className="text-xs text-neutral-500 italic">No conflicting reservations on selected dates.</p>
+                           )}
+                        </div>
+                      )}
 
-                        {/* Option B: Partial Allocation */}
-                        <label className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition-colors ${
-                          eventForm.allowReservations || eventForm.caterWalkIns
-                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                            : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:bg-neutral-800'
-                        }`}>
-                          <input 
-                            type="radio" 
-                            name="venuePolicy"
-                            checked={eventForm.allowReservations || eventForm.caterWalkIns}
-                            onChange={() => setEventForm(f => ({ ...f, allowReservations: true, caterWalkIns: true, reservationTableCount: 3, walkInTableCount: 3 }))}
-                            className="mt-0.5 accent-amber-500"
-                          />
-                          <div className="flex-1">
-                            <p className="font-bold text-white">Mixed Operation (Event + Open Tables)</p>
-                            <p className="text-[10px] text-neutral-500 mt-0.5">Allocate a specific number of tables for the tournament; the rest remain open for public play.</p>
-                            
-                            {(eventForm.allowReservations || eventForm.caterWalkIns) && (
-                              <div className="mt-3 pt-3 border-t border-amber-500/20 space-y-3">
-                                <div>
-                                  <div className="flex justify-between text-[11px] font-semibold text-neutral-300 mb-1">
-                                    <span>Tables Reserved for Tournament</span>
-                                    <span className="text-amber-400 font-mono font-bold">{eventForm.eventTableCount || 4} Tables</span>
-                                  </div>
-                                  <input 
-                                    type="number" 
-                                    min="1" 
-                                    max={tables.filter((t: any) => t.isActive).length || 10}
-                                    value={eventForm.eventTableCount || 4}
-                                    onChange={e => setEventForm(f => ({ ...f, eventTableCount: parseInt(e.target.value) || 1 }))}
-                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white"
-                                  />
-                                </div>
-                                <p className="text-[10px] text-neutral-500 italic">
-                                  Remaining {Math.max(0, (tables.filter((t: any) => t.isActive).length || 10) - (eventForm.eventTableCount || 4))} tables stay open for regular walk-ins and standard bookings.
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        </label>
-                      </div>
+                      <p className="text-[9px] text-neutral-500 italic">
+                        Selected tables will be automatically locked and reserved in the database for the event's duration upon saving.
+                      </p>
                     </div>
                   )}
 
@@ -1447,7 +1579,7 @@ export function AdminEvents() {
 
                   <div>
                     <div className="flex justify-between items-center mb-1.5">
-                      <label className="text-xs font-semibold text-neutral-400">Description</label>
+                      <label className="text-xs font-semibold text-neutral-400">Description <span className="text-rose-500">*</span></label>
                       <CharCount current={eventForm.description} max={400} />
                     </div>
                     <textarea maxLength={400} value={eventForm.description} onChange={e => setEventForm({...eventForm, description: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-md p-3 text-sm text-neutral-200 h-24 resize-none focus:outline-none focus:border-amber-500" placeholder="Event details..." />
@@ -1455,13 +1587,13 @@ export function AdminEvents() {
 
                   {eventForm.type === 'Tournament' && (
                     <div className="p-4 rounded-xl border border-emerald-900/30 bg-emerald-950/10 space-y-3">
-                      <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Tournament Links (Optional)</p>
+                      <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Tournament Links</p>
                       <div>
-                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Form Link</label>
+                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Form Link <span className="text-rose-500">*</span></label>
                         <Input value={eventForm.registrationLink} onChange={e => setEventForm({...eventForm, registrationLink: e.target.value})} placeholder="https://forms.google.com/..." className="bg-neutral-950 border-neutral-800 h-8 text-xs" />
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Network size={10} /> Live Bracket Link</label>
+                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Network size={10} /> Live Bracket Link <span className="text-rose-500">*</span></label>
                         <Input value={eventForm.bracketLink} onChange={e => setEventForm({...eventForm, bracketLink: e.target.value})} placeholder="https://challonge.com/..." className="bg-neutral-950 border-neutral-800 h-8 text-xs" />
                       </div>
                     </div>
@@ -1582,15 +1714,21 @@ export function AdminEvents() {
                               <AlertTriangle size={16} />
                               <span>{conflicts.length} Reservation{conflicts.length > 1 ? 's' : ''} Affected</span>
                             </div>
-                            <p className="text-xs text-rose-300/80 leading-relaxed">
-                              Closing this date conflicts with active customer reservations. 
+                            <p className="text-xs text-rose-300/80 leading-relaxed mb-3">
+                              Closing this date conflicts with active customer reservations. Please contact them below to initiate manual rescheduling or refunds.
                             </p>
-                            <button   
-                              type="button" 
-                              className="w-full bg-neutral-900 border border-rose-800/40 hover:border-rose-600 hover:bg-neutral-800 text-neutral-200 text-xs py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 font-semibold"
-                            >
-                              <Mail size={13} className="text-rose-400" /> Email Customers to Reschedule
-                            </button>
+                            <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                               {conflicts.map((r: any) => (
+                                 <div key={r.id} className="bg-rose-950/50 border border-rose-900/50 p-2.5 rounded-lg">
+                                   <p className="text-xs font-bold text-white mb-0.5">{r.customerName}</p>
+                                   <div className="flex flex-col text-[10px] text-rose-300/80 gap-0.5">
+                                      <a href={`tel:${r.contactNumber}`} className="hover:text-white flex items-center gap-1"><span className="text-rose-500">📞</span> {r.contactNumber}</a>
+                                      {r.email && <a href={`mailto:${r.email}`} className="hover:text-white flex items-center gap-1"><span className="text-rose-500">✉️</span> {r.email}</a>}
+                                      <span className="text-neutral-500 mt-1">{r.timeSlot} ({r.durationHours}h) - Table {r.tableId?.replace('t','')}</span>
+                                   </div>
+                                 </div>
+                               ))}
+                            </div>
                           </div>
                         );
                       }
@@ -1858,16 +1996,16 @@ export function AdminEvents() {
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   updateEvent(cancelEventModal.id, { 
                     isCancelled: true, 
                     cancelReason: eventCancelReason,
-                    allowReservations: true,
-                    reservationTableCount: 0,
-                    caterWalkIns: true,
-                    walkInTableCount: 0,
                     eventTableIds: []
                   });
+                  // Also cancel associated reservations tag
+                  const { error } = await supabase.from('reservations').update({ status: 'cancelled', cancellationReason: `Event Cancelled: ${eventCancelReason}` }).eq('paymentRef', 'EVENT').like('id', `%EVT-%`);
+                  if(error) console.error("Failed to cancel event tags", error);
+
                   setCancelEventModal(null);
                   flash(`Event "${cancelEventModal.title}" marked as cancelled and tables released.`);
                 }}

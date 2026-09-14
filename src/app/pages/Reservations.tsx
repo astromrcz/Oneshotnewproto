@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reservation, Event, PromoCode } from '../context/AppContext';
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
@@ -11,7 +11,10 @@ import { useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 
-const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+const formatPHP = (amount?: number | string | null) => {
+  const val = Number(amount) || 0;
+  return `₱${val.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+};
 
 const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
   pending: { label: 'Pending', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-400' },
@@ -42,6 +45,11 @@ const formatTimeOnly = (timeStr: string) => {
 };
 
 const todayStart = startOfDay(new Date());
+
+type ActionModalData = {
+  type: 'receipt' | 'refund' | 'reschedule';
+  reservation: any;
+};
 
 function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; }) {
   const today = new Date();
@@ -194,19 +202,35 @@ export function Reservations() {
   const [voidError, setVoidError] = useState('');
   const [isVoiding, setIsVoiding] = useState(false);
   
-  // Refund & Image View
-  const [refundNotes, setRefundNotes] = useState('');
+  // Image View & Receipt
   const [viewImage, setViewImage] = useState<string | null>(null);
   const [viewingEReceipt, setViewingEReceipt] = useState<any | null>(null);
 
   // Settle Balance Modal State
   const [settleModal, setSettleModal] = useState<{ id: string; customerName: string; balanceDue: number } | null>(null);
   const [tenderedAmount, setTenderedAmount] = useState('');
+  const [settlePaymentMethod, setSettlePaymentMethod] = useState<'cash' | 'gcash'>('cash');
+  const [settlePaymentRef, setSettlePaymentRef] = useState('');
+  const [settleReceiptFile, setSettleReceiptFile] = useState<File | null>(null);
+  const [settleReceiptPreview, setSettleReceiptPreview] = useState<string | null>(null);
+  const [isSettling, setIsSettling] = useState(false);
 
-  // 🟢 Enhanced Reschedule Modal State
-  const [rescheduleModal, setRescheduleModal] = useState<{
-    id: string; customerName: string; originalDate: Date;
-    newDate: Date | null; newTimeSlot: string; newDuration: number; newTableId: string | null;
+  // 🟢 Action Modal State (Receipt / Refund / Reschedule)
+  const [actionModal, setActionModal] = useState<ActionModalData | null>(null);
+  const [callSummary, setCallSummary] = useState('');
+  const [showDenyInput, setShowDenyInput] = useState(false);
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
+
+  // Refund Receipt State
+  const [refundReceiptFile, setRefundReceiptFile] = useState<File | null>(null);
+  const [refundReceiptPreview, setRefundReceiptPreview] = useState<string | null>(null);
+
+  // 🟢 Reschedule Setup specifically for the Reschedule Modal
+  const [rescheduleData, setRescheduleData] = useState<{
+    newDate: Date | null;
+    newTimeSlot: string;
+    newDuration: number;
+    newTableId: string | null;
     staffConfirmed: boolean;
   } | null>(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
@@ -327,7 +351,7 @@ export function Reservations() {
   };
 
   const maxAllowedDuration = (() => {
-    let maxMins = (reservationTerms?.maxHours || 8) * 60;
+    let maxMins = 24 * 60; 
     if (selectedDate && form.timeSlot) {
       const closeDate = getNextClosingTime(selectedDate);
       const [h, m] = form.timeSlot.split(':').map(Number);
@@ -350,6 +374,23 @@ export function Reservations() {
     const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
     return isWeekend ? wEndMax : wDayMax;
   })();
+
+  const validateAndSetImage = (e: React.ChangeEvent<HTMLInputElement>, setFile: (f: File | null) => void, setPreview: (s: string | null) => void) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      flash("Please upload a valid image format (JPG, PNG, WEBP).", "error");
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      flash("Image size must be less than 5MB.", "error");
+      e.target.value = '';
+      return;
+    }
+    setPreview(URL.createObjectURL(file));
+    setFile(file);
+  };
 
   const validateTimeSlot = (time: string, duration: number) => {
     if (!time || !selectedDate) return 'invalid';
@@ -381,7 +422,7 @@ export function Reservations() {
 
     sameTableRes.forEach((r: any) => {
       const rStart = new Date(r.date);
-      const [rH, rM] = r.timeSlot.split(':').map(Number);
+      const [rH, rM] = (r.timeSlot || '00:00').split(':').map(Number);
       rStart.setHours(rH, rM, 0, 0); 
       const rEnd = addMinutes(rStart, r.durationHours * 60);
       if (requestedStart < rEnd && requestedEnd > rStart) tableOverlapCount++;
@@ -406,8 +447,6 @@ export function Reservations() {
   const totalAmount = form.durationHours * effectiveHourly;
   const downPaymentPercentVal = rates && Number(rates.downPaymentPercent) >= 0 ? Number(rates.downPaymentPercent) : DOWN_PAYMENT_RATE * 100;
   const downPayment = totalAmount * (downPaymentPercentVal / 100);
-
-  const handleSendEmail = (resId: string) => flash(`Reschedule email sent to Reservation #${resId.toUpperCase()}`, "success");
 
   const handleCheckIn = (res: any) => {
     const resDate = new Date(res.date);
@@ -455,7 +494,7 @@ export function Reservations() {
     const rows = reservations.map((r: any) => [
       r.id, r.customerName, r.contactNumber, r.email || '', format(new Date(r.date), 'yyyy-MM-dd'),
       r.timeSlot, r.durationHours, r.partySize, r.tableId || '', r.status,
-      r.totalAmount.toFixed(2), r.downPaymentAmount.toFixed(2), r.balancePaid ? 'Yes' : 'No'
+      Number(r.totalAmount || 0).toFixed(2), Number(r.downPaymentAmount || 0).toFixed(2), r.balancePaid ? 'Yes' : 'No'
     ]);
     const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -558,6 +597,71 @@ export function Reservations() {
     }
   };
 
+  const executeActionModal = async () => {
+    if (!actionModal) return;
+    if (!callSummary.trim()) { flash("Call summary is required to proceed.", "error"); return; }
+    
+    setIsActionSubmitting(true);
+    
+    try {
+      if (actionModal.type === 'refund') {
+         let finalReceiptUrl = null;
+         if (refundReceiptFile) {
+            const fileExt = refundReceiptFile.name.split('.').pop();
+            const fileName = `refund_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+            const { error: uploadError } = await supabase.storage.from('oneshot-assets').upload(fileName, refundReceiptFile);
+            if (!uploadError) {
+               const { data: publicUrlData } = supabase.storage.from('oneshot-assets').getPublicUrl(fileName);
+               finalReceiptUrl = publicUrlData.publicUrl;
+            }
+         }
+
+         updateReservation(actionModal.reservation.id, { 
+            status: 'cancelled', 
+            cancellationReason: `Refund Settled: ${callSummary}` 
+         });
+
+         if (finalReceiptUrl) {
+            await supabase.from('reservations').update({ 
+              receipt_img_url: finalReceiptUrl,
+              refund_notes: finalReceiptUrl
+            }).eq('id', actionModal.reservation.id);
+         }
+
+         flash("Marked as contacted and refund settled successfully.", "success");
+
+      } else if (actionModal.type === 'reschedule') {
+         if (!rescheduleData?.newDate || !rescheduleData?.newTableId) {
+           flash("Please select a new date and table.", "error"); 
+           setIsActionSubmitting(false);
+           return;
+         }
+         const rDate = new Date(rescheduleData.newDate);
+         const [h,m] = rescheduleData.newTimeSlot.split(':').map(Number);
+         rDate.setHours(h, m, 0, 0);
+
+         updateReservation(actionModal.reservation.id, { 
+           status: 'confirmed', 
+           date: rDate,
+           timeSlot: rescheduleData.newTimeSlot,
+           durationHours: rescheduleData.newDuration,
+           tableId: rescheduleData.newTableId,
+           cancellationReason: `Rescheduled: ${callSummary}` 
+         });
+         flash("Marked as contacted and reservation rescheduled successfully.", "success");
+      }
+      
+      setActionModal(null);
+      setCallSummary('');
+      setRefundReceiptFile(null);
+      setRefundReceiptPreview(null);
+    } catch (e) {
+      flash("An error occurred while processing the action.", "error");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
   const filtered = reservations
     .filter((r: any) => {
       const matchSearch = !search || r.customerName.toLowerCase().includes(search.toLowerCase()) || r.contactNumber.includes(search) || r.id.toLowerCase().includes(search.toLowerCase());
@@ -577,10 +681,13 @@ export function Reservations() {
 
   const todayCount = reservations.filter((r: any) => isToday(new Date(r.date))).length;
   const pendingCount = reservations.filter((r: any) => r.status === 'pending').length;
-  const totalRevenue = reservations.filter((r: any) => r.status === 'completed').reduce((s: number, r: any) => s + r.totalAmount, 0);
+  
+  const totalRevenue = reservations.filter((r: any) => r.status === 'completed').reduce((s: number, r: any) => s + (Number(r.totalAmount) || 0), 0);
   const pendingPayment = reservations.filter((r: any) => r.status !== 'cancelled').reduce((s: number, r: any) => {
-    if (!r.downPaymentPaid) return s + r.downPaymentAmount;
-    if (!r.balancePaid) return s + (r.totalAmount - r.downPaymentAmount);
+    const dp = Number(r.downPaymentAmount) || 0;
+    const total = Number(r.totalAmount) || 0;
+    if (!r.downPaymentPaid) return s + dp;
+    if (!r.balancePaid) return s + (total - dp);
     return s;
   }, 0);
 
@@ -630,7 +737,7 @@ export function Reservations() {
         </div>
         <div className="p-4">
           <div className="grid grid-cols-7 mb-2">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="text-center text-[10px] text-neutral-500 font-semibold uppercase tracking-wider py-1">{d}</div>)}
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="text-center text-[10px] text-neutral-600 uppercase tracking-wider font-semibold py-1">{d}</div>)}
           </div>
           <div className="grid grid-cols-7 gap-1.5">
             {Array.from({ length: startPad }).map((_, i) => <div key={`pad-${i}`} />)}
@@ -662,18 +769,12 @@ export function Reservations() {
                   <div className="w-full space-y-0.5 overflow-hidden flex-1 pointer-events-none">
                     {dayCls && <div className="w-full text-[9px] bg-rose-500/20 text-rose-400 rounded px-1 truncate font-semibold">Closed</div>}
                     
-                    {!dayCls && dayRes.map((r: any) => {
-                      const tName = r.tableId ? tables.find((t: any) => t.id === r.tableId)?.name || 'T?' : 'Unasg';
-                      const isCancelled = r.status === 'cancelled';
-                      return (
-                        <div key={r.id} className={`w-full text-[9px] border rounded px-1.5 py-0.5 font-medium flex items-center gap-1.5 ${isCancelled ? 'bg-rose-500/10 border-rose-500/20 text-rose-400 opacity-60' : 'bg-blue-500/10 border-blue-500/20 text-blue-300'}`} title={`${r.customerName} - ${r.timeSlot} - ${tName} - ${r.durationHours}h`}>
-                          <span className={`font-bold ${isCancelled ? 'text-rose-500' : 'text-blue-400'}`}>{r.timeSlot}</span>
-                          <span className="truncate flex-1">{r.customerName}</span>
-                          <span className="font-bold shrink-0">{tName.replace('Table ', 'T')}</span>
-                          <span className="shrink-0">{r.durationHours}h</span>
-                        </div>
-                      );
-                    })}
+                    {!dayCls && dayRes.length > 0 && (
+                      <div className="w-full text-[8px] bg-blue-500/20 text-blue-400 rounded px-1 truncate font-semibold border border-blue-500/30">
+                        {dayRes.length} Rsv
+                      </div>
+                    )}
+                    
                     {!dayCls && dayEvs.map((e: any) => <div key={e.id} className="w-full text-[8px] bg-amber-500/20 text-amber-400 rounded px-1 truncate font-semibold">{e.title}</div>)}
                   </div>
                 </div>
@@ -817,6 +918,18 @@ export function Reservations() {
                   </tr>
                 ) : filtered.map((r: any) => {
                   const cfg = statusConfig[r.status] || { label: r.status, color: 'bg-neutral-800 text-neutral-400', dot: 'bg-neutral-500' };
+                  
+                  // Handle custom statuses correctly
+                  if (r.status === 'pending-reschedule') {
+                    cfg.label = 'Resched. Req.';
+                    cfg.color = 'bg-violet-900/30 text-violet-400 border-violet-800';
+                    cfg.dot = 'bg-violet-500';
+                  } else if (r.status === 'pending-refund') {
+                    cfg.label = 'Refund Req.';
+                    cfg.color = 'bg-rose-900/30 text-rose-400 border-rose-800';
+                    cfg.dot = 'bg-rose-500';
+                  }
+
                   return (
                     <tr key={r.id} onClick={() => setSelectedId(r.id)} className="hover:bg-neutral-900/60 transition-colors cursor-pointer relative">
                       <td className="px-4 py-3">
@@ -840,37 +953,47 @@ export function Reservations() {
                           </div>
                           <div className="flex items-center gap-1">
                             {r.balancePaid ? <CheckCircle size={11} className="text-emerald-400" /> : <XCircle size={11} className="text-neutral-600" />}
-                            <span className="text-[10px] text-neutral-500">Bal {formatPHP(r.totalAmount - r.downPaymentAmount)}</span>
+                            <span className="text-[10px] text-neutral-500">Bal {formatPHP(Number(r.totalAmount || 0) - Number(r.downPaymentAmount || 0))}</span>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3 relative">
                         <div className="flex justify-end" onClick={e => e.stopPropagation()}>
-                          <button onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-lg text-xs font-semibold text-neutral-300 transition-colors">
-                            Actions <ChevronDown size={14} />
-                          </button>
-                          <AnimatePresence>
-                            {openActionRowId === r.id && (
-                              <motion.div initial={{ opacity: 0, y: 5, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 5, scale: 0.95 }} className="absolute right-4 top-10 mt-1 w-44 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
-                                {r.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); updateReservationStatus(r.id, 'confirmed'); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
-                                {r.status === 'confirmed' && (
-                                  <>
-                                    <button onClick={(e) => { e.stopPropagation(); handleCheckIn(r); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In</button>
-                                    <button onClick={(e) => { e.stopPropagation(); setVoidModal({ type: 'verified', id: r.id, customerName: r.customerName }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-500 hover:bg-neutral-800 transition-colors">Void Verification</button>
-                                  </>
+                          {r.paymentRef === 'EVENT' ? (
+                            <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest px-3 py-1.5">System Locked</span>
+                          ) : r.status !== 'cancelled' && r.status !== 'completed' ? (
+                            <>
+                              <button onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-lg text-xs font-semibold text-neutral-300 transition-colors">
+                                Actions <ChevronDown size={14} />
+                              </button>
+                              <AnimatePresence>
+                                {openActionRowId === r.id && (
+                                  <motion.div initial={{ opacity: 0, y: 5, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 5, scale: 0.95 }} className="absolute right-4 top-10 mt-1 w-44 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
+                                    {r.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
+                                    {r.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
+                                    {r.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
+                                    {r.status === 'confirmed' && (
+                                      <>
+                                        <button onClick={(e) => { e.stopPropagation(); handleCheckIn(r); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In</button>
+                                        <button onClick={(e) => { e.stopPropagation(); setVoidModal({ type: 'verified', id: r.id, customerName: r.customerName }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-500 hover:bg-neutral-800 transition-colors">Void Verification</button>
+                                      </>
+                                    )}
+                                    {r.status === 'checked-in' && (
+                                      <button disabled={!hasCompletedSession(r)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(r.id, 'completed'); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
+                                    )}
+                                    {r.status === 'confirmed' && (
+                                      <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
+                                    )}
+                                    {r.status !== 'checked-in' && (
+                                      <button onClick={(e) => { e.stopPropagation(); setCancelTarget(r.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{r.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
+                                    )}
+                                  </motion.div>
                                 )}
-                                {r.status === 'checked-in' && (
-                                  <button disabled={!hasCompletedSession(r)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(r.id, 'completed'); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
-                                )}
-                                {r.status === 'confirmed' && (
-                                  <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: r.id, customerName: r.customerName, originalDate: new Date(r.date), newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
-                                )}
-                                {(r.status !== 'cancelled' && r.status !== 'completed') && (
-                                  <button onClick={(e) => { e.stopPropagation(); setCancelTarget(r.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{r.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
-                                )}
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                              </AnimatePresence>
+                            </>
+                          ) : (
+                            <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest px-3 py-1.5">No Actions</span>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -947,10 +1070,10 @@ export function Reservations() {
                                     <>
                                       <span className="text-[10px] text-rose-400 flex items-center gap-1 font-semibold"><AlertTriangle size={10} /> Affected: No Action</span>
                                       <button 
-                                        onClick={() => handleSendEmail(r.id)}
+                                        onClick={() => setActionModal({ type: 'refund', reservation: r })}
                                         className="text-[10px] bg-rose-600/20 text-rose-400 hover:bg-rose-600/40 px-2 py-1 rounded flex items-center gap-1 transition-colors"
                                       >
-                                        <Send size={10} /> Resend Email
+                                        <Send size={10} /> Contact Customer
                                       </button>
                                     </>
                                   )}
@@ -978,7 +1101,7 @@ export function Reservations() {
                 <h2 className="text-xl font-black text-neutral-100">{selected.customerName}</h2>
                 <p className="text-sm text-neutral-500 font-mono tracking-wider mt-1">Reservation #{selected.id.toUpperCase()}</p>
               </div>
-              <button onClick={() => { setSelectedId(null); setRefundNotes(''); }} className="p-2.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-xl transition-colors"><X size={20} /></button>
+              <button onClick={() => setSelectedId(null)} className="p-2.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-xl transition-colors"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto hide-scrollbar">
               <div className="grid grid-cols-2 gap-5 text-base">
@@ -988,20 +1111,36 @@ export function Reservations() {
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Table</p><p className="text-lg text-neutral-200 font-medium">{selected.tableId ? tables.find((t: any) => t.id === selected.tableId)?.name || selected.tableId : 'Not assigned'}</p></div>
               </div>
 
+              {/* 🟢 Cancellation Reason Display */}
+              {selected.status === 'cancelled' && selected.cancellationReason && (
+                <div className="bg-rose-950/20 border border-rose-900/40 rounded-xl p-4 mt-2">
+                  <p className="text-xs text-rose-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5"><AlertTriangle size={14}/> Cancellation Reason</p>
+                  <p className="text-sm text-rose-300/90 leading-relaxed font-medium">{selected.cancellationReason}</p>
+                </div>
+              )}
+
               {/* Payment breakdown */}
               <div className="bg-neutral-900 rounded-xl p-5 space-y-5 border border-neutral-800">
                 <p className="text-xs text-neutral-500 uppercase tracking-wider font-bold">Payment Details</p>
                 <div className="flex justify-between items-center text-base">
-                  <span className="text-neutral-400 font-medium">Down Payment ({rates?.downPaymentPercent || 25}%)</span>
+                  <span className="text-neutral-400 font-medium">Down Payment ({rates?.downPaymentPercent || 50}%)</span>
                   <div className="flex items-center gap-3">
                     <span className={selected.downPaymentPaid ? 'text-emerald-400 font-black text-xl' : 'text-neutral-400 font-black text-xl'}>{formatPHP(selected.downPaymentAmount)}</span>
                     {selected.downPaymentPaid ? (
                       <div className="flex items-center gap-2">
                          <span className="text-xs font-bold px-2.5 py-1 rounded bg-emerald-950/40 text-emerald-500 border border-emerald-900/50 cursor-default flex items-center gap-1.5"><CheckCircle size={12}/> Paid</span>
-                         <button onClick={() => setVoidModal({ type: 'downPayment', id: selected.id, customerName: selected.customerName })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">Void</button>
+                         {selected.status !== 'cancelled' && selected.status !== 'completed' && (
+                           <button onClick={() => setVoidModal({ type: 'downPayment', id: selected.id, customerName: selected.customerName })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">Void</button>
+                         )}
                       </div>
                     ) : (
-                      <button onClick={() => updateDownPayment(selected.id, true)} className="text-xs font-bold px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors">Mark Paid</button>
+                      <button 
+                        disabled={selected.status === 'cancelled'}
+                        onClick={() => updateDownPayment(selected.id, true)} 
+                        className={`text-xs font-bold px-3 py-1.5 rounded transition-colors ${selected.status === 'cancelled' ? 'bg-neutral-800 text-neutral-600 cursor-not-allowed border border-neutral-700' : 'bg-emerald-600 text-white hover:bg-emerald-500'}`}
+                      >
+                        Mark Paid
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1011,14 +1150,14 @@ export function Reservations() {
                   {selected.paymentRef || selected.receiptImg ? (
                     <div className="flex items-center justify-between bg-neutral-950 p-3.5 rounded-xl border border-neutral-800 shadow-inner">
                       <span className="text-xl font-mono text-white font-black tracking-widest truncate max-w-[180px]">
-                        {selected.paymentRef === 'CASH' ? 'PAID VIA CASH' : selected.paymentRef ? `${selected.paymentRef}` : 'IMAGE UPLOADED'}
+                        {selected.paymentRef === 'CASH' ? 'PAID VIA CASH' : selected.paymentRef === 'EVENT' ? 'EVENT TAG' : selected.paymentRef ? `${selected.paymentRef}` : 'IMAGE UPLOADED'}
                       </span>
                       {selected.receiptImg ? (
                         <button onClick={() => setViewImage(selected.receiptImg!)} className="text-blue-400 hover:text-white bg-blue-950/30 hover:bg-blue-600/40 rounded-lg transition-all p-2 flex items-center gap-2 font-bold text-xs border border-blue-900/50" title="View Receipt Image">
                           <ImageIcon size={18} /> View
                         </button>
                       ) : (
-                        <span className="text-xs text-neutral-600 italic px-1 font-medium">{selected.paymentRef === 'CASH' ? 'Verified manually' : 'No Image'}</span>
+                        <span className="text-xs text-neutral-600 italic px-1 font-medium">{selected.paymentRef === 'CASH' || selected.paymentRef === 'EVENT' ? 'Verified manually' : 'No Image'}</span>
                       )}
                     </div>
                   ) : (
@@ -1030,14 +1169,22 @@ export function Reservations() {
                 <div className="flex justify-between items-center text-base border-t border-neutral-800 pt-4">
                   <span className="text-neutral-300 font-bold">Balance</span>
                   <div className="flex items-center gap-3">
-                    <span className={selected.balancePaid ? 'text-emerald-400 font-black text-xl' : 'text-rose-400 font-black text-xl'}>{formatPHP(selected.totalAmount - selected.downPaymentAmount)}</span>
+                    <span className={selected.balancePaid ? 'text-emerald-400 font-black text-xl' : 'text-rose-400 font-black text-xl'}>{formatPHP(Number(selected.totalAmount || 0) - Number(selected.downPaymentAmount || 0))}</span>
                     {selected.balancePaid ? (
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold px-2.5 py-1 rounded bg-emerald-950/40 text-emerald-500 border border-emerald-900/50 cursor-default flex items-center gap-1.5"><CheckCircle size={12}/> Paid</span>
-                        <button onClick={() => setVoidModal({ type: 'balance', id: selected.id, customerName: selected.customerName })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">Void</button>
+                        {selected.status !== 'cancelled' && selected.status !== 'completed' && (
+                          <button onClick={() => setVoidModal({ type: 'balance', id: selected.id, customerName: selected.customerName })} className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950/30 text-rose-500 border border-rose-900/50 hover:bg-rose-900/50 transition-colors">Void</button>
+                        )}
                       </div>
                     ) : (
-                      <button onClick={() => { setSettleModal({ id: selected.id, customerName: selected.customerName, balanceDue: selected.totalAmount - selected.downPaymentAmount }); setTenderedAmount(''); }} className="text-xs font-bold px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors">Settle Balance</button>
+                      <button 
+                        disabled={selected.status === 'cancelled'}
+                        onClick={() => { setSettleModal({ id: selected.id, customerName: selected.customerName, balanceDue: Number(selected.totalAmount || 0) - Number(selected.downPaymentAmount || 0) }); setTenderedAmount(''); }} 
+                        className={`text-xs font-bold px-3 py-1.5 rounded transition-colors ${selected.status === 'cancelled' ? 'bg-neutral-800 text-neutral-600 cursor-not-allowed border border-neutral-700' : 'bg-emerald-600 text-white hover:bg-emerald-500'}`}
+                      >
+                        Settle Balance
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1056,34 +1203,207 @@ export function Reservations() {
               </div>
 
               {/* Status Actions Dropdown */}
-              <div className="relative mt-4" onClick={e => e.stopPropagation()}>
-                <button onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === selected.id ? null : selected.id); }} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded-xl text-sm font-bold text-neutral-200 transition-colors shadow-lg shadow-black/20">
-                  Manage Reservation Actions <ChevronDown size={16} />
-                </button>
-                <AnimatePresence>
-                  {openActionRowId === selected.id && (
-                    <motion.div initial={{ opacity: 0, y: -10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -10, scale: 0.95 }} className="absolute bottom-full left-0 mb-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
-                      {selected.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); updateReservationStatus(selected.id, 'confirmed'); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
-                      {selected.status === 'confirmed' && (
-                        <>
-                          <button onClick={(e) => { e.stopPropagation(); handleCheckIn(selected); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In Customer</button>
-                          <button onClick={(e) => { e.stopPropagation(); setVoidModal({ type: 'verified', id: selected.id, customerName: selected.customerName }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-500 hover:bg-neutral-800 transition-colors">Void Verification</button>
-                        </>
-                      )}
-                      {selected.status === 'checked-in' && (
-                        <button disabled={!hasCompletedSession(selected)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(selected.id, 'completed'); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
-                      )}
-                      {selected.status === 'confirmed' && (
-                        <button onClick={(e) => { e.stopPropagation(); setRescheduleModal({ id: selected.id, customerName: selected.customerName, originalDate: new Date(selected.date), newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
-                      )}
-                      {(selected.status !== 'cancelled' && selected.status !== 'completed') && (
-                        <button onClick={(e) => { e.stopPropagation(); setCancelTarget(selected.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{selected.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {selected.paymentRef === 'EVENT' ? (
+                <div className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-neutral-900 border border-neutral-800 rounded-xl text-sm font-bold text-neutral-600 cursor-not-allowed mt-4">
+                  <Lock size={16} /> Event Tagged - System Locked
+                </div>
+              ) : selected.status !== 'cancelled' && selected.status !== 'completed' ? (
+                <div className="relative mt-4" onClick={e => e.stopPropagation()}>
+                  <button onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === selected.id ? null : selected.id); }} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded-xl text-sm font-bold text-neutral-200 transition-colors shadow-lg shadow-black/20">
+                    Manage Reservation Actions <ChevronDown size={16} />
+                  </button>
+                  <AnimatePresence>
+                    {openActionRowId === selected.id && (
+                      <motion.div initial={{ opacity: 0, y: -10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -10, scale: 0.95 }} className="absolute bottom-full left-0 mb-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
+                        {selected.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
+                        {selected.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
+                        {selected.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
+                        {selected.status === 'confirmed' && (
+                          <>
+                            <button onClick={(e) => { e.stopPropagation(); handleCheckIn(selected); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In Customer</button>
+                            <button onClick={(e) => { e.stopPropagation(); setVoidModal({ type: 'verified', id: selected.id, customerName: selected.customerName }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-500 hover:bg-neutral-800 transition-colors">Void Verification</button>
+                          </>
+                        )}
+                        {selected.status === 'checked-in' && (
+                          <button disabled={!hasCompletedSession(selected)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(selected.id, 'completed'); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
+                        )}
+                        {selected.status === 'confirmed' && (
+                          <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
+                        )}
+                        {selected.status !== 'checked-in' && (
+                          <button onClick={(e) => { e.stopPropagation(); setCancelTarget(selected.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{selected.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              ) : null}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 UNIFIED ACTION MODAL (RECEIPTS, REFUNDS, RESCHEDULES) */}
+      {actionModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <h3 className="font-bold text-neutral-200">
+                {actionModal.type === 'receipt' ? 'Verify Receipt' : actionModal.type === 'refund' ? 'Process Refund Request' : 'Process Reschedule Request'}
+              </h3>
+              <button onClick={() => { setActionModal(null); setShowDenyInput(false); setCallSummary(''); setRefundReceiptFile(null); setRefundReceiptPreview(null); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
+            </div>
+            
+            <div className="p-5 flex-1 overflow-y-auto space-y-4">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300">
+                <p><strong>Customer:</strong> {actionModal.reservation.customerName}</p>
+                <p className="mt-1">
+                  <strong>Contact:</strong> 
+                  <span className="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold ml-1 tracking-wider inline-flex items-center gap-1">
+                    <Phone size={10}/> {actionModal.reservation.contactNumber}
+                  </span>
+                </p>
+                {actionModal.reservation.email && <p className="mt-1"><strong>Email:</strong> {actionModal.reservation.email}</p>}
+              </div>
+
+              {actionModal.type === 'receipt' && (
+                <>
+                  {actionModal.reservation.receiptImg ? (
+                    <div className="w-full bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden flex items-center justify-center">
+                      <img src={actionModal.reservation.receiptImg} alt="Uploaded Receipt" className="max-w-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="w-full h-32 bg-neutral-900 rounded-xl border border-neutral-800 flex items-center justify-center text-neutral-500 text-xs italic">
+                      No image provided. Ref number might have been used instead.
+                    </div>
+                  )}
+                  {showDenyInput && (
+                    <div className="bg-rose-950/20 border border-rose-900/40 p-4 rounded-xl space-y-3 mt-4 animate-in slide-in-from-top-2">
+                      <label className="text-xs text-rose-400 font-bold uppercase tracking-wider block">Reason for Cancellation</label>
+                      <Input 
+                        autoFocus
+                        value={callSummary} 
+                        onChange={e => setCallSummary(e.target.value)} 
+                        placeholder="e.g. Invalid receipt, amount mismatch" 
+                        className="bg-neutral-950 border-rose-800 text-neutral-200 text-xs h-10" 
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowDenyInput(false)} className="flex-1 py-2 bg-neutral-900 text-neutral-400 rounded-lg text-xs font-semibold hover:bg-neutral-800 transition-colors">Back</button>
+                        <button onClick={() => {
+                            if (!callSummary.trim()) { flash("Cancellation reason is required.", "error"); return; }
+                            updateReservation(actionModal.reservation.id, { status: 'cancelled', cancellationReason: callSummary });
+                            flash("Reservation has been cancelled.");
+                            setActionModal(null);
+                            setShowDenyInput(false);
+                            setCallSummary('');
+                          }} 
+                          className="flex-1 py-2 bg-rose-600 text-white rounded-lg text-xs font-bold shadow-lg hover:bg-rose-500 transition-colors"
+                        >
+                          Confirm Deny
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {(actionModal.type === 'refund' || actionModal.type === 'reschedule') && (
+                <div className="space-y-4">
+                  <div className={`p-3 rounded-lg border text-xs leading-relaxed ${actionModal.type === 'refund' ? 'bg-rose-950/20 border-rose-900/40 text-rose-300' : 'bg-violet-950/20 border-violet-900/40 text-violet-300'}`}>
+                    {actionModal.type === 'refund' ? (
+                       <p>Please contact the customer to manually settle the GCash refund of <strong>{formatPHP(actionModal.reservation.downPaymentAmount)}</strong>.</p>
+                    ) : (
+                       <p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{actionModal.reservation.timeSlot}</strong>.</p>
+                    )}
+                  </div>
+                  
+                  {actionModal.type === 'refund' && (
+                    <div>
+                      <label className="text-xs text-neutral-400 font-bold uppercase tracking-wider block mb-2">Upload GCash Refund Proof (Optional)</label>
+                      <label className="cursor-pointer w-full bg-neutral-950 border border-dashed border-neutral-700 rounded-lg overflow-hidden h-[80px] flex items-center justify-center hover:border-neutral-500 transition-colors relative">
+                        <input type="file" accept="image/jpeg, image/png, image/webp" className="hidden" onChange={e => validateAndSetImage(e, setRefundReceiptFile, setRefundReceiptPreview)} />
+                        {refundReceiptPreview ? (
+                          <img src={refundReceiptPreview} alt="Preview" className="w-full h-full object-cover opacity-80" />
+                        ) : (
+                          <span className="text-[10px] text-neutral-400 font-semibold flex flex-col items-center gap-1"><ImageIcon size={16}/> Upload JPG/PNG</span>
+                        )}
+                      </label>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="text-xs text-neutral-400 font-bold uppercase tracking-wider block mb-2">Call Summary / Admin Notes <span className="text-rose-500">*</span></label>
+                    <textarea 
+                      autoFocus
+                      value={callSummary} 
+                      onChange={e => setCallSummary(e.target.value)} 
+                      placeholder={actionModal.type === 'refund' ? "e.g. Sent ₱500 to 09123456789. Ref #..." : "e.g. Customer agreed to move booking to next week Friday 8PM."} 
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-xl p-3 text-xs text-neutral-200 focus:border-amber-500 outline-none resize-none h-24" 
+                    />
+                  </div>
+
+                  {actionModal.type === 'reschedule' && rescheduleData && (
+                     <div className="bg-neutral-900 p-3 rounded-xl border border-neutral-800/80 space-y-3">
+                        <label className="block text-[10px] text-emerald-500 font-bold uppercase tracking-wider">Select New Time & Table</label>
+                        <div className="grid grid-cols-2 gap-2">
+                           <div>
+                              <label className="block text-[10px] text-neutral-500 mb-1">New Date</label>
+                              <input type="date" value={rescheduleData.newDate ? format(rescheduleData.newDate, 'yyyy-MM-dd') : ''} min={format(new Date(), 'yyyy-MM-dd')} onChange={e => setRescheduleData(prev => prev ? ({...prev, newDate: new Date(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
+                           </div>
+                           <div>
+                              <label className="block text-[10px] text-neutral-500 mb-1">New Time</label>
+                              <input type="time" value={rescheduleData.newTimeSlot} onChange={e => setRescheduleData(prev => prev ? ({...prev, newTimeSlot: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
+                           </div>
+                           <div>
+                              <label className="block text-[10px] text-neutral-500 mb-1">Duration</label>
+                              <select value={rescheduleData.newDuration} onChange={e => setRescheduleData(prev => prev ? ({...prev, newDuration: parseInt(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500">
+                                 {[1,2,3,4,5,6].map(h => <option key={h} value={h}>{h}h</option>)}
+                              </select>
+                           </div>
+                           <div>
+                              <label className="block text-[10px] text-neutral-500 mb-1">Assign Table</label>
+                              <select value={rescheduleData.newTableId || ''} onChange={e => setRescheduleData(prev => prev ? ({...prev, newTableId: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500">
+                                 <option value="" disabled>Select a table...</option>
+                                 {tables.filter((t: any) => t.isActive).map((t: any) => (
+                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                 ))}
+                              </select>
+                           </div>
+                        </div>
+                     </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {!showDenyInput && (
+              <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex gap-3">
+                {actionModal.type === 'receipt' ? (
+                  <>
+                    <button onClick={() => setShowDenyInput(true)} className="flex-1 py-2.5 bg-neutral-800 hover:bg-rose-950/40 border border-neutral-700 hover:border-rose-800 text-rose-400 rounded-xl text-xs font-bold transition-colors">
+                      Deny & Cancel
+                    </button>
+                    <button onClick={() => {
+                        updateReservationStatus(actionModal.reservation.id, 'confirmed');
+                        flash("Receipt verified and booking confirmed.");
+                        setActionModal(null);
+                      }} 
+                      className="flex-[2] py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-900/30 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle size={14}/> Verify & Approve
+                    </button>
+                  </>
+                ) : (
+                  <button 
+                    disabled={isActionSubmitting}
+                    onClick={executeActionModal} 
+                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-xl text-xs font-bold shadow-lg transition-colors flex justify-center items-center gap-2"
+                  >
+                    {isActionSubmitting ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <><CheckCircle size={14} /> Mark as Contacted & Resolved</>}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1273,10 +1593,14 @@ export function Reservations() {
                           </div>
                           <div>
                             <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
-                            <div className="flex items-center gap-3 mt-1.5">
-                              <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center">
-                                <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
-                                <span className="text-[10px] text-neutral-400">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
+                            <div className="mt-1.5">
+                              <label className="cursor-pointer w-full bg-neutral-950 border border-dashed border-neutral-700 rounded-lg overflow-hidden h-[60px] flex items-center justify-center hover:border-neutral-500 transition-colors relative">
+                                <input type="file" accept="image/jpeg, image/png, image/webp" className="hidden" onChange={e => validateAndSetImage(e, setReceiptFile, setReceiptPreview)} />
+                                {receiptPreview ? (
+                                  <img src={receiptPreview} alt="Preview" className="w-full h-full object-cover opacity-80" />
+                                ) : (
+                                  <span className="text-[10px] text-neutral-400 font-semibold flex flex-col items-center gap-1"><ImageIcon size={14}/> Upload JPG/PNG</span>
+                                )}
                               </label>
                             </div>
                           </div>
@@ -1319,7 +1643,7 @@ export function Reservations() {
                 <h3 className="text-base font-bold text-neutral-100">Settle Remaining Balance</h3>
                 <p className="text-xs text-neutral-500">{settleModal.customerName}</p>
               </div>
-              <button onClick={() => setSettleModal(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
+              <button onClick={() => { setSettleModal(null); setSettleReceiptFile(null); setSettleReceiptPreview(null); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
             </div>
 
             <div className="p-6 space-y-4">
@@ -1342,6 +1666,37 @@ export function Reservations() {
                   className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-base text-white font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
               </div>
+
+              {/* Payment Method Toggle for Settle Balance */}
+              <div className="space-y-1.5 mt-3">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Payment Method</label>
+                <div className="flex bg-neutral-950 border border-neutral-800 rounded-lg p-1">
+                  <button type="button" onClick={() => setSettlePaymentMethod('cash')} className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${settlePaymentMethod === 'cash' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>Cash</button>
+                  <button type="button" onClick={() => setSettlePaymentMethod('gcash')} className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${settlePaymentMethod === 'gcash' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>GCash</button>
+                </div>
+              </div>
+
+              {settlePaymentMethod === 'gcash' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3 border-t border-neutral-800 pt-3">
+                  <div>
+                    <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Ref No. (Optional)</label>
+                    <input type="text" value={settlePaymentRef} onChange={e => setSettlePaymentRef(e.target.value.replace(/\D/g, '').slice(0, 13))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Receipt Image (Optional)</label>
+                    <div className="mt-1.5">
+                      <label className="cursor-pointer w-full bg-neutral-950 border border-dashed border-neutral-700 rounded-xl overflow-hidden h-[60px] flex items-center justify-center hover:border-neutral-500 transition-colors relative">
+                        <input type="file" accept="image/jpeg, image/png, image/webp" className="hidden" onChange={e => validateAndSetImage(e, setSettleReceiptFile, setSettleReceiptPreview)} />
+                        {settleReceiptPreview ? (
+                          <img src={settleReceiptPreview} alt="Preview" className="w-full h-full object-cover opacity-80" />
+                        ) : (
+                          <span className="text-[10px] text-neutral-400 font-semibold flex flex-col items-center gap-1"><ImageIcon size={14}/> Upload JPG/PNG</span>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {(() => {
                 const tendered = parseFloat(tenderedAmount) || 0;
@@ -1366,39 +1721,68 @@ export function Reservations() {
               })()}
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setSettleModal(null)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
+                <button type="button" disabled={isSettling} onClick={() => { setSettleModal(null); setSettleReceiptFile(null); setSettleReceiptPreview(null); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
                 <button
                   type="button"
                   disabled={
+                    isSettling ||
                     tenderedAmount === '' ||
                     (parseFloat(tenderedAmount) || 0) < 0 || 
                     (parseFloat(tenderedAmount) || 0) > settleModal.balanceDue + 100000
                   }
-                  onClick={() => {
-                    const tendered = parseFloat(tenderedAmount) || 0;
-                    const debt = Math.max(0, settleModal.balanceDue - tendered);
+                  onClick={async () => {
+                    setIsSettling(true);
+                    try {
+                      const tendered = parseFloat(tenderedAmount) || 0;
+                      const debt = Math.max(0, settleModal.balanceDue - tendered);
 
-                    if (debt > 0 && addWatchlistItem) {
-                      addWatchlistItem({
-                        name: settleModal.customerName,
-                        reason: 'debt',
-                        description: `Unpaid balance of ${formatPHP(debt)} from Reservation #${settleModal.id.toUpperCase()}.`,
-                        status: 'active',
-                        dateAdded: new Date()
-                      });
-                      if (addActivity) {
-                        addActivity('admin_action', `Automatically added ${settleModal.customerName} to Watchlist for unpaid debt of ${formatPHP(debt)} (Res #${settleModal.id.toUpperCase()}).`);
+                      if (debt > 0 && addWatchlistItem) {
+                        addWatchlistItem({
+                          name: settleModal.customerName,
+                          reason: 'debt',
+                          description: `Unpaid balance of ${formatPHP(debt)} from Reservation #${settleModal.id.toUpperCase()}.`,
+                          status: 'active',
+                          dateAdded: new Date()
+                        });
+                        if (addActivity) {
+                          addActivity('admin_action', `Automatically added ${settleModal.customerName} to Watchlist for unpaid debt of ${formatPHP(debt)} (Res #${settleModal.id.toUpperCase()}).`);
+                        }
                       }
-                    }
 
-                    updateBalance(settleModal.id, true);
-                    setSettleModal(null);
-                    setTenderedAmount('');
-                    flash(debt > 0 ? "Partial payment logged. Customer added to watchlist." : "Balance settled successfully.", debt > 0 ? "error" : "success");
+                      let finalReceiptUrl = null;
+                      if (settlePaymentMethod === 'gcash' && settleReceiptFile) {
+                        const fileExt = settleReceiptFile.name.split('.').pop();
+                        const fileName = `balance_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+                        const { error: uploadError } = await supabase.storage.from('oneshot-assets').upload(fileName, settleReceiptFile);
+                        if (!uploadError) {
+                          const { data: publicUrlData } = supabase.storage.from('oneshot-assets').getPublicUrl(fileName);
+                          finalReceiptUrl = publicUrlData.publicUrl;
+                        }
+                      }
+
+                      updateBalance(settleModal.id, true);
+
+                      // Append or update the reservation's receipt image if one was uploaded during GCash settlement
+                      if (finalReceiptUrl || (settlePaymentMethod === 'gcash' && settlePaymentRef)) {
+                        const updates: any = {};
+                        if (finalReceiptUrl) updates.receipt_img_url = finalReceiptUrl; 
+                        await supabase.from('reservations').update(updates).eq('id', settleModal.id);
+                      }
+
+                      setSettleModal(null);
+                      setTenderedAmount('');
+                      setSettleReceiptFile(null);
+                      setSettleReceiptPreview(null);
+                      flash(debt > 0 ? "Partial payment logged. Customer added to watchlist." : "Balance settled successfully.", debt > 0 ? "error" : "success");
+                    } catch (e) {
+                      flash("An error occurred during settlement.", "error");
+                    } finally {
+                      setIsSettling(false);
+                    }
                   }}
-                  className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30"
+                  className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2"
                 >
-                  Confirm Settlement
+                  {isSettling ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : 'Confirm Settlement'}
                 </button>
               </div>
             </div>
@@ -1449,221 +1833,6 @@ export function Reservations() {
           </div>
         );
       })()}
-
-      {/* Reschedule Modal */}
-      {rescheduleModal && (() => {
-        // 🟢 DYNAMIC RESCHEDULE VALIDATORS (Industry Standards)
-        const originalStart = new Date(rescheduleModal.originalDate);
-        const [oH, oM] = rescheduleModal.newTimeSlot.split(':').map(Number);
-        originalStart.setHours(oH, oM, 0, 0);
-        
-        const hoursUntilOriginal = differenceInHours(originalStart, new Date());
-        const isWithin24Hours = hoursUntilOriginal >= 0 && hoursUntilOriginal < 24;
-        
-        const requestedStart = new Date(rescheduleModal.newDate || new Date());
-        const daysInFuture = differenceInDays(requestedStart, new Date());
-        const isExceeding30Days = daysInFuture > 30;
-
-        const rescheduleValidation = (() => {
-          if (!rescheduleModal.newDate || !rescheduleModal.newTimeSlot || !rescheduleModal.newTableId) return 'invalid';
-          
-          const [h, m] = rescheduleModal.newTimeSlot.split(':').map(Number);
-          requestedStart.setHours(h, m, 0, 0);
-          const requestedEnd = addMinutes(requestedStart, rescheduleModal.newDuration * 60);
-
-          if (isBefore(requestedStart, new Date()) && !isToday(requestedStart)) return 'past';
-          if (isToday(requestedStart) && (h * 60 + m) <= new Date().getHours() * 60 + new Date().getMinutes()) return 'past';
-
-          // 1. Closure Check
-          const isClosed = closedDates.some((c: any) => {
-            if (c.type === 'weekly') return requestedStart.getDay() === c.dayOfWeek;
-            if (!c.date) return false;
-            return isSameDay(new Date(c.date), requestedStart);
-          });
-          if (isClosed) return 'closed';
-
-          // 2. Event Check
-          const blockingEvent = events.find((e: any) => {
-            if (!e.date) return false;
-            const eventDates = e.date.split(',').map((d: string) => d.trim());
-            if (!eventDates.includes(format(requestedStart, 'yyyy-MM-dd'))) return false;
-            if (e.allowReservations === false || e.allowReservations === 0) return true;
-            const eventTableIds = typeof e.eventTableIds === 'string' ? JSON.parse(e.eventTableIds || '[]') : (e.eventTableIds || []);
-            if (eventTableIds.includes(rescheduleModal.newTableId)) return true;
-            return false;
-          });
-          if (blockingEvent) return 'event_conflict';
-
-          // 3. Existing Reservation Check
-          const overlap = reservations.some((r: any) => {
-            if (r.id === rescheduleModal.id || r.tableId !== rescheduleModal.newTableId || r.status === 'cancelled' || r.status === 'completed') return false;
-            if (!isSameDay(new Date(r.date), requestedStart)) return false;
-            const rStart = new Date(r.date);
-            const [rH, rM] = (r.timeSlot || '00:00').split(':').map(Number);
-            rStart.setHours(rH, rM, 0, 0);
-            const rEnd = addMinutes(rStart, r.durationHours * 60);
-            return requestedStart < rEnd && requestedEnd > rStart;
-          });
-          if (overlap) return 'table_conflict';
-
-          return 'valid';
-        })();
-
-        return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-              <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-violet-950/30 shrink-0">
-                <div>
-                  <h3 className="text-base font-bold text-violet-400">Reschedule Booking</h3>
-                  <p className="text-xs text-neutral-400">Operational Change Request</p>
-                </div>
-                <button onClick={() => setRescheduleModal(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
-              </div>
-              
-              <div className="p-6 overflow-y-auto space-y-5 hide-scrollbar">
-                
-                {/* 🟢 24-HOUR & 30-DAY VALIDATOR WARNINGS */}
-                {isWithin24Hours && (
-                  <div className="bg-rose-950/20 border border-rose-900/50 p-4 rounded-xl space-y-2">
-                    <p className="text-xs font-bold text-rose-400 flex items-center gap-1.5"><AlertTriangle size={14}/> 24-Hour Policy Warning</p>
-                    <p className="text-[10px] text-rose-300/80 leading-relaxed">This reservation is less than 24 hours away. Rescheduling is restricted by default. If this is a verified management override, check the confirmation box below.</p>
-                  </div>
-                )}
-                {isExceeding30Days && (
-                  <div className="bg-amber-950/20 border border-amber-900/50 p-3 rounded-xl">
-                    <p className="text-xs font-bold text-amber-500 flex items-center gap-1.5"><Calendar size={14}/> Booking Range Exceeded</p>
-                    <p className="text-[10px] text-amber-400/80 mt-1">Requested date is more than 30 days in the future. Please select an earlier date.</p>
-                  </div>
-                )}
-
-                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800/80">
-                  <label className="block text-xs text-emerald-500 font-bold uppercase tracking-wider mb-3">1. Select New Date</label>
-                  <input type="date" value={rescheduleModal.newDate ? format(rescheduleModal.newDate, 'yyyy-MM-dd') : ''} min={format(new Date(), 'yyyy-MM-dd')} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newDate: new Date(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
-                </div>
-
-                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800/80">
-                  <label className="block text-xs text-emerald-500 font-bold uppercase tracking-wider mb-3">2. Select New Time & Table</label>
-                  <div className="grid grid-cols-2 gap-4 mb-3">
-                    <div>
-                      <label className="block text-[10px] text-neutral-500 mb-1">Time</label>
-                      <input type="time" value={rescheduleModal.newTimeSlot} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newTimeSlot: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-neutral-500 mb-1">Duration</label>
-                      <select value={rescheduleModal.newDuration} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newDuration: parseInt(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-amber-500">
-                        {[1,2,3,4,5,6].map(h => <option key={h} value={h}>{h} hour{h>1?'s':''}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-neutral-500 mb-1">Assign Table</label>
-                    <select value={rescheduleModal.newTableId || ''} onChange={e => setRescheduleModal(prev => prev ? ({...prev, newTableId: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-amber-500">
-                      <option value="" disabled>Select a table...</option>
-                      {tables.filter((t: any) => t.isActive).map((t: any) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="mt-3">
-                    {rescheduleValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> Time has passed.</p>}
-                    {rescheduleValidation === 'closed' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>The venue is marked as closed on this date.</span></div>}
-                    {rescheduleValidation === 'event_conflict' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>This table is blocked by a special event on this date.</span></div>}
-                    {rescheduleValidation === 'table_conflict' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>Table has another reservation overlapping this time.</span></div>}
-                    {rescheduleValidation === 'valid' && <p className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-2"><CheckCircle size={10} /> Valid selection!</p>}
-                  </div>
-                </div>
-
-                {/* 🟢 STAFF PROTOCOL CHECKBOX */}
-                <div className="bg-blue-950/20 border border-blue-900/40 p-4 rounded-xl">
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={rescheduleModal.staffConfirmed} 
-                      onChange={e => setRescheduleModal(prev => prev ? ({...prev, staffConfirmed: e.target.checked}) : null)}
-                      className="mt-1 flex-shrink-0"
-                    />
-                    <span className="text-xs text-blue-200/90 leading-relaxed font-semibold">
-                      I confirm that I have contacted the customer via their registered phone number and they have agreed to this schedule change, per our operational terms.
-                    </span>
-                  </label>
-                </div>
-
-              </div>
-
-              <div className="p-6 border-t border-neutral-800 bg-neutral-900/30 shrink-0 flex gap-3">
-                 <button type="button" disabled={isRescheduling} onClick={() => setRescheduleModal(null)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
-                 <button 
-                    type="button" 
-                    disabled={rescheduleValidation !== 'valid' || isRescheduling || isExceeding30Days || !rescheduleModal.staffConfirmed}
-                    onClick={async () => {
-                      setIsRescheduling(true);
-                      
-                      try {
-                        const rDate = new Date(rescheduleModal.newDate!);
-                        const [h,m] = rescheduleModal.newTimeSlot.split(':').map(Number);
-                        rDate.setHours(h, m, 0, 0);
-                        
-                        // Execute Manual Reschedule via Staff Override
-                        updateReservation(rescheduleModal.id, {
-                           date: rDate,
-                           timeSlot: rescheduleModal.newTimeSlot,
-                           durationHours: rescheduleModal.newDuration,
-                           tableId: rescheduleModal.newTableId!
-                        });
-                        
-                        addActivity('admin_action', `Staff manually rescheduled booking for ${rescheduleModal.customerName} (Res #${rescheduleModal.id}) after confirming via phone.`);
-                        
-                        flash("Reservation successfully rescheduled.", "success");
-                        setRescheduleModal(null);
-                        setSelectedId(null);
-                      } catch (error) {
-                        flash("An error occurred while rescheduling.", "error");
-                      } finally {
-                        setIsRescheduling(false);
-                      }
-                    }} 
-                    className="flex-1 px-4 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-violet-900/30 flex items-center justify-center gap-2"
-                  >
-                    {isRescheduling ? <><RefreshCw size={15} className="animate-spin" /> Processing...</> : 'Confirm Reschedule'}
-                  </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Admin Authorized Void Modal */}
-      {voidModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
-              <div className="flex items-center gap-2">
-                <ShieldAlert size={16} className="text-rose-500" />
-                <div>
-                  <h3 className="text-base font-bold text-neutral-100">
-                    {voidModal.type === 'downPayment' && 'Void Down Payment'}
-                    {voidModal.type === 'balance' && 'Void Settle Balance'}
-                    {voidModal.type === 'verified' && 'Void Verification'}
-                  </h3>
-                  <p className="text-xs text-neutral-500">Admin Authorization Required</p>
-                </div>
-              </div>
-              <button onClick={() => { setVoidModal(null); setVoidPassword(''); setVoidReason(''); setVoidError(''); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
-            </div>
-            <form onSubmit={handleConfirmVoid} className="p-6 space-y-4">
-              <p className="text-xs text-neutral-400 leading-relaxed">You are about to void {voidModal.type === 'verified' ? 'the verified (confirmed) status' : 'a payment record'} for <strong className="text-white">{voidModal.customerName}</strong>.</p>
-              <div className="space-y-1.5"><label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Reason for Voiding *</label><textarea required rows={2} value={voidReason} onChange={e => setVoidReason(e.target.value)} placeholder="Enter reason for voiding this record..." className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40" /></div>
-              <div className="space-y-1.5"><label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Admin Password *</label><input type="password" required autoFocus value={voidPassword} onChange={e => setVoidPassword(e.target.value)} placeholder="Enter admin password..." className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40" /></div>
-              {voidError && <div className="flex items-center gap-1.5 text-[11px] text-rose-400 font-semibold bg-rose-950/40 border border-rose-900/50 p-2.5 rounded-xl"><AlertTriangle size={14} className="flex-shrink-0" /><span>{voidError}</span></div>}
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setVoidModal(null); setVoidPassword(''); setVoidReason(''); setVoidError(''); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
-                <button type="submit" disabled={isVoiding || !voidPassword || !voidReason.trim()} className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-1.5">{isVoiding ? 'Authorizing...' : 'Confirm Void'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Image Viewer Lightbox */}
       {viewImage && (
@@ -1721,7 +1890,7 @@ export function Reservations() {
                 <div className="w-full space-y-1.5 text-sm">
                   <div className="flex justify-between font-black text-base"><span>TOTAL DUE</span><span>{formatPHP(viewingEReceipt.totalAmount)}</span></div>
                   <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Down Payment</span><span>-{formatPHP(viewingEReceipt.downPaymentAmount)}</span></div>
-                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Balance Paid</span><span>-{formatPHP(Math.max(0, viewingEReceipt.totalAmount - viewingEReceipt.downPaymentAmount))}</span></div>
+                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Balance Paid</span><span>-{formatPHP(Math.max(0, Number(viewingEReceipt.totalAmount || 0) - Number(viewingEReceipt.downPaymentAmount || 0)))}</span></div>
                 </div>
 
                 <div className="w-full mt-4 pt-4 border-t-[3px] border-neutral-800 flex justify-between font-black text-xl">
@@ -1742,7 +1911,7 @@ export function Reservations() {
       )}
 
       {/* 🟢 GLOBAL REFRESH BLOCKER */}
-      {(isRefreshing || isRescheduling) && (
+      {(isRefreshing || isVoiding || isSubmitting || isSettling || isActionSubmitting || isRescheduling) && (
         <div className="fixed inset-0 z-[99999] cursor-wait" />
       )}
 

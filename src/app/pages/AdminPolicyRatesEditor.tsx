@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   Save, Clock, DollarSign, AlertCircle, ShieldCheck, 
-  Calendar, FileText, ToggleLeft, ToggleRight, SlidersHorizontal, X,
-  ShieldAlert, WifiOff, CheckCircle, AlertTriangle, Table2, Info
+  FileText, ToggleLeft, ToggleRight, X,
+  ShieldAlert, AlertTriangle, CheckCircle, Lock
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
 
@@ -13,33 +13,28 @@ export default function AdminPolicyRatesEditor() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🟢 DYNAMIC ACTIVE TABLE COUNT BOUND TO LOCAL SQLITE DB
   const activeTablesCount = useMemo(() => {
     if (!tables || !Array.isArray(tables)) return 0;
     return tables.filter((t: any) => t.isActive && t.status !== 'maintenance').length;
   }, [tables]);
 
   const [ratesForm, setRatesForm] = useState({ 
-    ...rates, 
-    weekdayOnlineCapacityLimit: rates.weekdayOnlineCapacityLimit ?? activeTablesCount,
-    weekendOnlineCapacityLimit: rates.weekendOnlineCapacityLimit ?? activeTablesCount
+    ...rates,
+    downPaymentPercent: rates.downPaymentPercent ?? 50,
+    overtimeRate: rates.overtimeRate ?? rates.hourlyRate ?? 0,
   });
   
   const [termsForm, setTermsForm] = useState({
     ...reservationTerms,
-    minHours: reservationTerms.minHours ?? 1,
-    maxHours: reservationTerms.maxHours ?? 6,
     weekdayMinPartySize: reservationTerms.weekdayMinPartySize ?? 1,
     weekdayMaxPartySize: reservationTerms.weekdayMaxPartySize ?? 8,
     weekendMinPartySize: reservationTerms.weekendMinPartySize ?? 1,
     weekendMaxPartySize: reservationTerms.weekendMaxPartySize ?? 8,
-    advanceBookingHours: reservationTerms.advanceBookingHours ?? 2,
     cancellationHours: reservationTerms.cancellationHours ?? 24
   });
   
   const [showSummaryModal, setShowSummaryModal] = useState(false);
 
-  // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   const toastTimeout = useRef<NodeJS.Timeout | null>(null);
 
@@ -49,27 +44,7 @@ export default function AdminPolicyRatesEditor() {
     toastTimeout.current = setTimeout(() => setToast(null), 5000);
   };
 
-  // 🟢 OPERATIONAL DEFENSE STATE
   const [gracePeriodMins, setGracePeriodMins] = useState(15);
-  const [maxBookingsPerUser, setMaxBookingsPerUser] = useState(2);
-  const [manualVerification, setManualVerification] = useState(true);
-
-  // 🟢 DYNAMIC SYNCHRONIZATION WITH LOCAL TABLES
-  useEffect(() => {
-    setRatesForm(prev => {
-      let wkCap = Number(prev.weekdayOnlineCapacityLimit);
-      let weCap = Number(prev.weekendOnlineCapacityLimit);
-
-      if (isNaN(wkCap) || wkCap > activeTablesCount) wkCap = activeTablesCount;
-      if (isNaN(weCap) || weCap > activeTablesCount) weCap = activeTablesCount;
-
-      return {
-        ...prev,
-        weekdayOnlineCapacityLimit: wkCap,
-        weekendOnlineCapacityLimit: weCap
-      };
-    });
-  }, [activeTablesCount]);
 
   // INITIAL DUAL-FETCH ON MOUNT WITH WATCHDOG
   useEffect(() => {
@@ -108,7 +83,12 @@ export default function AdminPolicyRatesEditor() {
         }
 
         if (isMounted && Object.keys(mergedSettings).length > 0) {
-          setRatesForm(prev => ({ ...prev, ...mergedSettings }));
+          setRatesForm(prev => ({ 
+            ...prev, 
+            ...mergedSettings,
+            downPaymentPercent: mergedSettings.downPaymentPercent ?? 50,
+            overtimeRate: mergedSettings.overtimeRate ?? mergedSettings.hourlyRate ?? 0
+          }));
           setTermsForm(prev => ({ ...prev, ...mergedSettings }));
         }
       } catch (err) {
@@ -125,7 +105,7 @@ export default function AdminPolicyRatesEditor() {
 
     fetchPoliciesAndRates();
     return () => { isMounted = false; };
-  }, []);
+  }, [isSystemOffline]);
 
   const parseToMins = (t: string) => {
     if (!t || !t.includes(':')) return 0;
@@ -165,8 +145,6 @@ export default function AdminPolicyRatesEditor() {
     }
   };
 
-  // ── INPUT VALIDATORS ──────────────────────────────────────────
-
   const handleRatesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type } = e.target;
     setRatesForm(prev => ({ ...prev, [name]: type === 'range' ? Number(value) : value }));
@@ -176,7 +154,14 @@ export default function AdminPolicyRatesEditor() {
     const { name, value } = e.target;
     const cleanDigits = value.replace(/\D/g, '').slice(0, 4);
     const numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
-    setRatesForm(prev => ({ ...prev, [name]: numericValue }));
+    
+    setRatesForm(prev => {
+      const next = { ...prev, [name]: numericValue };
+      if (name === 'hourlyRate') {
+        next.overtimeRate = numericValue;
+      }
+      return next;
+    });
   };
 
   const handleHourInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -205,7 +190,6 @@ export default function AdminPolicyRatesEditor() {
     setTermsForm(prev => ({ ...prev, [name]: value }));
   };
 
-  // 🟢 COMPREHENSIVE SUBMISSION VALIDATOR
   const handleReviewChanges = () => {
     const hr = Number(ratesForm.hourlyRate) || 0;
     const ov = Number(ratesForm.overtimeRate) || 0;
@@ -214,9 +198,6 @@ export default function AdminPolicyRatesEditor() {
     const maxWkDay = Number(termsForm.weekdayMaxPartySize) || 0;
     const minWkEnd = Number(termsForm.weekendMinPartySize) || 0;
     const maxWkEnd = Number(termsForm.weekendMaxPartySize) || 0;
-    const minHrs = Number(termsForm.minHours) || 0;
-    const maxHrs = Number(termsForm.maxHours) || 0;
-    const advHrs = Number(termsForm.advanceBookingHours) || 0;
     const cancelHrs = Number(termsForm.cancellationHours) || 0;
 
     if (hr <= 0) { flash('Standard Hourly Rate must be greater than ₱0.', 'error'); return; }
@@ -253,11 +234,6 @@ export default function AdminPolicyRatesEditor() {
     if (minWkEnd <= 0 || maxWkEnd <= 0) { flash('Weekend party sizes must be at least 1 person.', 'error'); return; }
     if (minWkEnd > maxWkEnd) { flash(`Weekend Min party size (${minWkEnd}) cannot exceed Max (${maxWkEnd}).`, 'error'); return; }
 
-    if (minHrs <= 0 || maxHrs <= 0) { flash('Booking duration must be at least 1 hour.', 'error'); return; }
-    if (minHrs > maxHrs) { flash(`Minimum duration (${minHrs}h) cannot exceed Maximum duration (${maxHrs}h).`, 'error'); return; }
-    if (maxHrs > 24) { flash('Maximum booking duration cannot exceed 24 hours.', 'error'); return; }
-
-    if (advHrs > 720) { flash('Advance booking notice cannot exceed 30 days (720 hours).', 'error'); return; }
     if (cancelHrs > 168) { flash('Cancellation grace period cannot exceed 7 days (168 hours).', 'error'); return; }
 
     setShowSummaryModal(true);
@@ -270,28 +246,28 @@ export default function AdminPolicyRatesEditor() {
       const ratesPayload = {
         hourlyRate: Number(ratesForm.hourlyRate) || 0,
         overtimeRate: Number(ratesForm.overtimeRate) || 0,
-        downPaymentPercent: Number(ratesForm.downPaymentPercent) || 0,
+        downPaymentPercent: Number(ratesForm.downPaymentPercent) || 50,
         weekdayStartTime: ratesForm.weekdayStartTime || '12:00',
         weekdayEndTime: ratesForm.weekdayEndTime || '00:00',
         isWeekdayHappyHourActive: !!ratesForm.isWeekdayHappyHourActive,
         weekdayHappyHourRate: Number(ratesForm.weekdayHappyHourRate) || 0,
         weekdayHappyHourStart: ratesForm.weekdayHappyHourStart || '15:00',
         weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd || '18:00',
-        weekdayOnlineCapacityLimit: Number(ratesForm.weekdayOnlineCapacityLimit) || 0,
+        weekdayOnlineCapacityLimit: activeTablesCount,
         weekendStartTime: ratesForm.weekendStartTime || '12:00',
         weekendEndTime: ratesForm.weekendEndTime || '02:00',
         isWeekendHappyHourActive: !!ratesForm.isWeekendHappyHourActive,
         weekendHappyHourRate: Number(ratesForm.weekendHappyHourRate) || 0,
         weekendHappyHourStart: ratesForm.weekendHappyHourStart || '15:00',
         weekendHappyHourEnd: ratesForm.weekendHappyHourEnd || '18:00',
-        weekendOnlineCapacityLimit: Number(ratesForm.weekendOnlineCapacityLimit) || 0,
+        weekendOnlineCapacityLimit: activeTablesCount,
       };
 
       const termsPayload = {
-        minHours: Number(termsForm.minHours) || 1,
-        maxHours: Number(termsForm.maxHours) || 6,
+        minHours: 1, // Standard hardcoded minimum
+        maxHours: 24, // Handled dynamically by cutoff
+        advanceBookingHours: 1, // Default fallback
         cancellationHours: Number(termsForm.cancellationHours) || 24,
-        advanceBookingHours: Number(termsForm.advanceBookingHours) || 2,
         cancellationPolicy: termsForm.cancellationPolicy || '',
         termsAndConditions: termsForm.termsAndConditions || '',
         weekdayMinPartySize: Number(termsForm.weekdayMinPartySize) || 1,
@@ -408,7 +384,7 @@ export default function AdminPolicyRatesEditor() {
       <div className="flex justify-between items-end border-b border-neutral-800 pb-4">
         <div>
           <h1 className="text-3xl font-black text-neutral-100 tracking-widest">POLICY & RATES</h1>
-          <p className="text-sm text-neutral-400 mt-1">Manage operational pricing, business hours, and reservation rules.</p>
+          <p className="text-sm text-neutral-400 mt-1">Manage operational pricing, business hours, and strictly enforced rules.</p>
         </div>
         <div className="flex items-center gap-3">
           <button type="button" onClick={handleReviewChanges} className="bg-emerald-600 hover:bg-emerald-500 text-neutral-100 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors shadow-lg shadow-emerald-950/40">
@@ -417,12 +393,11 @@ export default function AdminPolicyRatesEditor() {
         </div>
       </div>
 
-      {/* 🟢 TOP GRID: Left side Rates & Rules, Right side Content Editor */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
         
         {/* LEFT COLUMN: RATES & HAPPY HOUR */}
         <div className="space-y-8">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
               <DollarSign className="text-emerald-500" /> Base Rates & Store Hours
             </h2>
@@ -490,7 +465,7 @@ export default function AdminPolicyRatesEditor() {
             </div>
           </div>
 
-          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6"><Clock className="text-emerald-500" /> Happy Hour Promotions</h2>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className={`p-4 rounded-lg border transition-colors ${ratesForm.isWeekdayHappyHourActive ? 'bg-neutral-950 border-emerald-900/50' : 'bg-neutral-950 border-neutral-800 opacity-70'}`}>
@@ -540,38 +515,39 @@ export default function AdminPolicyRatesEditor() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: CONTENT EDITOR & DURATION */}
+        {/* RIGHT COLUMN: CONTENT EDITOR & RULES */}
         <div className="space-y-6">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
-              <FileText className="text-emerald-500" /> Content Editor & Duration Bounds
+              <FileText className="text-emerald-500" /> Booking Rules & Limits
             </h2>
             <div className="space-y-4">
               
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Min Booking Hours</label>
-                  <input type="text" inputMode="numeric" name="minHours" value={termsForm.minHours} onChange={handleHourInput} placeholder="1" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono" />
+              <div className="grid grid-cols-2 gap-4 bg-neutral-950 p-4 border border-neutral-800/80 rounded-xl mb-4">
+                <div className="space-y-3">
+                    <h3 className="text-[10px] uppercase font-bold text-emerald-500 border-b border-neutral-800 pb-1">Weekday Limits</h3>
+                    <div className="flex gap-2">
+                        <div className="flex-1"><label className="block text-[9px] text-neutral-400 mb-1 uppercase">Min Pax</label><input type="text" inputMode="numeric" name="weekdayMinPartySize" value={termsForm.weekdayMinPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none text-center font-mono" /></div>
+                        <div className="flex-1"><label className="block text-[9px] text-neutral-400 mb-1 uppercase">Max Pax</label><input type="text" inputMode="numeric" name="weekdayMaxPartySize" value={termsForm.weekdayMaxPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none text-center font-mono" /></div>
+                    </div>
                 </div>
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Max Booking Hours</label>
-                  <input type="text" inputMode="numeric" name="maxHours" value={termsForm.maxHours} onChange={handleHourInput} placeholder="6" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono" />
+                <div className="space-y-3 border-l border-neutral-800 pl-4">
+                    <h3 className="text-[10px] uppercase font-bold text-emerald-500 border-b border-neutral-800 pb-1">Weekend Limits</h3>
+                    <div className="flex gap-2">
+                        <div className="flex-1"><label className="block text-[9px] text-neutral-400 mb-1 uppercase">Min Pax</label><input type="text" inputMode="numeric" name="weekendMinPartySize" value={termsForm.weekendMinPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none text-center font-mono" /></div>
+                        <div className="flex-1"><label className="block text-[9px] text-neutral-400 mb-1 uppercase">Max Pax</label><input type="text" inputMode="numeric" name="weekendMaxPartySize" value={termsForm.weekendMaxPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none text-center font-mono" /></div>
+                    </div>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Advance Booking Cut-off (Hours)</label>
-                <input type="text" inputMode="numeric" name="advanceBookingHours" value={termsForm.advanceBookingHours} onChange={handleHourInput} placeholder="2" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono" />
-              </div>
-              <div>
-                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Cancellation Grace Period (Hours)</label>
+                <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Cancel Window (Hrs)</label>
                 <input type="text" inputMode="numeric" name="cancellationHours" value={termsForm.cancellationHours} onChange={handleHourInput} placeholder="24" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono" />
               </div>
 
-              {/* 🟢 UPGRADED: Auto-expanding text areas */}
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs text-neutral-400 uppercase tracking-wider">Booking Policies (Displayed in Step 2)</label>
+                <div className="flex justify-between items-center mb-1 mt-2">
+                  <label className="block text-xs text-neutral-400 uppercase tracking-wider">Booking Policies (Displayed to Users)</label>
                   <CharCount current={termsForm.cancellationPolicy} max={400} />
                 </div>
                 <textarea 
@@ -609,200 +585,57 @@ export default function AdminPolicyRatesEditor() {
               </div>
             </div>
           </div>
-
-          <div>
-            <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider flex items-center gap-2"><ShieldCheck size={14}/> Customer View Preview</p>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-6 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
-              <h3 className="text-lg font-bold text-neutral-100 mb-4">Booking Policies & Terms</h3>
-              <ul className="space-y-4">
-                <li className="flex gap-3 text-neutral-300">
-                  <AlertCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{termsForm.cancellationPolicy || "No policy defined."}</p>
-                    <p className="text-xs text-neutral-400 mt-2">Minimum booking: <span className="text-neutral-100 font-bold">{termsForm.minHours} hour(s)</span> | Advance Notice: <span className="text-neutral-100 font-bold">{termsForm.advanceBookingHours} hour(s)</span></p>
-                  </div>
-                </li>
-                <li className="flex gap-3 text-neutral-300">
-                  <Clock size={18} className="text-emerald-500 shrink-0 mt-0.5" />
-                  <div className="w-full">
-                    <div className="grid grid-cols-2 gap-4 bg-neutral-900/50 p-3 rounded border border-neutral-800">
-                      <div>
-                        <p className="text-[10px] uppercase text-emerald-500 font-bold mb-1">Weekday Setup</p>
-                        <p className="text-xs text-neutral-400">Hours: <span className="text-neutral-100">{fmt12(ratesForm.weekdayStartTime)} - {fmt12(ratesForm.weekdayEndTime)}</span></p>
-                        <p className="text-xs text-neutral-400">Booking: <span className="text-neutral-100">{bookingWindowDisplay(ratesForm.weekdayStartTime, ratesForm.weekdayEndTime)}</span></p>
-                        <p className="text-xs text-neutral-400">Limits: <span className="text-neutral-100">{ratesForm.weekdayOnlineCapacityLimit} Tables | {termsForm.weekdayMinPartySize}-{termsForm.weekdayMaxPartySize} Pax</span></p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase text-emerald-500 font-bold mb-1">Weekend Setup</p>
-                        <p className="text-xs text-neutral-400">Hours: <span className="text-neutral-100">{fmt12(ratesForm.weekendStartTime)} - {fmt12(ratesForm.weekendEndTime)}</span></p>
-                        <p className="text-xs text-neutral-400">Booking: <span className="text-neutral-100">{bookingWindowDisplay(ratesForm.weekendStartTime, ratesForm.weekendEndTime)}</span></p>
-                        <p className="text-xs text-neutral-400">Limits: <span className="text-neutral-100">{ratesForm.weekendOnlineCapacityLimit} Tables | {termsForm.weekendMinPartySize}-{termsForm.weekendMaxPartySize} Pax</span></p>
-                      </div>
-                    </div>
-                    <p className="text-sm mt-3">Down payment required: <span className="font-bold text-neutral-100">{ratesForm.downPaymentPercent ?? 25}%</span></p>
-                  </div>
-                </li>
-                <li className="flex gap-3 text-neutral-300">
-                  <FileText size={18} className="text-neutral-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-neutral-400 leading-relaxed whitespace-pre-wrap italic">{termsForm.termsAndConditions}</p>
-                </li>
-              </ul>
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* 🟢 FULL WIDTH BOTTOM: VENUE ALLOCATION POLICY & CONSTRAINTS */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mt-8">
+      {/* 🟢 FULL WIDTH BOTTOM: ANTI-FRAUD DEFENSE ENGINE */}
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mt-8 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2">
-            <SlidersHorizontal className="text-emerald-500" /> Venue Table Allocation
+            <ShieldAlert className="text-emerald-500" /> Fraud Defense & Automation Constraints
           </h2>
-          <span className="text-xs text-neutral-400 bg-neutral-950 border border-neutral-800 px-3 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
-            <Table2 size={13} className="text-emerald-500" />
-            <strong>{activeTablesCount}</strong> Active Tables in DB
-          </span>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-          {/* WEEKDAY LIMITS */}
-          <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-800/80">
-            <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2 mb-4">WEEKDAYS</h3>
-            <div className="mb-6">
-              <label className="block text-xs text-neutral-400 mb-2 uppercase tracking-wider flex justify-between items-center">
-                <span>Max Online Booking Tables</span>
-                <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/50 px-2.5 py-0.5 rounded-full text-xs">
-                  {ratesForm.weekdayOnlineCapacityLimit} of {activeTablesCount} Tables
-                </span>
-              </label>
-              <input 
-                type="range" 
-                name="weekdayOnlineCapacityLimit" 
-                min="0" 
-                max={activeTablesCount} 
-                step="1" 
-                value={ratesForm.weekdayOnlineCapacityLimit} 
-                onChange={handleRatesChange} 
-                disabled={activeTablesCount === 0}
-                className="w-full accent-emerald-500 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer disabled:opacity-30" 
-              />
-              <div className="flex justify-between items-center mt-2 text-[10px] text-neutral-500">
-                <span>{ratesForm.weekdayOnlineCapacityLimit} Online</span>
-                <span className="text-amber-400/90 font-medium">
-                  {Math.max(0, activeTablesCount - ratesForm.weekdayOnlineCapacityLimit)} Reserved for Walk-Ins
-                </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          {/* Defense 1: Late Grace Period */}
+          <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-800/80 flex flex-col justify-between shadow-sm">
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-neutral-300">No-Show Grace Period</span>
+                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/20">{gracePeriodMins}m Late</span>
               </div>
+              <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
+                If a customer fails to check-in physically by this time, their table is automatically forfeited to the walk-in queue.
+              </p>
             </div>
-            <div className="flex gap-3">
-              <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Min Party</label><input type="text" inputMode="numeric" name="weekdayMinPartySize" value={termsForm.weekdayMinPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none font-mono" /></div>
-              <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Max Party</label><input type="text" inputMode="numeric" name="weekdayMaxPartySize" value={termsForm.weekdayMaxPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none font-mono" /></div>
+            <select 
+              value={gracePeriodMins} 
+              onChange={e => setGracePeriodMins(Number(e.target.value))}
+              className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              <option value={15}>15 Mins (Strict)</option>
+              <option value={20}>20 Mins (Standard)</option>
+              <option value={30}>30 Mins (Lenient)</option>
+            </select>
+          </div>
+
+          {/* Defense 2: Mandatory Receipt Verification (Static System Rule) */}
+          <div className="bg-emerald-950/20 p-5 rounded-xl border border-emerald-900/40 flex flex-col justify-between shadow-sm relative overflow-hidden">
+            <div className="absolute -right-4 -top-4 text-emerald-900/20">
+                <Lock size={100} />
+            </div>
+            <div className="relative z-10">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-emerald-400">Receipt Verification</span>
+                <span className="text-[10px] font-bold text-neutral-100 bg-emerald-600 px-2.5 py-0.5 rounded uppercase tracking-wider">System Enforced</span>
+              </div>
+              <p className="text-[11px] text-emerald-300/80 leading-relaxed">
+                Online bookings will strictly remain <strong className="text-amber-400 font-semibold">'Pending'</strong> until your venue staff visually reviews and manually approves the GCash receipt upload. This mandatory protocol prevents booking spam.
+              </p>
             </div>
           </div>
 
-          {/* WEEKEND LIMITS */}
-          <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-800/80">
-            <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2 mb-4">WEEKENDS</h3>
-            <div className="mb-6">
-              <label className="block text-xs text-neutral-400 mb-2 uppercase tracking-wider flex justify-between items-center">
-                <span>Max Online Booking Tables</span>
-                <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/50 px-2.5 py-0.5 rounded-full text-xs">
-                  {ratesForm.weekendOnlineCapacityLimit} of {activeTablesCount} Tables
-                </span>
-              </label>
-              <input 
-                type="range" 
-                name="weekendOnlineCapacityLimit" 
-                min="0" 
-                max={activeTablesCount} 
-                step="1" 
-                value={ratesForm.weekendOnlineCapacityLimit} 
-                onChange={handleRatesChange} 
-                disabled={activeTablesCount === 0}
-                className="w-full accent-emerald-500 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer disabled:opacity-30" 
-              />
-              <div className="flex justify-between items-center mt-2 text-[10px] text-neutral-500">
-                <span>{ratesForm.weekendOnlineCapacityLimit} Online</span>
-                <span className="text-amber-400/90 font-medium">
-                  {Math.max(0, activeTablesCount - ratesForm.weekendOnlineCapacityLimit)} Reserved for Walk-Ins
-                </span>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Min Party</label><input type="text" inputMode="numeric" name="weekendMinPartySize" value={termsForm.weekendMinPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none font-mono" /></div>
-              <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Max Party</label><input type="text" inputMode="numeric" name="weekendMaxPartySize" value={termsForm.weekendMaxPartySize} onChange={handlePartySizeInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none font-mono" /></div>
-            </div>
-          </div>
-        </div>
-
-        {/* 🟢 ANTI-GHOSTING & FRAUD DEFENSE ENGINE */}
-        <div className="border-t border-neutral-800 pt-6">
-          <h3 className="text-sm font-bold text-neutral-200 mb-4 flex items-center gap-2">
-            <ShieldAlert size={16} className="text-emerald-500" />
-            <span>Anti-Ghosting & Reservation Protection</span>
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-            
-            {/* Defense 1: Late Grace Period */}
-            <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-800/80 flex flex-col justify-between shadow-sm">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-bold text-neutral-300">No-Show Grace Period</span>
-                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/20">{gracePeriodMins}m Late</span>
-                </div>
-                <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
-                  If a customer fails to check-in physically by this time, their table is automatically forfeited to the walk-in queue.
-                </p>
-              </div>
-              <select 
-                value={gracePeriodMins} 
-                onChange={e => setGracePeriodMins(Number(e.target.value))}
-                className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-emerald-500"
-              >
-                <option value={15}>15 Mins (Strict)</option>
-                <option value={20}>20 Mins (Standard)</option>
-                <option value={30}>30 Mins (Lenient)</option>
-              </select>
-            </div>
-
-            {/* Defense 2: Max Active Bookings */}
-            <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-800/80 flex flex-col justify-between shadow-sm">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-bold text-neutral-300">Booking Cap</span>
-                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/20">Max {maxBookingsPerUser}x</span>
-                </div>
-                <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
-                  Restricts a single phone number from hoarding multiple time slots to defend against malicious table blocking.
-                </p>
-              </div>
-              <select 
-                value={maxBookingsPerUser} 
-                onChange={e => setMaxBookingsPerUser(Number(e.target.value))}
-                className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-emerald-500"
-              >
-                <option value={1}>1 Active Booking</option>
-                <option value={2}>2 Active Bookings</option>
-                <option value={3}>3 Active Bookings</option>
-              </select>
-            </div>
-
-            {/* Defense 3: Manual Verification */}
-            <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-800/80 flex flex-col justify-between shadow-sm">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-bold text-neutral-300">Receipt Verification</span>
-                  <button type="button" onClick={() => setManualVerification(!manualVerification)}>
-                    {manualVerification ? <ToggleRight size={26} className="text-emerald-500" /> : <ToggleLeft size={26} className="text-neutral-600" />}
-                  </button>
-                </div>
-                <p className="text-[11px] text-neutral-400 leading-relaxed">
-                  Online bookings remain <strong className="text-amber-400 font-semibold">'Pending'</strong> until Staff visually reviews and approves the GCash receipt upload.
-                </p>
-              </div>
-            </div>
-
-          </div>
         </div>
       </div>
 
@@ -832,7 +665,6 @@ export default function AdminPolicyRatesEditor() {
                 {renderChangeRow('Happy Hour Status', rates.isWeekdayHappyHourActive, ratesForm.isWeekdayHappyHourActive)}
                 {renderChangeRow('Happy Hour Window', `${fmt12(rates.weekdayHappyHourStart)} - ${fmt12(rates.weekdayHappyHourEnd)}`, `${fmt12(ratesForm.weekdayHappyHourStart)} - ${fmt12(ratesForm.weekdayHappyHourEnd)}`)}
                 {renderChangeRow('Happy Hour Rate', rates.weekdayHappyHourRate, ratesForm.weekdayHappyHourRate, true)}
-                {renderChangeRow('Online Tables Cap', `${rates.weekdayOnlineCapacityLimit} Tables`, `${ratesForm.weekdayOnlineCapacityLimit} Tables`)}
                 {renderChangeRow('Min/Max Party Size', `${reservationTerms.weekdayMinPartySize}-${reservationTerms.weekdayMaxPartySize}`, `${termsForm.weekdayMinPartySize}-${termsForm.weekdayMaxPartySize}`)}
                 
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Weekend Setup</div>
@@ -840,20 +672,16 @@ export default function AdminPolicyRatesEditor() {
                 {renderChangeRow('Happy Hour Status', rates.isWeekendHappyHourActive, ratesForm.isWeekendHappyHourActive)}
                 {renderChangeRow('Happy Hour Window', `${fmt12(rates.weekendHappyHourStart)} - ${fmt12(rates.weekendHappyHourEnd)}`, `${fmt12(ratesForm.weekendHappyHourStart)} - ${fmt12(ratesForm.weekendHappyHourEnd)}`)}
                 {renderChangeRow('Happy Hour Rate', rates.weekendHappyHourRate, ratesForm.weekendHappyHourRate, true)}
-                {renderChangeRow('Online Tables Cap', `${rates.weekendOnlineCapacityLimit} Tables`, `${ratesForm.weekendOnlineCapacityLimit} Tables`)}
                 {renderChangeRow('Min/Max Party Size', `${reservationTerms.weekendMinPartySize}-${reservationTerms.weekendMaxPartySize}`, `${termsForm.weekendMinPartySize}-${termsForm.weekendMaxPartySize}`)}
                 
-                <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Policies & Duration</div>
-                {renderChangeRow('Min/Max Duration', `${reservationTerms.minHours}-${reservationTerms.maxHours} Hrs`, `${termsForm.minHours}-${termsForm.maxHours} Hrs`)}
-                {renderChangeRow('Advance Notice', `${reservationTerms.advanceBookingHours} Hrs`, `${termsForm.advanceBookingHours} Hrs`)}
+                <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Policies</div>
                 {renderChangeRow('Cancellation Grace', `${reservationTerms.cancellationHours} Hrs`, `${termsForm.cancellationHours} Hrs`)}
                 {renderChangeRow('Cancellation Policy', truncate(reservationTerms.cancellationPolicy), truncate(termsForm.cancellationPolicy))}
                 {renderChangeRow('General T&C Text', truncate(reservationTerms.termsAndConditions), truncate(termsForm.termsAndConditions))}
                 
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Anti-Ghosting & Fraud Defense</div>
                 {renderChangeRow('No-Show Grace Period', `${gracePeriodMins}m Late`, `${gracePeriodMins}m Late`)}
-                {renderChangeRow('Active Booking Cap', `Max ${maxBookingsPerUser}x`, `Max ${maxBookingsPerUser}x`)}
-                {renderChangeRow('Staff Receipt Verification', manualVerification, manualVerification)}
+                {renderChangeRow('Staff Receipt Verification', "System Enforced", "System Enforced")}
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowSummaryModal(false)} className="flex-1 px-4 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-sm font-semibold transition-colors border border-neutral-800">

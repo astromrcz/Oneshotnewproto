@@ -26,14 +26,14 @@ const todayStart = startOfDay(new Date());
 
 type Section = 'home' | 'reservations' | 'events' | 'rates';
 
-function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; }) {
-  const today = new Date();
+function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick, minDate = new Date() }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; minDate?: Date }) {
+  const today = minDate;
   today.setHours(0, 0, 0, 0);
   
   const maxDate = new Date(today);
   maxDate.setDate(today.getDate() + 30);
 
-  const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
+  const [viewDate, setViewDate] = useState(() => { const d = new Date(today); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -125,8 +125,21 @@ export function HomePage() {
     updateReservation, updateReservationStatus, addFeedback, applyPromoCode
   } = useAppContext() as any;
 
-  // 🟢 RESTORED: Auth state variable (fixes the crash)
   const [activeUser, setActiveUser] = useState<{ name: string; email: string; } | null>(null);
+
+  // Rate Limits
+  const [rateLimits, setRateLimits] = useState<Record<string, number[]>>({});
+  const checkRateLimit = useCallback((action: string, maxAttempts: number, windowMinutes: number) => {
+    const now = Date.now();
+    const windowMs = windowMinutes * 60 * 1000;
+    setRateLimits(prev => {
+      const attempts = (prev[action] || []).filter(t => now - t < windowMs);
+      if (attempts.length >= maxAttempts) return prev;
+      return { ...prev, [action]: [...attempts, now] };
+    });
+    const currentAttempts = (rateLimits[action] || []).filter(t => now - t < windowMs);
+    return currentAttempts.length < maxAttempts;
+  }, [rateLimits]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -185,7 +198,8 @@ export function HomePage() {
 
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0);
   const [resTab, setResTab] = useState<'new' | 'track'>('new');
-  const [trackForm, setTrackForm] = useState({ reservationId: '', phone: '' });
+  // Removed phone from trackForm
+  const [trackForm, setTrackForm] = useState({ reservationId: '' });
   const [trackedReservations, setTrackedReservations] = useState<any[] | null>(null);
   const [generatedResId, setGeneratedResId] = useState('');
   
@@ -199,6 +213,9 @@ export function HomePage() {
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
+  // Reschedule State
+  const [rescheduleData, setRescheduleData] = useState<{ show: boolean, reservation: any, newDate: Date | null, timeSlot: string } | null>(null);
+
   // Mini Report Modal & Dropdown States
   const [reportModalResId, setReportModalResId] = useState<string | null>(null);
   const [reportMessage, setReportMessage] = useState('');
@@ -206,7 +223,6 @@ export function HomePage() {
   
   const [openActionRowId, setOpenActionRowId] = useState<string | null>(null);
   
-  // 🟢 NEW: Toast, Scroll, and Terms Modal States
   const [toastMsg, setToastMsg] = useState<{title: string, desc: string, type: 'success'|'error'} | null>(null);
   const [pendingScroll, setPendingScroll] = useState<string | null>(null);
   const [showTermsModal, setShowTermsModal] = useState(false);
@@ -312,7 +328,15 @@ export function HomePage() {
     createdAt: r.createdAt
   }));
 
-  const allNotifications = [...activeAnnouncements, ...resNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const refundNotifications = userReservations.filter((r: any) => r.status === 'pending-refund').map((r: any) => ({
+    id: `refund_${r.id}`,
+    type: 'Refund Status',
+    title: 'Pending Refund',
+    content: `Refund on Booking ID ${r.id} and its details is pending refund...`,
+    createdAt: r.createdAt
+  }));
+
+  const allNotifications = [...activeAnnouncements, ...resNotifications, ...refundNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   
   const unreadNotifications = allNotifications.filter((n: any) => !readAnnouncements.includes(n.id));
   const hasUnread = isFirstTime || unreadNotifications.length > 0;
@@ -355,6 +379,7 @@ export function HomePage() {
   };
 
   const handleLoginSubmit = async () => {
+    if (!checkRateLimit('login', 5, 5)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait 5 minutes before trying again.", type:"error"});
     if (!loginForm.email || !loginForm.password) return setLoginForm(f => ({ ...f, error: 'Please fill all fields.' }));
     setLoginForm(f => ({ ...f, loading: true, error: '' }));
     const { error } = await supabase.auth.signInWithPassword({ email: loginForm.email, password: loginForm.password });
@@ -367,6 +392,7 @@ export function HomePage() {
   };
 
   const handleRegisterSubmit = async () => {
+    if (!checkRateLimit('register', 3, 10)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait before trying again.", type:"error"});
     if (!registerForm.name || !registerForm.email || !registerForm.phone || !registerForm.password) return setRegisterForm(f => ({ ...f, error: 'Please fill all required fields.' }));
     if (registerForm.password !== registerForm.confirm) return setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
     if (registerForm.password.length < 8) return setRegisterForm(f => ({ ...f, error: 'Password must be at least 8 characters long.' }));
@@ -388,6 +414,7 @@ export function HomePage() {
   };
 
   const handleForgotSubmit = async () => {
+    if (!checkRateLimit('forgot', 2, 10)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait before trying again.", type:"error"});
     if (!forgotForm.email) return setForgotForm(f => ({ ...f, error: 'Please enter your email.' }));
     setForgotForm(f => ({ ...f, loading: true, error: '' }));
     const { error } = await supabase.auth.resetPasswordForEmail(forgotForm.email, { redirectTo: `${window.location.origin}/reset-password` });
@@ -409,15 +436,23 @@ export function HomePage() {
   };
 
   const handleDeleteAccount = async () => {
+    if (!checkRateLimit('delete', 1, 60)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait before trying again.", type:"error"});
     if (window.confirm('WARNING: Are you sure you want to delete your account?\n\nTo maintain strict financial records, your historical transactions will be retained but your personal data will be anonymized (Soft Delete Protocol). This action cannot be undone.')) {
-      await supabase.auth.signOut();
-      setShowProfileModal(false);
-      alert('Account successfully marked for deletion. Your personal data has been securely anonymized.');
+      
+      const { error } = await supabase.auth.updateUser({
+        data: { deleted: true, full_name: 'Anonymized User', phone: '00000000000' }
+      });
+      
+      if (!error) {
+        await supabase.auth.signOut();
+        setShowProfileModal(false);
+        alert('Account successfully marked for deletion. Your personal data has been securely anonymized.');
+      } else {
+        alert('Failed to delete account: ' + error.message);
+      }
     }
   };
 
-  // 🟢 ENHANCED ROUTING: Prevents Rates Nav from highlighting when scrolling Reservations
-  // 🟢 ENHANCED ROUTING: Smooth cross-tab anchor scrolling
   const handleNavClick = (sectionId: string) => {
     if (sectionId === 'about' || sectionId === 'feedback') {
       setActiveSection('home');
@@ -512,15 +547,15 @@ export function HomePage() {
 
   const maxAllowedDuration = getMaxDuration();
 
-  const validateTimeSlot = (time: string, duration: number) => {
-    if (!time || !selectedDate) return 'invalid';
-    if (!selectedTableId) return 'no_table';
+  const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null) => {
+    if (!time || !dateObj) return 'invalid';
+    if (!tableId) return 'no_table';
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
       return Number(hh) * 60 + Number(mm || 0);
     };
     const slotMins = parseToMins(time);
-    const requestedStart = new Date(selectedDate);
+    const requestedStart = new Date(dateObj);
     const [h, m] = time.split(':').map(Number);
     requestedStart.setHours(h, m, 0, 0);
     const requestedEnd = addMinutes(requestedStart, duration * 60);
@@ -540,7 +575,7 @@ export function HomePage() {
     if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
     const sameTableRes = reservations.filter((r: any) => 
-      r.tableId === selectedTableId && 
+      r.tableId === tableId && 
       r.status !== 'cancelled' && 
       r.status !== 'completed' && 
       isSameDay(new Date(r.date), requestedStart)
@@ -555,7 +590,7 @@ export function HomePage() {
     }
 
     if (isToday(requestedStart)) {
-      const targetTable = tables.find((t: any) => t.id === selectedTableId);
+      const targetTable = tables.find((t: any) => t.id === tableId);
       if (targetTable?.status === 'occupied' && targetTable.session?.startTime && targetTable.session?.durationMinutes) {
          const sessionEnd = addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes);
          if (requestedStart < sessionEnd) return 'active_conflict';
@@ -565,10 +600,10 @@ export function HomePage() {
     return 'valid';
   };
 
+  const validateTimeSlot = (time: string, duration: number) => validateTimeSlotHelper(time, duration, selectedDate, selectedTableId);
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // Reservation & Submission Handlers
   // Reservation & Submission Handlers
   const handleReservationSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -582,7 +617,6 @@ export function HomePage() {
         return;
       }
     }
-    // 🟢 Open the Terms & Conditions Modal instead of submitting directly
     setShowTermsModal(true);
   };
 
@@ -624,6 +658,7 @@ export function HomePage() {
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
         receiptImg: finalReceiptUrl || undefined,
+        rescheduleCount: 0
       });
 
       await supabase.from('reservations').upsert([{
@@ -643,6 +678,7 @@ export function HomePage() {
         balancePaid: 0,
         paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : (resForm.paymentMethod === 'cash' ? 'CASH' : (resForm.paymentRef || null)),
         receiptImg: finalReceiptUrl || null,
+        rescheduleCount: 0,
         createdAt: new Date().toISOString()
       }]);
 
@@ -675,7 +711,6 @@ export function HomePage() {
 
     const minsUntilRes = (resDate.getTime() - new Date().getTime()) / 60000;
 
-    // 🟢 Strict 1-Hour Non-Refundable Cut-Off
     if (minsUntilRes < 60 && minsUntilRes > 0) {
       setToastMsg({ title: "Action Denied", desc: "Cancellations within 1 hour are non-refundable. Please use 'Report Issue'.", type: 'error' });
       return;
@@ -686,7 +721,6 @@ export function HomePage() {
 
     if(window.confirm(`Are you sure you want to cancel this booking?\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To process your GCash refund, you must contact our staff at ${cms.phone.split('|')[0].trim()} with your Reservation ID and GCash Number.`)) {
        
-       // 🟢 Directly updating Supabase without relying on missing context functions
        const { error } = await supabase.from('reservations').update({ 
          status: 'pending-refund'
        }).eq('id', id);
@@ -704,19 +738,50 @@ export function HomePage() {
     }
   };
 
-  const handleRequestReschedule = async (id: string) => {
-    if(window.confirm("Are you sure you want to request a reschedule? Staff will review your request.")) {
-       const { error } = await supabase.from('reservations').update({ status: 'pending-reschedule' }).eq('id', id);
-       
-       if (error) {
-         setToastMsg({ title: "Error", desc: "Failed to request reschedule.", type: 'error' });
-         return;
-       }
+  const handleRequestReschedule = async (id: string, r: any) => {
+    if (r.rescheduleCount >= 1) {
+      setToastMsg({ title: "Limit Reached", desc: "Only 1 reschedule allowed per booking.", type: "error" });
+      return;
+    }
+    setRescheduleData({ show: true, reservation: r, newDate: null, timeSlot: r.timeSlot });
+  };
 
-       if (trackForm.reservationId || currentUser) {
-         setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-reschedule' } : r) : null);
-       }
-       setToastMsg({ title: "Request Sent", desc: "Reschedule request sent to staff successfully.", type: 'success' });
+  const executeReschedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rescheduleData?.newDate || !rescheduleData?.timeSlot || !rescheduleData.reservation) return;
+
+    const validation = validateTimeSlotHelper(rescheduleData.timeSlot, rescheduleData.reservation.durationHours, rescheduleData.newDate, rescheduleData.reservation.tableId);
+    if (validation !== 'valid') {
+      setToastMsg({ title: "Invalid Schedule", desc: "Please pick a valid available time slot.", type: "error" });
+      return;
+    }
+
+    setIsReporting(true);
+    const newDateStr = rescheduleData.newDate.toISOString();
+    
+    try {
+      const { error } = await supabase.from('reservations').update({ 
+        date: newDateStr, 
+        timeSlot: rescheduleData.timeSlot, 
+        rescheduleCount: (rescheduleData.reservation.rescheduleCount || 0) + 1 
+      }).eq('id', rescheduleData.reservation.id);
+
+      if (error) throw error;
+
+      if (trackForm.reservationId || currentUser) {
+        setTrackedReservations(prev => prev ? prev.map(r => r.id === rescheduleData.reservation.id ? { 
+          ...r, 
+          date: newDateStr, 
+          timeSlot: rescheduleData.timeSlot, 
+          rescheduleCount: (r.rescheduleCount || 0) + 1 
+        } : r) : null);
+      }
+      setToastMsg({ title: "Rescheduled", desc: "Booking successfully rescheduled.", type: 'success' });
+      setRescheduleData(null);
+    } catch (error) {
+      setToastMsg({ title: "Error", desc: "Failed to reschedule booking.", type: 'error' });
+    } finally {
+      setIsReporting(false);
     }
   };
 
@@ -755,7 +820,7 @@ export function HomePage() {
     
     addFeedback({ 
       customerName: currentUser?.name || 'Guest', 
-      contactInfo: currentUser?.email || trackForm.phone || 'N/A', 
+      contactInfo: currentUser?.email || 'N/A', 
       rating: 0, 
       feedbackType: 'complaint', 
       comment: reportMessage, 
@@ -1008,7 +1073,6 @@ export function HomePage() {
                     <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
                     <p className="text-neutral-400 text-sm leading-relaxed mb-6">{cms.aboutP3}</p>
                     
-                    {/* 🟢 DYNAMIC CONTACT INFO IN ABOUT US */}
                     <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-3 shadow-inner">
                       <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-2">Get in Touch</p>
                       <div className="flex items-center gap-3 text-sm text-neutral-300">
@@ -1171,7 +1235,7 @@ export function HomePage() {
                       </div>
 
                       {/* STEP 2: ALL-IN-ONE TABLE BOARD */}
-                      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl flex-1 flex flex-col">
+                      <div className={`bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl flex flex-col ${isTableSelectorExpanded && selectedDate ? 'flex-1' : 'shrink-0'}`}>
                         <div 
                           onClick={() => selectedDate && setIsTableSelectorExpanded(!isTableSelectorExpanded)}
                           className={`bg-neutral-950 px-5 py-4 flex items-center justify-between border-b border-neutral-800/80 shrink-0 ${selectedDate ? 'cursor-pointer hover:bg-neutral-900/80' : 'opacity-50 cursor-not-allowed'}`}
@@ -1296,13 +1360,7 @@ export function HomePage() {
 
                     {/* RIGHT COLUMN: Reservation Schedule & Customer Details */}
                     <div className="lg:col-span-6 flex flex-col h-full">
-                      {!selectedDate || !selectedTableId ? (
-                        <div className="bg-neutral-900 border border-dashed border-neutral-800 rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-3 flex-1 min-h-[350px]">
-                          <Table2 size={36} className="text-neutral-700" />
-                          <p className="text-neutral-400 font-semibold text-sm">Select both Date & Table to continue</p>
-                          <p className="text-neutral-600 text-xs max-w-xs">Use Step 1 & 2 to lock in your venue arrangement.</p>
-                        </div>
-                      ) : reservationStep === 3 ? (
+                      {reservationStep === 3 ? (
                         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-3 flex-1 min-h-[400px] shadow-xl">
                           <CheckCircle size={64} className="text-emerald-500 mb-2" />
                           <h2 className="text-2xl font-black text-white mb-1">Booking Submitted!</h2>
@@ -1314,138 +1372,149 @@ export function HomePage() {
                           <button onClick={closeReservation} className="px-10 py-3.5 bg-neutral-800 hover:bg-neutral-700 text-white font-bold rounded-xl transition-colors border border-neutral-700">Done</button>
                         </div>
                       ) : (
-                        <form onSubmit={handleReservationSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5 shadow-xl flex-1 flex flex-col">
-                          <div className="flex justify-between items-center pb-2 border-b border-neutral-800 shrink-0">
-                            <p className="text-xs font-bold uppercase tracking-widest text-emerald-400">Step 3 — Schedule & Details</p>
-                            <span className="text-xs font-bold text-white bg-neutral-800 px-3 py-1 rounded-lg">
-                              {tables.find((t: any) => t.id === selectedTableId)?.name}
-                            </span>
-                          </div>
-
-                          <div className="shrink-0 space-y-4">
-                            <div>
-                              <label className="block text-xs text-neutral-400 mb-1">Full Name *</label>
-                              <input type="text" value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
+                        <div className="relative flex-1 flex flex-col">
+                          {!selectedDate || !selectedTableId ? (
+                            <div className="absolute inset-0 z-10 bg-neutral-950/40 backdrop-blur-[2px] rounded-2xl flex items-center justify-center pointer-events-none">
+                              <div className="bg-neutral-900/90 border border-neutral-700 px-5 py-3 rounded-xl shadow-2xl flex items-center gap-2">
+                                <Table2 size={16} className="text-neutral-400" />
+                                <p className="text-sm font-semibold text-neutral-200">Complete Steps 1 & 2 to unlock</p>
+                              </div>
+                            </div>
+                          ) : null}
+                          
+                          <form onSubmit={handleReservationSubmit} className={`bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5 shadow-xl flex-1 flex flex-col transition-all duration-300 ${(!selectedDate || !selectedTableId) ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                            <div className="flex justify-between items-center pb-2 border-b border-neutral-800 shrink-0">
+                              <p className="text-xs font-bold uppercase tracking-widest text-emerald-400">Step 3 — Schedule & Details</p>
+                              <span className="text-xs font-bold text-white bg-neutral-800 px-3 py-1 rounded-lg">
+                                {tables.find((t: any) => t.id === selectedTableId)?.name || 'Table'}
+                              </span>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="shrink-0 space-y-4">
                               <div>
-                                <label className="block text-xs text-neutral-400 mb-1">Email Address</label>
-                                <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
+                                <label className="block text-xs text-neutral-400 mb-1">Full Name *</label>
+                                <input type="text" value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
                               </div>
-                              <div>
-                                <label className="block text-xs text-neutral-400 mb-1">Phone Number *</label>
-                                <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
-                              </div>
-                            </div>
 
-                            <div className="grid grid-cols-3 gap-3">
-                              <div className="col-span-1">
-                                <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
-                                  <span>Pax</span>
-                                  <span className="text-[9px] text-emerald-500 font-bold ml-1">Max {maxAllowedPartySize}</span>
-                                </label>
-                                <input type="number" min={1} max={maxAllowedPartySize} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" />
-                              </div>
-                              <div className="col-span-1">
-                                <label className="block text-xs text-neutral-400 mb-1.5">Start Time *</label>
-                                <input type="time" style={{ colorScheme: 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
-                              </div>
-                              <div className="col-span-1">
-                                <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
-                                  <span>Duration</span>
-                                  {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h</span>}
-                                </label>
-                                <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 text-center appearance-none">
-                                  {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
-                                    <option key={h} value={h}>{h}h</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-
-                            <div className="mt-2 space-y-1">
-                              {timeValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> This time slot has already passed.</p>}
-                              {timeValidation === 'advance' && <p className="text-[10px] text-amber-500 font-semibold flex items-center gap-1"><AlertTriangle size={10} /> Requires at least 1 hour advance notice.</p>}
-                              {timeValidation === 'closed' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> Outside operating hours.</p>}
-                              {timeValidation === 'happyhour' && <p className="text-[10px] text-amber-500 font-semibold flex items-center gap-1"><AlertTriangle size={10} /> Happy Hour is strictly walk-in only.</p>}
-                              {timeValidation === 'full' && <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1"><Users size={10} /> Venue online capacity limit reached.</p>}
-                              {timeValidation === 'event_blocked' && <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1"><AlertTriangle size={10} /> Overlaps with a special event.</p>}
-                              
-                              {timeValidation === 'table_conflict' && (
-                                <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2">
-                                  <XCircle size={14} className="flex-shrink-0 mt-0.5" /> 
-                                  <span>Time slot overlaps with another reservation. Check the table schedule in Step 2.</span>
-                                </div>
-                              )}
-                              {timeValidation === 'active_conflict' && (
-                                <div className="text-[10px] text-amber-400 font-bold flex items-start gap-1.5 bg-amber-950/20 p-2.5 rounded border border-amber-900/30 mt-2">
-                                  <Clock size={14} className="flex-shrink-0 mt-0.5" /> 
-                                  <span>A walk-in customer is currently playing on this table. Please allow buffer time.</span>
-                                </div>
-                              )}
-                              {timeValidation === 'valid' && (
-                                <p className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-2">
-                                  <CheckCircle size={10} /> Schedule looks good!
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Payment Block */}
-                          <div className="space-y-3 border-t border-neutral-800 pt-4">
-                            <div className="flex justify-between items-center">
-                              <p className="text-xs text-amber-500 uppercase tracking-wider font-bold">Down Payment Info</p>
-                              <div className="flex bg-neutral-950 border border-neutral-800 rounded-lg p-1">
-                                <span className={`px-3 py-1 text-xs font-semibold rounded-md ${isDownPaymentWaived ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'}`}>
-                                  {isDownPaymentWaived ? 'Waived (Trusted)' : 'GCash'}
-                                </span>
-                              </div>
-                            </div>
-
-                            {!isDownPaymentWaived ? (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
-                                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
-                                  <input type="text" value={resForm.paymentRef} onChange={e => setResForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" />
+                                  <label className="block text-xs text-neutral-400 mb-1">Email Address</label>
+                                  <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
                                 </div>
                                 <div>
-                                  <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
-                                  <div className="flex items-center gap-3 mt-1.5">
-                                    <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
-                                      <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
-                                      <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
-                                    </label>
+                                  <label className="block text-xs text-neutral-400 mb-1">Phone Number *</label>
+                                  <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="col-span-1">
+                                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                                    <span>Pax</span>
+                                    <span className="text-[9px] text-emerald-500 font-bold ml-1">Max {maxAllowedPartySize}</span>
+                                  </label>
+                                  <input type="number" min={1} max={maxAllowedPartySize} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" />
+                                </div>
+                                <div className="col-span-1">
+                                  <label className="block text-xs text-neutral-400 mb-1.5">Start Time *</label>
+                                  <input type="time" style={{ colorScheme: 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
+                                </div>
+                                <div className="col-span-1">
+                                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
+                                    <span>Duration</span>
+                                    {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h</span>}
+                                  </label>
+                                  <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 text-center appearance-none">
+                                    {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                                      <option key={h} value={h}>{h}h</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div className="mt-2 space-y-1">
+                                {timeValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> This time slot has already passed.</p>}
+                                {timeValidation === 'advance' && <p className="text-[10px] text-amber-500 font-semibold flex items-center gap-1"><AlertTriangle size={10} /> Requires at least 1 hour advance notice.</p>}
+                                {timeValidation === 'closed' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> Outside operating hours.</p>}
+                                {timeValidation === 'happyhour' && <p className="text-[10px] text-amber-500 font-semibold flex items-center gap-1"><AlertTriangle size={10} /> Happy Hour is strictly walk-in only.</p>}
+                                {timeValidation === 'full' && <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1"><Users size={10} /> Venue online capacity limit reached.</p>}
+                                {timeValidation === 'event_blocked' && <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1"><AlertTriangle size={10} /> Overlaps with a special event.</p>}
+                                
+                                {timeValidation === 'table_conflict' && (
+                                  <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2">
+                                    <XCircle size={14} className="flex-shrink-0 mt-0.5" /> 
+                                    <span>Time slot overlaps with another reservation. Check the table schedule in Step 2.</span>
+                                  </div>
+                                )}
+                                {timeValidation === 'active_conflict' && (
+                                  <div className="text-[10px] text-amber-400 font-bold flex items-start gap-1.5 bg-amber-950/20 p-2.5 rounded border border-amber-900/30 mt-2">
+                                    <Clock size={14} className="flex-shrink-0 mt-0.5" /> 
+                                    <span>A walk-in customer is currently playing on this table. Please allow buffer time.</span>
+                                  </div>
+                                )}
+                                {timeValidation === 'valid' && (
+                                  <p className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-2">
+                                    <CheckCircle size={10} /> Schedule looks good!
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Payment Block */}
+                            <div className="space-y-3 border-t border-neutral-800 pt-4">
+                              <div className="flex justify-between items-center">
+                                <p className="text-xs text-amber-500 uppercase tracking-wider font-bold">Down Payment Info</p>
+                                <div className="flex bg-neutral-950 border border-neutral-800 rounded-lg p-1">
+                                  <span className={`px-3 py-1 text-xs font-semibold rounded-md ${isDownPaymentWaived ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'}`}>
+                                    {isDownPaymentWaived ? 'Waived (Trusted)' : 'GCash'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {!isDownPaymentWaived ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
+                                    <input type="text" value={resForm.paymentRef} onChange={e => setResForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
+                                    <div className="flex items-center gap-3 mt-1.5">
+                                      <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
+                                        <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
+                                        <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
+                                      </label>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ) : (
-                              <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
-                                <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
-                                <p className="text-xs text-emerald-400 font-bold">Down payment is waived for Trusted Customers. Your booking will be instantly confirmed.</p>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="mt-auto pt-4 space-y-4">
-                            <div className="bg-neutral-950 rounded-xl p-4 border border-neutral-800/80 text-xs space-y-1.5">
-                              <div className="flex justify-between"><span className="text-neutral-400">Total Rate ({resForm.duration}h)</span><span className="text-white font-semibold">₱{totalAmount}.00</span></div>
-                              <div className="flex justify-between font-bold text-amber-400">
-                                <span>{isDownPaymentWaived ? 'Down Payment (Waived for Trusted User)' : `Down Payment (${rates?.downPaymentPercent || 25}%)`}</span>
-                                <span>₱{isDownPaymentWaived ? 0 : downPayment}.00</span>
-                              </div>
+                              ) : (
+                                <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
+                                  <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
+                                  <p className="text-xs text-emerald-400 font-bold">Down payment is waived for Trusted Customers. Your booking will be instantly confirmed.</p>
+                                </div>
+                              )}
                             </div>
 
-                            <button
-                              type="submit"
-                              disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || isVerifying || confirmingPayment}
-                              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
-                            >
-                              {(isVerifying || confirmingPayment) ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <>Confirm & Reserve <CheckCircle size={16} /></>}
-                            </button>
-                          </div>
+                            <div className="mt-auto pt-4 space-y-4">
+                              <div className="bg-neutral-950 rounded-xl p-4 border border-neutral-800/80 text-xs space-y-1.5">
+                                <div className="flex justify-between"><span className="text-neutral-400">Total Rate ({resForm.duration}h)</span><span className="text-white font-semibold">₱{totalAmount}.00</span></div>
+                                <div className="flex justify-between font-bold text-amber-400">
+                                  <span>{isDownPaymentWaived ? 'Down Payment (Waived for Trusted User)' : `Down Payment (${rates?.downPaymentPercent || 25}%)`}</span>
+                                  <span>₱{isDownPaymentWaived ? 0 : downPayment}.00</span>
+                                </div>
+                              </div>
 
-                        </form>
+                              <button
+                                type="submit"
+                                disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || isVerifying || confirmingPayment}
+                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                              >
+                                {(isVerifying || confirmingPayment) ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <>Confirm & Reserve <CheckCircle size={16} /></>}
+                              </button>
+                            </div>
+
+                          </form>
+                        </div>
                       )}
                     </div>
 
@@ -1506,13 +1575,11 @@ export function HomePage() {
                       <form onSubmit={(e) => {
                         e.preventDefault();
                         const found = reservations.filter((r: any) => 
-                          r.id.toUpperCase() === trackForm.reservationId.toUpperCase() &&
-                          r.contactNumber === trackForm.phone
+                          r.id.toUpperCase() === trackForm.reservationId.toUpperCase()
                         );
                         setTrackedReservations(found);
                       }} className="space-y-4">
                         <input type="text" required value={trackForm.reservationId} onChange={e => setTrackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="Reservation ID (e.g. X7B9QA)" className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-4 py-3 text-center text-sm font-mono tracking-widest text-white uppercase outline-none" />
-                        <input type="tel" required value={trackForm.phone} onChange={e => setTrackForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '') }))} placeholder="Phone Number" className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-4 py-3 text-center text-sm font-mono text-white outline-none" />
                         <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-sm transition-all shadow-lg shadow-emerald-900/30">Locate Booking</button>
                       </form>
                     </div>
@@ -1587,8 +1654,8 @@ export function HomePage() {
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
-                                          {/* Only logged-in users can cancel (Passes both date and timeSlot for 1-hour validation) */}
-                                          {(r.status === 'pending' || r.status === 'pending-reschedule') && currentUser && (
+                                          {/* Only logged-in users can cancel */}
+                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && currentUser && (
                                              <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
                                                Cancel Booking
                                              </button>
@@ -1596,7 +1663,7 @@ export function HomePage() {
                                           
                                           {/* Request Reschedule */}
                                           {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
-                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
+                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
                                                Request Reschedule
                                              </button>
                                           )}
@@ -1835,7 +1902,12 @@ export function HomePage() {
               </p>
               <div className="flex gap-2 pt-2">
                 <button onClick={() => setShowLogoutConfirm(false)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold rounded-xl text-xs transition-colors border border-neutral-800">Cancel</button>
-                <button onClick={async () => { await supabase.auth.signOut(); setShowLogoutConfirm(false); setShowProfileModal(false); }} className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors">Yes, Log Out</button>
+                <button onClick={async () => { 
+                  if (!checkRateLimit('logout', 5, 5)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait.", type:"error"});
+                  await supabase.auth.signOut(); 
+                  setShowLogoutConfirm(false); 
+                  setShowProfileModal(false); 
+                }} className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors">Yes, Log Out</button>
               </div>
             </motion.div>
           </motion.div>
@@ -1967,6 +2039,18 @@ export function HomePage() {
                       <p className="text-[8px] text-neutral-500 uppercase tracking-widest font-bold mt-1">Missed</p>
                     </div>
                   </div>
+
+                  {userReservations.filter((r: any) => r.status === 'pending-refund').length > 0 && (
+                    <div className="p-4 bg-rose-950/30 border border-rose-900/50 rounded-xl mt-4">
+                        <p className="text-[10px] font-bold text-rose-400 mb-2 uppercase tracking-wider">Pending Refunds</p>
+                        {userReservations.filter((r: any) => r.status === 'pending-refund').map((r: any) => (
+                            <div key={r.id} className="text-[10px] text-neutral-300 mb-1.5 flex items-start gap-2">
+                                <Clock size={12} className="text-rose-400 shrink-0 mt-0.5" />
+                                <span>Refund on Booking ID <span className="font-mono text-white font-bold">{r.id}</span> ({format(new Date(r.date), 'MMM d')}) is pending refund...</span>
+                            </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
                 
                 <div className="mt-6 pt-6 border-t border-neutral-800/60 flex flex-col gap-3">
@@ -1988,6 +2072,46 @@ export function HomePage() {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* 🟢 RESCHEDULE MODAL */}
+        {rescheduleData?.show && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <h3 className="text-lg font-black text-violet-400 flex items-center gap-2"><Calendar size={18} /> Reschedule Booking</h3>
+                  <p className="text-xs text-neutral-500 mt-1">Reservation #{rescheduleData.reservation.id.toUpperCase()}</p>
+                </div>
+                <button onClick={() => setRescheduleData(null)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
+              </div>
+              
+              <form onSubmit={executeReschedule} className="space-y-4">
+                <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-800">
+                  <MiniCalendar
+                    selectedDate={rescheduleData.newDate}
+                    minDate={new Date()}
+                    onSelect={(d) => setRescheduleData(prev => prev ? ({ ...prev, newDate: d }) : null)}
+                    reservedDates={reservedDates}
+                    closedDates={closedDates || []}
+                    onClosedClick={(d, r) => setToastMsg({ title: "Closed", desc: r, type: 'error' })}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs text-neutral-400 mb-1.5">New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</label>
+                  <input type="time" style={{ colorScheme: 'dark' }} required value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => prev ? ({ ...prev, timeSlot: e.target.value }) : null)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" />
+                </div>
+                
+                <div className="flex gap-2 pt-2">
+                  <button type="button" onClick={() => setRescheduleData(null)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold rounded-xl text-xs transition-colors border border-neutral-800">Cancel</button>
+                  <button type="submit" disabled={!rescheduleData.newDate || !rescheduleData.timeSlot || isReporting} className="flex-1 py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2">
+                    {isReporting ? <><RefreshCw size={14} className="animate-spin" /> Verifying...</> : 'Confirm Reschedule'}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </motion.div>
         )}
@@ -2174,7 +2298,7 @@ export function HomePage() {
             </motion.div>
           </motion.div>
         )}
-        /* 🟢 TERMS AND CONDITIONS MODAL */
+        {/* 🟢 TERMS AND CONDITIONS MODAL */}
         {showTermsModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4">
@@ -2232,4 +2356,3 @@ export function HomePage() {
     </div>
   );
 }
-    

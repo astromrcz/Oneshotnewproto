@@ -180,12 +180,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
         if (!err) db.run(`DROP TABLE IF EXISTS cms_content`);
       });
 
+        // 🟢 IRONCLAD SELF-HEALING SUPER ADMIN
+      // 🟢 IRONCLAD SELF-HEALING SUPER ADMIN
       const createSuperAdmin = `
-        INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin)
-        SELECT 'admin_001', 'superadmin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'System Administrator', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492'
-        WHERE NOT EXISTS (SELECT 1 FROM staff WHERE username = 'superadmin')
+        INSERT OR IGNORE INTO staff (id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin)
+        VALUES ('admin_001', 'superadmin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'System Administrator', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492')
       `;
-      db.run(createSuperAdmin);
+      db.run(createSuperAdmin, (err) => {
+        if (err) console.error("❌ Failed to inject Super Admin:", err.message);
+        else console.log("🛡️ Super Admin account verified/injected.");
+      });
     });
   }
 });
@@ -982,6 +986,14 @@ app.post('/api/staff', (req, res) => {
 
 app.put('/api/staff/:id', (req, res) => {
   const updates = req.body;
+
+  if (req.params.id === 'admin_001') {
+    delete updates.isActive; // Cannot deactivate
+    delete updates.isAdmin;  // Cannot remove admin rights
+    delete updates.role;     // Cannot change role
+    delete updates.username; // Cannot change root username
+  }
+
   const keys = Object.keys(updates);
   if (keys.length === 0) return res.json({ message: "Nothing to update" });
 

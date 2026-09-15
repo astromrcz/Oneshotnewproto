@@ -345,39 +345,7 @@ export function AdminSiteSettings() {
         )}
 
         {activeTab === 'about' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-300">
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 space-y-4">
-              <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold border-b border-neutral-800 pb-3 mb-4">About Us Copy</h3>
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs text-neutral-400 font-medium">Header Title</label>
-                  <CharCount current={form.aboutTitle} max={50} />
-                </div>
-                <input type="text" maxLength={50} value={form.aboutTitle || ''} onChange={e => setForm((f: any) => ({...f, aboutTitle: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:border-sky-500 outline-none" />
-              </div>
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs text-neutral-400 font-medium">Paragraph 1 (The Hook)</label>
-                  <CharCount current={form.aboutP1} max={400} />
-                </div>
-                <textarea rows={3} maxLength={400} value={form.aboutP1 || ''} onChange={e => setForm((f: any) => ({...f, aboutP1: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
-              </div>
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs text-neutral-400 font-medium">Paragraph 2 (The Facility)</label>
-                  <CharCount current={form.aboutP2} max={400} />
-                </div>
-                <textarea rows={3} maxLength={400} value={form.aboutP2 || ''} onChange={e => setForm((f: any) => ({...f, aboutP2: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
-              </div>
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs text-neutral-400 font-medium">Paragraph 3 (The Closing)</label>
-                  <CharCount current={form.aboutP3} max={400} />
-                </div>
-                <textarea rows={3} maxLength={400} value={form.aboutP3 || ''} onChange={e => setForm((f: any) => ({...f, aboutP3: e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-300 focus:border-sky-500 outline-none resize-none" />
-              </div>
-            </div>
-
+          <div className="max-w-2xl mx-auto animate-in fade-in duration-300">
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
               <div className="flex justify-between items-center border-b border-neutral-800 pb-3 mb-4">
                 <h3 className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">About Featured Image</h3>
@@ -390,9 +358,9 @@ export function AdminSiteSettings() {
                   <Save size={14} /> Update Image
                 </button>
               </div>
-              <p className="text-[10px] text-neutral-500 mb-4">Upload the feature image shown next to the "About Us" text.</p>
+              <p className="text-[10px] text-neutral-500 mb-4">Upload the feature image shown next to the hardcoded "About Us" text.</p>
               
-              <div className="relative h-48 rounded-xl overflow-hidden border border-neutral-700 group bg-neutral-900 flex items-center justify-center">
+              <div className="relative h-64 rounded-xl overflow-hidden border border-neutral-700 group bg-neutral-900 flex items-center justify-center">
                 {form.aboutImage ? (
                   <>
                     <img src={form.aboutImage.startsWith('http') ? form.aboutImage : `http://localhost:3001${form.aboutImage}`} alt="About Us Feature" className="w-full h-full object-cover" />

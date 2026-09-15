@@ -494,6 +494,34 @@ export function SettingsPage() {
               </button>
             </div>
           </div>
+          <div className="mt-10 p-6 bg-rose-950/20 border border-rose-900/50 rounded-2xl text-center">
+  <h3 className="text-rose-500 font-black text-lg mb-2">Alpha Testing Reset</h3>
+  <p className="text-xs text-rose-400/80 mb-4">
+    This will wipe all active tables, queues, reservations, and history from the local database.
+  </p>
+  <button 
+    onClick={async () => {
+      if(window.confirm("⚠️ WARNING: This will permanently delete all test transactions and reset the venue to empty. Are you sure?")) {
+        try {
+          // 1. Wipe the Backend (SQLite)
+          await fetch('http://localhost:3001/api/debug/reset', { method: 'POST' });
+          
+          // 2. Wipe the Frontend (Browser Memory)
+          localStorage.clear();
+          sessionStorage.clear();
+          
+          alert("Test data and browser cache successfully wiped! The app will now reload.");
+          window.location.href = '/'; // Forces a hard redirect to the login page
+        } catch (e) {
+          alert("Failed to reset database. Is the local server running?");
+        }
+      }
+    }}
+    className="bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 px-6 rounded-xl text-sm transition-colors shadow-lg shadow-rose-900/40"
+  >
+    Wipe All Test Data
+  </button>
+</div>
         </div>
       )}
     </div>

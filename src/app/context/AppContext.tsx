@@ -311,7 +311,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const forceFullSync = async () => {
     try {
-      // 1. FETCH FLOOR DATA (Local Machine is Source of Truth for physical floor operations)
+      // 1. FETCH FLOOR DATA (Local Machine is Absolute Source of Truth for physical operations)
       const [tablesRes, invRes, queueRes, staffRes, historyRes, activitiesRes, feedRes, lostRes, watchRes] = await Promise.all([
         fetch('http://localhost:3001/api/tables').catch(() => null),
         fetch('http://localhost:3001/api/inventory').catch(() => null),
@@ -328,13 +328,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (invRes && invRes.ok) setInventory(await invRes.json());
       if (queueRes && queueRes.ok) setQueue(await queueRes.json());
       if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
-      if (historyRes && historyRes.ok) setSessionHistory(await historyRes.json());
+      if (historyRes && historyRes.ok) setSessionHistory(await historyRes.json()); // 🟢 Local History is King
       if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
       if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
       if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
       if (watchRes && watchRes.ok) setWatchlist(await watchRes.json());
 
-      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations & Configs)
+      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations & CMS)
+      // 🟢 NOTICE: We are NO LONGER fetching session_history from the cloud to prevent local data erasure!
       const [
         { data: resData, error: resErr }, { data: annData }, { data: cmsData }, 
         { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData }
@@ -383,8 +384,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn("⚠️ Supabase Offline. Loading Reservations from Local Cache...", err);
       // 4. STRICT OFFLINE FALLBACK FOR RESERVATIONS & CLOUD SETTINGS
-      const [resRes, ratesRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes] = await Promise.all([
-        fetch('http://localhost:3001/api/reservations').catch(() => null), fetch('http://localhost:3001/api/settings/rates').catch(() => null), fetch('http://localhost:3001/api/announcements').catch(() => null), fetch('http://localhost:3001/api/cms').catch(() => null), fetch('http://localhost:3001/api/closed-dates').catch(() => null), fetch('http://localhost:3001/api/promo-codes').catch(() => null), fetch('http://localhost:3001/api/events').catch(() => null)
+      const [resRes, ratesRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, historyResFb] = await Promise.all([
+        fetch('http://localhost:3001/api/reservations').catch(() => null), fetch('http://localhost:3001/api/settings/rates').catch(() => null), fetch('http://localhost:3001/api/announcements').catch(() => null), fetch('http://localhost:3001/api/cms').catch(() => null), fetch('http://localhost:3001/api/closed-dates').catch(() => null), fetch('http://localhost:3001/api/promo-codes').catch(() => null), fetch('http://localhost:3001/api/events').catch(() => null), fetch('http://localhost:3001/api/session-history').catch(() => null)
       ]);
 
       if (resRes && resRes.ok) setReservations(await resRes.json());
@@ -392,6 +393,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
       if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
       if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
+      if (historyResFb && historyResFb.ok) setSessionHistory(await historyResFb.json()); // 🟢 Fallback retains local history
       if (eventsRes && eventsRes.ok) {
         const dbEvents = await eventsRes.json();
         setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...dbEvents.filter((e: any) => !existingIds.has(e.id))]; });

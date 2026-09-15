@@ -484,6 +484,8 @@ app.post('/api/ai/predict-wait-time', (req, res) => {
 // ====================================================================
 // 📥 WRITE ROUTES (POST/PUT/DELETE)
 // ====================================================================
+
+
 app.put('/api/cms', (req, res) => {
   const payload = req.body;
   const keys = Object.keys(payload);
@@ -1089,6 +1091,74 @@ if (isProduction) {
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
+// ====================================================================
+// ⚠️ DEBUG ROUTE: TOTAL DAY-1 NUKE (FOR ALPHA TESTING)
+// ====================================================================
+app.post('/api/debug/reset', async (req, res) => {
+  try {
+    console.log("🧹 Initiating Total Day-1 Database Nuke...");
+
+    // 1. WIPE CLOUD (SUPABASE)
+    // 🟢 SAFE FILTER: .not('id', 'is', null) safely wipes UUIDs and Text IDs.
+    // 🟢 SCHEMA MATCH: Only targets tables that actually exist in Supabase.
+    const cloudWipes = await Promise.all([
+      supabase.from('queue').delete().not('id', 'is', null),
+      supabase.from('reservations').delete().not('id', 'is', null),
+      supabase.from('session_history').delete().not('id', 'is', null),
+      supabase.from('activities').delete().not('id', 'is', null),
+      supabase.from('feedback').delete().not('id', 'is', null),
+      supabase.from('e_receipts').delete().not('id', 'is', null),
+      supabase.from('watchlist').delete().not('id', 'is', null),
+      supabase.from('lost_and_found').delete().not('id', 'is', null),
+      supabase.from('tables').delete().not('id', 'is', null),
+      supabase.from('inventory').delete().not('id', 'is', null),
+      supabase.from('events').delete().not('id', 'is', null),
+      supabase.from('promo_codes').delete().not('id', 'is', null),
+      supabase.from('announcements').delete().not('id', 'is', null),
+      supabase.from('closed_dates').delete().not('id', 'is', null)
+    ]);
+
+    const cloudErrors = cloudWipes.filter(r => r.error).map(r => r.error.message);
+    if (cloudErrors.length > 0) {
+       console.error("⚠️ Cloud Wipe Blocked:", cloudErrors);
+       return res.status(500).json({ error: "Cloud Wipe Failed: " + cloudErrors[0] });
+    }
+    console.log("✅ Cloud Supabase Nuke Successful.");
+
+    // 2. WIPE LOCAL SQLITE DATA
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION');
+      db.run(`DELETE FROM queue`);
+      db.run(`DELETE FROM reservations`);
+      db.run(`DELETE FROM session_history`);
+      db.run(`DELETE FROM activities`);
+      db.run(`DELETE FROM feedback`);
+      db.run(`DELETE FROM e_receipts`);
+      db.run(`DELETE FROM watchlist`);
+      db.run(`DELETE FROM lost_and_found`);
+      db.run(`DELETE FROM tables`);
+      db.run(`DELETE FROM inventory`);
+      db.run(`DELETE FROM events`);
+      db.run(`DELETE FROM promo_codes`);
+      db.run(`DELETE FROM announcements`);
+      db.run(`DELETE FROM closed_dates`);
+      // Protects the Local Super Admin so you don't get locked out
+      db.run(`DELETE FROM staff WHERE username != 'superadmin'`); 
+      
+      // Reset the SQLite auto-increment counters for a clean state
+      db.run(`VACUUM`);
+
+      db.run('COMMIT', (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        console.log("✅ Local SQLite Nuke Successful.");
+        res.status(200).json({ message: "Full Day 1 Reset completed across Local and Cloud." });
+      });
+    });
+  } catch (err) {
+    console.error("Cloud wipe error:", err);
+    res.status(500).json({ error: "Failed to wipe cloud data: " + err.message });
+  }
+});
 
 // ====================================================================
 // 🚀 SERVER STARTUP

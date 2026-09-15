@@ -495,25 +495,31 @@ export function SettingsPage() {
             </div>
           </div>
           <div className="mt-10 p-6 bg-rose-950/20 border border-rose-900/50 rounded-2xl text-center">
-  <h3 className="text-rose-500 font-black text-lg mb-2">Alpha Testing Reset</h3>
-  <p className="text-xs text-rose-400/80 mb-4">
-    This will wipe all active tables, queues, reservations, and history from the local database.
-  </p>
-  <button 
+          <h3 className="text-rose-500 font-black text-lg mb-2">Alpha Testing Reset</h3>
+            <p className="text-xs text-rose-400/80 mb-4">
+               This will wipe all active tables, queues, reservations, and history from the local and cloud database.
+              </p>
+ <button 
     onClick={async () => {
       if(window.confirm("⚠️ WARNING: This will permanently delete all test transactions and reset the venue to empty. Are you sure?")) {
         try {
-          // 1. Wipe the Backend (SQLite)
-          await fetch('http://localhost:3001/api/debug/reset', { method: 'POST' });
+          const response = await fetch('http://localhost:3001/api/debug/reset', { method: 'POST' });
+          
+          // 🟢 STRICT CHECK: Stop and show error if server rejects or 404s
+          if (!response.ok) {
+             const errData = await response.json().catch(() => ({ error: 'Endpoint missing or server crashed.' }));
+             alert(`❌ Wipe Failed: ${errData.error}\n\nCheck your terminal! If it's a Cloud error, you need to use your Supabase SERVICE_ROLE_KEY in your .env file to bypass security restrictions.`);
+             return;
+          }
           
           // 2. Wipe the Frontend (Browser Memory)
           localStorage.clear();
           sessionStorage.clear();
           
-          alert("Test data and browser cache successfully wiped! The app will now reload.");
-          window.location.href = '/'; // Forces a hard redirect to the login page
+          alert("✅ Test data and browser cache successfully wiped! The app will now reload.");
+          window.location.href = '/'; 
         } catch (e) {
-          alert("Failed to reset database. Is the local server running?");
+          alert("❌ Failed to reach Edge Server. Is localhost:3001 running?");
         }
       }
     }}

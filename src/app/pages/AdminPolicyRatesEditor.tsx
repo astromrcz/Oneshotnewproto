@@ -583,61 +583,13 @@ export default function AdminPolicyRatesEditor() {
                   placeholder="General establishment rules..." 
                 />
               </div>
+              
             </div>
           </div>
         </div>
       </div>
 
-      {/* 🟢 FULL WIDTH BOTTOM: ANTI-FRAUD DEFENSE ENGINE */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mt-8 shadow-sm">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2">
-            <ShieldAlert className="text-emerald-500" /> Fraud Defense & Automation Constraints
-          </h2>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          {/* Defense 1: Late Grace Period */}
-          <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-800/80 flex flex-col justify-between shadow-sm">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold text-neutral-300">No-Show Grace Period</span>
-                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/20">{gracePeriodMins}m Late</span>
-              </div>
-              <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
-                If a customer fails to check-in physically by this time, their table is automatically forfeited to the walk-in queue.
-              </p>
-            </div>
-            <select 
-              value={gracePeriodMins} 
-              onChange={e => setGracePeriodMins(Number(e.target.value))}
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-emerald-500 cursor-pointer"
-            >
-              <option value={15}>15 Mins (Strict)</option>
-              <option value={20}>20 Mins (Standard)</option>
-              <option value={30}>30 Mins (Lenient)</option>
-            </select>
-          </div>
-
-          {/* Defense 2: Mandatory Receipt Verification (Static System Rule) */}
-          <div className="bg-emerald-950/20 p-5 rounded-xl border border-emerald-900/40 flex flex-col justify-between shadow-sm relative overflow-hidden">
-            <div className="absolute -right-4 -top-4 text-emerald-900/20">
-                <Lock size={100} />
-            </div>
-            <div className="relative z-10">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold text-emerald-400">Receipt Verification</span>
-                <span className="text-[10px] font-bold text-neutral-100 bg-emerald-600 px-2.5 py-0.5 rounded uppercase tracking-wider">System Enforced</span>
-              </div>
-              <p className="text-[11px] text-emerald-300/80 leading-relaxed">
-                Online bookings will strictly remain <strong className="text-amber-400 font-semibold">'Pending'</strong> until your venue staff visually reviews and manually approves the GCash receipt upload. This mandatory protocol prevents booking spam.
-              </p>
-            </div>
-          </div>
-
-        </div>
-      </div>
+     
 
       {/* ALL-INCLUSIVE CONFIRMATION MODAL */}
       {showSummaryModal && (

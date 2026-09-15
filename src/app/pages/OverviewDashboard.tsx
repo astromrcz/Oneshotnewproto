@@ -307,7 +307,7 @@ export function OverviewDashboard() {
             ) : (
               <Download size={14} className="text-amber-400" />
             )}
-            <span>Run Local Backup</span>
+            <span>Local Backup</span>
           </button>
         </div>
       </div>
@@ -549,7 +549,7 @@ export function OverviewDashboard() {
                   className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-neutral-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
                 >
                   <Download size={13} />
-                  <span>Run Local Backup</span>
+                  <span>Local Backup</span>
                 </button>
               </div>
             </div>

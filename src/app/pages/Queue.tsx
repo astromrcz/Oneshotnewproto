@@ -368,15 +368,29 @@ export function Queue() {
                         <Users size={10} /> {r.partySize} pax
                       </span>
                       <span className="text-xs text-neutral-500">{r.contactNumber}</span>
-                      <span className="text-xs text-sky-500">{r.timeSlot} · {r.durationHours}h</span>
+                      <span className="text-xs text-sky-500">
+                        {isToday(new Date(r.date)) ? 'Today' : isTomorrow(new Date(r.date)) ? 'Tomorrow' : format(new Date(r.date), 'MMM d')} · {r.timeSlot} · {r.durationHours}h
+                      </span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => navigate('/staff/tables')}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 text-xs font-semibold rounded-lg border border-sky-700/30 transition-colors flex-none"
-                  >
-                    Assign Table
-                  </button>
+                  <div className="flex items-center gap-2 flex-none">
+                    <button
+                      onClick={() => navigate('/staff/tables')}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 text-xs font-semibold rounded-lg border border-sky-700/30 transition-colors"
+                    >
+                      Assign Table
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCancelTarget(r.id);
+                        setShowCancelDialog(true);
+                      }}
+                      title="Cancel / Dismiss Reservation"
+                      className="p-2 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 rounded-lg transition-colors border border-rose-700/30"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   MessageSquare, ThumbsUp, Tag, AlertTriangle, Lightbulb,
-  Search, Package, User, Calendar
+  Search, Package, User, Calendar, CheckCircle2, X
 } from 'lucide-react';
 import { formatDistanceToNow, isToday, isYesterday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 
@@ -17,7 +17,7 @@ const TYPE_CONFIG: Record<FeedbackType, { label: string; color: string; bg: stri
 };
 
 export function FeedbackPage() {
-  const { feedback } = useAppContext();
+  const { feedback, resolveFeedback, adminLoggedIn } = useAppContext();
   
   // ── States ──
   const [filterType, setFilterType] = useState<FeedbackType | 'all'>('all');
@@ -26,17 +26,17 @@ export function FeedbackPage() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
+  // ── Resolution Modal State ──
+  const [resolveModal, setResolveModal] = useState<{ id: string; name: string } | null>(null);
+  const [resolveNotes, setResolveNotes] = useState('');
+
   // ── Filtering Logic ──
   const filtered = feedback.filter(f => {
-    // 1. Type Match
     const matchType = filterType === 'all' || f.feedbackType === filterType;
-    
-    // 2. Search Match (Name or Comment)
     const matchSearch = !searchQuery ||
       f.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       f.comment.toLowerCase().includes(searchQuery.toLowerCase());
       
-    // 3. Date Match
     let matchDate = true;
     const fDate = new Date(f.date);
     
@@ -75,8 +75,16 @@ export function FeedbackPage() {
     return Object.entries(tagMap).sort((a, b) => b[1] - a[1]).slice(0, 6);
   })();
 
+  const handleResolve = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resolveModal || !resolveNotes.trim()) return;
+    resolveFeedback(resolveModal.id, resolveNotes.trim());
+    setResolveModal(null);
+    setResolveNotes('');
+  };
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 relative">
       {/* ── Stats Row ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
@@ -98,7 +106,6 @@ export function FeedbackPage() {
       {/* ── Toolbar ── */}
       <div className="flex flex-col gap-3">
         <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
-          {/* Search */}
           <div className="relative flex-1 w-full">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
             <input
@@ -110,7 +117,6 @@ export function FeedbackPage() {
             />
           </div>
 
-          {/* Date Filter */}
           <div className="relative w-full md:w-auto flex-shrink-0">
             <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
               <Calendar size={14} className="text-neutral-400" />
@@ -136,7 +142,6 @@ export function FeedbackPage() {
           </div>
         </div>
 
-        {/* Custom Date Range Inputs (Conditional) */}
         {dateFilter === 'CUSTOM' && (
           <div className="flex items-center gap-3 bg-neutral-950 p-4 rounded-xl border border-neutral-800 animate-in fade-in slide-in-from-top-2">
             <div className="flex-1 sm:flex-none">
@@ -172,7 +177,6 @@ export function FeedbackPage() {
           </div>
         )}
 
-        {/* Type Filter Pills */}
         <div className="flex gap-1.5 flex-wrap">
           {(['all', 'compliment', 'suggestion', 'complaint', 'lost_item', 'other'] as const).map(t => {
             const cfg = t !== 'all' ? TYPE_CONFIG[t] : null;
@@ -222,10 +226,9 @@ export function FeedbackPage() {
           const cfg = TYPE_CONFIG[type];
           const Icon = cfg.icon;
           return (
-            <div key={fb.id} className={`bg-neutral-950 border rounded-xl p-5 hover:border-neutral-700 transition-colors ${fb.feedbackType ? cfg.border : 'border-neutral-800'}`}>
+            <div key={fb.id} className={`bg-neutral-950 border rounded-xl p-5 hover:border-neutral-700 transition-colors flex flex-col ${fb.feedbackType ? cfg.border : 'border-neutral-800'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 flex-1 min-w-0">
-                  {/* Avatar */}
                   <div className="w-9 h-9 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-sm font-bold text-neutral-400 flex-none">
                     <User size={16} />
                   </div>
@@ -248,7 +251,6 @@ export function FeedbackPage() {
                     </div>
                   </div>
                 </div>
-                {/* Type Badge */}
                 <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold flex-shrink-0 ${cfg.bg} ${cfg.color} border ${cfg.border}`}>
                   <Icon size={11} />
                   <span className="hidden sm:inline">{cfg.label}</span>
@@ -266,10 +268,76 @@ export function FeedbackPage() {
                   ))}
                 </div>
               )}
+
+              {/* Resolution Block */}
+              {adminLoggedIn && (
+                <div className="mt-4 pt-4 border-t border-neutral-800/50">
+                  {fb.status === 'resolved' ? (
+                    <div className="bg-emerald-950/20 border border-emerald-900/40 p-3 rounded-lg flex gap-3 items-start">
+                      <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider mb-1">Resolved</p>
+                        <p className="text-xs text-emerald-200/80 leading-relaxed">{fb.notes}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setResolveModal({ id: fb.id, name: fb.customerName })}
+                      className="text-xs font-bold text-neutral-400 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <CheckCircle2 size={14} /> Mark as Resolved
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
+
+      {/* ── Resolve Modal ── */}
+      {resolveModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-500" />
+                <div>
+                  <h3 className="text-base font-bold text-neutral-100">Resolve Feedback</h3>
+                  <p className="text-xs text-neutral-500">{resolveModal.name}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { setResolveModal(null); setResolveNotes(''); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleResolve} className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Resolution Summary / Admin Notes *</label>
+                <textarea
+                  required
+                  autoFocus
+                  rows={4}
+                  value={resolveNotes}
+                  onChange={(e) => setResolveNotes(e.target.value)}
+                  placeholder="e.g. Contacted customer and offered a free hour on next visit to compensate for the aircon issue."
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600 resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => { setResolveModal(null); setResolveNotes(''); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">
+                  Cancel
+                </button>
+                <button type="submit" disabled={!resolveNotes.trim()} className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2">
+                  <CheckCircle2 size={16} /> Confirm Resolution
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

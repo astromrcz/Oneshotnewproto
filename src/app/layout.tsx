@@ -174,6 +174,10 @@ export function Layout() {
     } catch { return []; }
   });
 
+  // 🟢 Notification Read/Clear States
+  const [clearedTime, setClearedTime] = useState<number>(() => parseInt(localStorage.getItem('oneshot_staff_cleared_time') || '0'));
+  const [readTime, setReadTime] = useState<number>(() => parseInt(localStorage.getItem('oneshot_staff_read_time') || '0'));
+
   const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
   const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
@@ -285,6 +289,30 @@ export function Layout() {
     const end = new Date(t.session.startTime).getTime() + (t.session.durationMinutes || 0) * 60000;
     return Date.now() > end;
   }).length;
+
+  // 🟢 Notifications Computed Variables
+  const visibleActivities = (activities || [])
+    .filter((a: any) => new Date(a.timestamp).getTime() > clearedTime)
+    .slice(0, 10); // Show max 10 recent
+
+  const unreadCount = visibleActivities.filter((a: any) => new Date(a.timestamp).getTime() > readTime).length;
+
+  // 🟢 Notifications Action Handlers
+  const handleClearNotifications = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const now = Date.now();
+    setClearedTime(now);
+    setReadTime(now);
+    localStorage.setItem('oneshot_staff_cleared_time', now.toString());
+    localStorage.setItem('oneshot_staff_read_time', now.toString());
+  };
+
+  const handleMarkAsRead = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const now = Date.now();
+    setReadTime(now);
+    localStorage.setItem('oneshot_staff_read_time', now.toString());
+  };
 
   const pageTitle = pageTitles[location.pathname] || 'One Shot Bar';
 
@@ -488,24 +516,53 @@ export function Layout() {
                 </AnimatePresence>
               </div>
 
-              {/* Notifications */}
+              {/* 🟢 Notifications Panel with Read/Clear Actions */}
               <div className="relative">
                 <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-neutral-400 hover:text-neutral-200 transition-colors rounded-lg hover:bg-neutral-800">
                   <Bell size={18} />
-                  {(waitingCount > 0 || overtimeCount > 0) && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full" />}
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-neutral-950" />
+                  )}
                 </button>
                 {showNotifications && (
-                  <div className="absolute right-0 top-full mt-3 w-80 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-neutral-800 flex justify-between items-center">
-                      <p className="text-sm font-semibold text-neutral-200">Recent Activity</p>
+                  <div className="absolute right-0 top-full mt-3 w-80 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col">
+                    <div className="px-4 py-3 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/80">
+                      <p className="text-sm font-bold text-neutral-200">System Activity</p>
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={handleMarkAsRead} 
+                          disabled={unreadCount === 0} 
+                          className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${unreadCount > 0 ? 'text-emerald-400 hover:text-emerald-300' : 'text-neutral-700 cursor-not-allowed'}`}
+                        >
+                          Read
+                        </button>
+                        <button 
+                          onClick={handleClearNotifications} 
+                          disabled={visibleActivities.length === 0} 
+                          className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${visibleActivities.length > 0 ? 'text-rose-400 hover:text-rose-300' : 'text-neutral-700 cursor-not-allowed'}`}
+                        >
+                          Clear
+                        </button>
+                      </div>
                     </div>
-                    <div className="max-h-96 overflow-y-auto">
-                      {activities.slice(0, 5).map((activity: any) => (
-                        <div key={activity.id} className="px-4 py-3 border-b border-neutral-800/50 hover:bg-neutral-900/40 transition-colors">
-                          <p className="text-xs text-neutral-300">{activity.description}</p>
-                          <p className="text-[10px] text-neutral-600 mt-1">{new Date(activity.timestamp).toLocaleTimeString()}</p>
+                    <div className="max-h-96 overflow-y-auto hide-scrollbar">
+                      {visibleActivities.length === 0 ? (
+                        <div className="p-6 text-center">
+                          <Bell size={24} className="mx-auto text-neutral-700 mb-2" />
+                          <p className="text-xs text-neutral-500 font-medium">No new notifications</p>
                         </div>
-                      ))}
+                      ) : (
+                        visibleActivities.map((activity: any) => {
+                          const isUnread = new Date(activity.timestamp).getTime() > readTime;
+                          return (
+                            <div key={activity.id} className={`px-4 py-3 border-b border-neutral-800/50 transition-colors relative ${isUnread ? 'bg-emerald-950/10 hover:bg-emerald-900/20' : 'hover:bg-neutral-900/40'}`}>
+                              {isUnread && <span className="absolute left-2.5 top-4 w-1.5 h-1.5 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.6)]" />}
+                              <p className={`text-xs pl-3 ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-400'}`}>{activity.description}</p>
+                              <p className="text-[10px] text-neutral-600 mt-1.5 pl-3">{new Date(activity.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 )}

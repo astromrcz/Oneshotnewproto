@@ -338,6 +338,34 @@ export function Reservations() {
     }
   };
 
+  const [migrateModal, setMigrateModal] = useState<{ id: string; customerName: string; currentTableId: string | null } | null>(null);
+  const [migrateTargetTableId, setMigrateTargetTableId] = useState('');
+  const [migrateReason, setMigrateReason] = useState('');
+  const [isMigrating, setIsMigrating] = useState(false);
+
+  const handleConfirmMigrate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!migrateModal || !migrateTargetTableId || !migrateReason.trim()) return;
+    setIsMigrating(true);
+    try {
+      const fromTable = tables.find((t: any) => t.id === migrateModal.currentTableId)?.name || 'No Table';
+      const toTable = tables.find((t: any) => t.id === migrateTargetTableId)?.name || 'Unknown Table';
+      
+      updateReservation(migrateModal.id, { tableId: migrateTargetTableId });
+      addActivity('admin_action', `Migrated reservation #${migrateModal.id.toUpperCase()} (${migrateModal.customerName}) from ${fromTable} to ${toTable}. Reason: ${migrateReason.trim()}`);
+      
+      flash("Reservation migrated to new table successfully.", "success");
+      setMigrateModal(null);
+      setMigrateTargetTableId('');
+      setMigrateReason('');
+    } catch (err) {
+      console.error(err);
+      flash("Failed to migrate reservation.", "error");
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
   const getNextClosingTime = (dateObj: Date) => {
     if (!dateObj) return null;
     const d = new Date(dateObj);
@@ -1007,6 +1035,9 @@ export function Reservations() {
                                     {r.status === 'confirmed' && (
                                       <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
                                     )}
+                                    {r.status !== 'cancelled' && r.status !== 'completed' && r.tableId && (
+                                      <button onClick={(e) => { e.stopPropagation(); setMigrateModal({ id: r.id, customerName: r.customerName, currentTableId: r.tableId }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-sky-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Migrate Table</button>
+                                    )}
                                     {r.status !== 'checked-in' && (
                                       <button onClick={(e) => { e.stopPropagation(); setCancelTarget(r.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{r.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
                                     )}
@@ -1265,6 +1296,9 @@ export function Reservations() {
                         )}
                         {selected.status === 'confirmed' && (
                           <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
+                        )}
+                        {selected.status !== 'cancelled' && selected.status !== 'completed' && selected.tableId && (
+                          <button onClick={(e) => { e.stopPropagation(); setMigrateModal({ id: selected.id, customerName: selected.customerName, currentTableId: selected.tableId }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-sky-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Migrate Table</button>
                         )}
                         {selected.status !== 'checked-in' && (
                           <button onClick={(e) => { e.stopPropagation(); setCancelTarget(selected.id); setShowCancelDialog(true); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">{selected.status === 'pending' ? 'Deny Reservation' : 'Cancel Booking'}</button>
@@ -2060,6 +2094,59 @@ export function Reservations() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 MIGRATE TABLE MODAL */}
+      {migrateModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <div className="flex items-center gap-2">
+                <Table2 size={16} className="text-sky-500" />
+                <div>
+                  <h3 className="text-base font-bold text-neutral-100">Migrate Reservation</h3>
+                  <p className="text-xs text-neutral-500">{migrateModal.customerName}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { setMigrateModal(null); setMigrateTargetTableId(''); setMigrateReason(''); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
+            </div>
+            <form onSubmit={handleConfirmMigrate} className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">New Table Assignment *</label>
+                <select
+                  required
+                  value={migrateTargetTableId}
+                  onChange={e => setMigrateTargetTableId(e.target.value)}
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                >
+                  <option value="" disabled>Select new table...</option>
+                  {tables.filter((t: any) => t.isActive && t.id !== migrateModal.currentTableId).map((t: any) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Reason for Migration *</label>
+                <textarea 
+                  required 
+                  rows={3} 
+                  value={migrateReason} 
+                  onChange={e => setMigrateReason(e.target.value)} 
+                  placeholder="e.g. Current table became unavailable due to damage..." 
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/40 resize-none placeholder-neutral-600" 
+                />
+              </div>
+              
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => { setMigrateModal(null); setMigrateTargetTableId(''); setMigrateReason(''); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
+                <button type="submit" disabled={isMigrating || !migrateTargetTableId || !migrateReason.trim()} className="flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-sky-900/30 flex items-center justify-center gap-1.5">
+                  {isMigrating ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : 'Confirm Migration'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

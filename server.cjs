@@ -100,6 +100,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
       db.run(`CREATE TABLE IF NOT EXISTS lost_and_found (id TEXT PRIMARY KEY, itemName TEXT, description TEXT, foundDate DATETIME, status TEXT, image TEXT, claimedBy TEXT, claimedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
       db.run(`CREATE TABLE IF NOT EXISTS watchlist (id TEXT PRIMARY KEY, name TEXT, reason TEXT, description TEXT, status TEXT, evidenceLink TEXT, dateAdded DATETIME, resolvedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
       db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`);
+      db.run(`CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, customerName TEXT, contactInfo TEXT, feedbackType TEXT, comment TEXT, reservationId TEXT, tags TEXT, date DATETIME DEFAULT CURRENT_TIMESTAMP, status TEXT DEFAULT 'pending', notes TEXT)`);
       
       // 🟢 e-RECEIPTS TABLE FOR PAPERLESS CHECKOUTS
       db.run(`CREATE TABLE IF NOT EXISTS e_receipts (id TEXT PRIMARY KEY, receipt_no TEXT UNIQUE NOT NULL, reservation_id TEXT, customer_name TEXT NOT NULL, customer_email TEXT, customer_phone TEXT, table_id TEXT, table_name TEXT NOT NULL, play_start_time TEXT, play_end_time TEXT, duration_minutes INTEGER DEFAULT 0, table_rate REAL DEFAULT 0, table_charge REAL DEFAULT 0, overtime_charge REAL DEFAULT 0, fnb_charge REAL DEFAULT 0, subtotal REAL DEFAULT 0, discount_amount REAL DEFAULT 0, total_amount REAL DEFAULT 0, amount_paid REAL DEFAULT 0, balance_due REAL DEFAULT 0, payment_method TEXT DEFAULT 'cash', payment_status TEXT DEFAULT 'paid', created_at TEXT DEFAULT (datetime('now')))`);
@@ -144,6 +145,13 @@ const db = new sqlite3.Database(dbPath, (err) => {
       ];
       newEventCols.forEach(col => {
         db.run(`ALTER TABLE events ADD COLUMN ${col}`, () => {});
+      });
+      const feedbackCols = [
+        'status TEXT DEFAULT \'pending\'',
+        'notes TEXT'
+      ];
+      feedbackCols.forEach(col => {
+        db.run(`ALTER TABLE feedback ADD COLUMN ${col}`, () => {});
       });
 
       // 🟢 AI TRAINING TELEMETRY COLUMNS IN SESSION HISTORY
@@ -562,8 +570,8 @@ app.post('/api/sync-to-cloud', async (req, res) => {
       syncTable('announcements', 'announcements', r => ({ id: r.id, title: r.title, content: r.content, type: r.type, isActive: r.isActive ? 1 : 0, expiresAt: r.expiresAt || null, createdAt: r.createdAt || new Date().toISOString() }), 'id'),
       syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: !!r.is_full_day, open_time: r.open_time, close_time: r.close_time }), 'id'),
       syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id'),
-      syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date || new Date().toISOString() }), 'id'),
       syncTable('lost_and_found', 'lost_and_found', r => ({ id: r.id, itemName: r.itemName, description: r.description, foundDate: r.foundDate || null, status: r.status, image: r.image || null, claimedBy: r.claimedBy || null, claimedDate: r.claimedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
+      syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date || new Date().toISOString(), status: r.status || 'pending', notes: r.notes || null }), 'id'),
       syncTable('watchlist', 'watchlist', r => ({ id: r.id, name: r.name, reason: r.reason, description: r.description, status: r.status, evidenceLink: r.evidenceLink || null, dateAdded: r.dateAdded || null, resolvedDate: r.resolvedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
       syncTable('activities', 'activities', r => ({ id: r.id, type: r.type, description: r.description, timestamp: r.timestamp || new Date().toISOString(), metadata: r.metadata || null }), 'id'),
       
@@ -867,7 +875,20 @@ app.post('/api/closed-dates', (req, res) => {
     }
   );
 });
+app.put('/api/feedback/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
 
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => updates[k]);
+  values.push(req.params.id);
+
+  db.run(`UPDATE feedback SET ${setClause} WHERE id = ?`, values, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Feedback updated." });
+  });
+});
 app.put('/api/closed-dates/:id', (req, res) => {
   const updates = req.body;
   const keys = Object.keys(updates);

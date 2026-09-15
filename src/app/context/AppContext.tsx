@@ -64,6 +64,7 @@ export type Reservation = {
 
 export type Feedback = {
   id: string; customerName: string; contactInfo?: string; rating: number; feedbackType?: 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other'; comment: string; date: Date; reservationId?: string; tags: string[];
+  status?: 'pending' | 'resolved'; notes?: string;
 };
 
 export type ActivityType =
@@ -144,7 +145,7 @@ type AppContextType = {
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
   addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
-  addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;
+  addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
@@ -336,17 +337,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations & Configs)
       const [
         { data: resData, error: resErr }, { data: annData }, { data: cmsData }, 
-        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }
+        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData }
       ] = await Promise.all([
         supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), 
         supabase.from('cms').select('*'), supabase.from('system_settings').select('*'), 
         supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), 
-        supabase.from('events').select('*')
+        supabase.from('events').select('*'), supabase.from('feedback').select('*')
       ]);
 
       if (resErr) throw new Error("Supabase is unreachable.");
 
       if (annData) setAnnouncements(annData as Announcement[]);
+      if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[]);
       if (promoData) setPromoCodes((promoData as any[]).map(r => ({ id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description, isActive: !!r.is_active, isLimitedUses: !!r.is_limited_uses, maxUsage: r.max_usage, usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at })) as PromoCode[]);
       if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
       if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
@@ -976,6 +978,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const { rating, ...supabasePayload } = newFeedback;
     supabase.from('feedback').insert([supabasePayload]).then();
   };
+  const resolveFeedback = (id: string, notes: string) => {
+    setFeedback(prev => prev.map(f => f.id === id ? { ...f, status: 'resolved', notes } : f));
+    syncToDB(`/api/feedback/${id}`, 'PUT', { status: 'resolved', notes }, `Feedback resolved`).then(runCloudBackup).catch(()=>{});
+    supabase.from('feedback').update({ status: 'resolved', notes }).eq('id', id).then();
+    addActivity('admin_action', `Resolved feedback message from ID: ${id}`);
+  };
 
   const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
     const id = `p${Date.now()}`;
@@ -1166,7 +1174,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,
       addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,
-      addFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
+      addFeedback, resolveFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
       updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,

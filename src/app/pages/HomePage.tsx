@@ -122,10 +122,51 @@ export function HomePage() {
   const { 
     siteConfig, announcements, tables, reservations, events, 
     closedDates, reservationTerms, rates, addReservation, cancelReservation, 
-    updateReservation, updateReservationStatus, addFeedback, applyPromoCode
+    updateReservation, updateReservationStatus, addFeedback, applyPromoCode,
+    sessionHistory, queue
   } = useAppContext() as any;
 
   const [activeUser, setActiveUser] = useState<{ name: string; email: string; } | null>(null);
+
+  // 🟢 NEW: Live Customer-Facing Wait Time Calculator
+  const [dynamicWaitTime, setDynamicWaitTime] = useState<string>('Calculating...');
+
+  useEffect(() => {
+    const activeTables = (tables || []).filter((t: any) => t.status === 'occupied' && t.session);
+    const freeTables = (tables || []).filter((t: any) => t.status === 'available').length;
+    const waitingCount = (queue || []).filter((q: any) => q.status === 'waiting').length;
+
+    if (freeTables > waitingCount) {
+      setDynamicWaitTime("0 mins (Available Now)");
+      return;
+    }
+
+    if (activeTables.length === 0) {
+      setDynamicWaitTime("0 mins (Available Now)");
+      return;
+    }
+
+    const now = new Date();
+    // Calculate how many minutes are left for every occupied table
+    const remainingTimes = activeTables.map((t: any) => {
+      if (t.session.isOpenTime || !t.session.durationMinutes) return 45; // Safe fallback for "Open Time" tables
+      const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
+      return Math.max(0, differenceInMinutes(end, now));
+    }).sort((a: any, b: any) => a - b);
+
+    // Grab the table finishing the soonest
+    const baseWait = remainingTimes[0] || 15;
+    
+    // Calculate friction for how many people are waiting ahead of the current website visitor
+    const unseatedQueue = Math.max(0, waitingCount - freeTables);
+    const totalWait = baseWait + (unseatedQueue * 15); // Adds 15m buffer per queue group
+
+    if (totalWait < 60) {
+      setDynamicWaitTime(`~${Math.round(totalWait)} mins`);
+    } else {
+      setDynamicWaitTime(`~${Math.floor(totalWait / 60)}h ${Math.round(totalWait % 60)}m`);
+    }
+  }, [tables, queue]);
 
   // Rate Limits
   const [rateLimits, setRateLimits] = useState<Record<string, number[]>>({});
@@ -1073,21 +1114,48 @@ export function HomePage() {
                     <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
                     <p className="text-neutral-400 text-sm leading-relaxed mb-6">{cms.aboutP3}</p>
                     
-                    {/* 🟢 NEW: AI Wait Estimation Feature Highlight */}
-                    <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 mb-6 shadow-inner relative overflow-hidden group">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
-                      <div className="relative z-10 flex items-start gap-4">
-                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-1">
-                          <Sparkles size={18} className="text-emerald-400 animate-pulse" />
+                    {/* 🟢 NEW: Live Queue Dynamic Wait Time Status & AI Metrics */}
+                    {(() => {
+                      // Calculate historical metrics securely
+                      const totalHistoricalSessions = sessionHistory?.length || 0;
+                      const avgDuration = totalHistoricalSessions > 0 
+                        ? Math.round(sessionHistory.reduce((acc: number, curr: any) => acc + (curr.durationMinutes || 0), 0) / totalHistoricalSessions) 
+                        : 0;
+
+                      return (
+                        <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 mb-6 shadow-inner relative overflow-hidden group">
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
+                          <div className="relative z-10 flex items-start gap-4">
+                            <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-1 shadow-inner">
+                              <Sparkles size={18} className="text-emerald-400 animate-pulse" />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="text-sm font-black text-emerald-400 mb-1">Smart Queue Neural Network</h4>
+                              <p className="text-xs text-emerald-100/70 leading-relaxed mb-3 pr-2">
+                                Our system tracks live table occupancy and analyzes historical data to give you real-time estimates before you walk in.
+                              </p>
+                              
+                              <div className="grid grid-cols-2 gap-2 mb-3">
+                                <div className="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3 shadow-lg">
+                                  <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Live Wait Estimate</span>
+                                  <span className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5"><Clock size={12}/> {dynamicWaitTime}</span>
+                                </div>
+                                <div className="bg-neutral-950/80 border border-neutral-800/60 rounded-xl p-3 shadow-lg">
+                                  <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Historical Avg Play</span>
+                                  <span className="text-sm font-black text-white tracking-wide">{avgDuration > 0 ? `${avgDuration} mins` : 'Gathering Data...'}</span>
+                                </div>
+                              </div>
+                              
+                              {totalHistoricalSessions > 0 && (
+                                <p className="text-[9px] text-emerald-500/50 font-mono uppercase tracking-widest text-right">
+                                  AI Trained on {totalHistoricalSessions} sessions
+                                </p>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="text-sm font-black text-emerald-400 mb-1">Smart Queue Neural Network</h4>
-                          <p className="text-xs text-emerald-100/70 leading-relaxed">
-                            No more guessing. Our system uses a localized <strong>Brain.js Neural Network</strong> that analyzes real-time table occupancy, historic play durations, and party sizes to predict live queue wait times with high accuracy.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
 
                     <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-3 shadow-inner">
                       <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-2">Get in Touch</p>
@@ -1322,11 +1390,7 @@ export function HomePage() {
                                   {(() => {
                                     const targetTable = tables.find((t: any) => t.id === selectedTableId);
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
-                                    let walkInEnd = null;
-                                    if (isActiveWalkIn) {
-                                      walkInEnd = addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes || 60);
-                                    }
-
+                                    
                                     const tableRes = reservations.filter((r: any) => 
                                       r.tableId === selectedTableId && 
                                       isSameDay(new Date(r.date), selectedDate) && 
@@ -1342,11 +1406,16 @@ export function HomePage() {
 
                                     return (
                                       <div className="space-y-2">
-                                        {isActiveWalkIn && walkInEnd && (
+                                        {isActiveWalkIn && targetTable.session && (
                                           <div className="flex items-center gap-3 bg-amber-950/20 p-2.5 rounded-lg border border-amber-900/30">
                                             <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                                             <span className="text-amber-200 text-xs font-semibold">Walk-in Playing</span>
-                                            <span className="text-amber-500/70 text-[10px] font-medium ml-auto">Until {format(walkInEnd, 'h:mm a')}</span>
+                                            <span className="text-amber-500/70 text-[10px] font-medium ml-auto">
+                                              {targetTable.session.isOpenTime 
+                                                ? 'Open Time (No set end)' 
+                                                : `Until ${format(addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes || 60), 'h:mm a')}`
+                                              }
+                                            </span>
                                           </div>
                                         )}
                                         {tableRes.map((r: any) => {

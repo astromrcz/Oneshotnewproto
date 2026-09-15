@@ -165,11 +165,19 @@ export function Queue() {
   };
 
   const handleCallCustomer = (customerId: string, customerName: string) => {
-    // 🟢 NEW: Zero Tables Validation Warning
+    // 🟢 DEFENSE 1: Zero Tables Validation Warning
     if (availableTables.length === 0) {
       if (!window.confirm(`⚠️ Wait! There are NO available tables right now.\n\nAre you sure you want to call ${customerName} to the counter? (e.g., A table is currently packing up)`)) {
         return;
       }
+    }
+
+    // 🟢 DEFENSE 2: Priority Bypass Lockout & Audit
+    if (checkedInReservations.length > 0) {
+      if (!window.confirm(`🚨 PRIORITY BYPASS DETECTED!\n\nYou have ${checkedInReservations.length} Checked-In Reservation(s) waiting for a table. Are you absolutely sure you want to skip them to seat a walk-in?\n\nClicking OK will log this override to the security audit trail.`)) {
+        return;
+      }
+      addActivity('admin_action', `⚠️ PRIORITY BYPASS: Staff bypassed waiting reservations to manually call walk-in customer: ${customerName}`);
     }
 
     callQueueItem(customerId);
@@ -577,27 +585,54 @@ export function Queue() {
                     <p className="text-sm font-semibold text-neutral-200">{table.name}</p>
                     <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-bold px-2 py-0.5 rounded uppercase border border-emerald-500/20">Free</span>
                   </div>
-                  {(called.length > 0 || waiting.length > 0) && (
-                    <button
-                      onClick={() => {
-                        const targetCustomer = called.length > 0 ? called[0] : waiting[0];
-                        sessionStorage.setItem('assignCustomer', JSON.stringify({
-                          kind: 'queue',
-                          id: targetCustomer.id,
-                          name: targetCustomer.customerName,
-                          partySize: targetCustomer.partySize,
-                          contact: targetCustomer.contactNumber,
-                          notes: targetCustomer.notes
-                        }));
-                        sessionStorage.setItem('assignTableId', table.id);
-                        navigate('/staff/tables');
-                      }}
-                      className="w-full text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-700/30 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-1.5"
-                    >
-                      <UserPlus size={12} />
-                      Assign {called.length > 0 ? called[0].customerName : waiting[0]?.customerName}
-                    </button>
-                  )}
+                  {(checkedInReservations.length > 0 || called.length > 0 || waiting.length > 0) && (() => {
+                    let targetCustomer = null;
+                    let isRes = false;
+
+                    // 1. Is there a priority reservation strictly assigned to THIS table?
+                    const specificRes = checkedInReservations.find((r: any) => r.tableId === table.id);
+                    // 2. Is there a priority reservation with NO specific table assignment?
+                    const flexibleRes = checkedInReservations.find((r: any) => !r.tableId);
+
+                    if (specificRes) {
+                      targetCustomer = specificRes;
+                      isRes = true;
+                    } else if (flexibleRes) {
+                      targetCustomer = flexibleRes;
+                      isRes = true;
+                    } else {
+                      // 🟢 DEFENSE: If priority customers are waiting for OTHER specific tables, bypass them for THIS table so we can seat walk-ins!
+                      targetCustomer = called.length > 0 ? called[0] : waiting.length > 0 ? waiting[0] : null;
+                    }
+
+                    if (!targetCustomer) return null;
+
+                    return (
+                      <button
+                        onClick={() => {
+                          sessionStorage.setItem('assignCustomer', JSON.stringify({
+                            kind: isRes ? 'reservation' : 'queue',
+                            id: targetCustomer.id,
+                            name: targetCustomer.customerName,
+                            partySize: targetCustomer.partySize,
+                            contact: targetCustomer.contactNumber,
+                            notes: targetCustomer.notes,
+                            ...(isRes ? { durationHours: targetCustomer.durationHours, timeSlot: targetCustomer.timeSlot } : {})
+                          }));
+                          sessionStorage.setItem('assignTableId', table.id);
+                          navigate('/staff/tables');
+                        }}
+                        className={`w-full text-xs py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-1.5 border ${
+                          isRes 
+                            ? 'bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border-sky-700/30'
+                            : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border-emerald-700/30'
+                        }`}
+                      >
+                        <UserPlus size={12} />
+                        Assign {targetCustomer.customerName} {isRes && specificRes ? '(Reserved)' : ''}
+                      </button>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

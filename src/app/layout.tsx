@@ -1,18 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   CheckCircle, Clock, Calendar, UserPlus,
   Tag,
   Menu, X, Bell, ChevronRight,
-  LogOut, Settings,
+  LogOut, Settings, Search,
   Monitor, ShieldCheck, Lock, ShieldAlert, Package, History,
   AlertTriangle, Sparkles, MessageSquare
 } from 'lucide-react';
-import { addMinutes, differenceInSeconds } from 'date-fns';
+import { addMinutes, differenceInSeconds, format } from 'date-fns';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import { FirstTimeLoginModal } from './components/FirstTimeLoginModal';
+import { AnimatePresence, motion } from 'motion/react';
 
 const navItems = [
   { to: '/staff',                     icon: CheckCircle,   label: 'Overview',            exact: true },
@@ -23,7 +24,7 @@ const navItems = [
   { to: '/staff/history',             icon: History,       label: 'Session History' }, 
   { to: '/staff/lost-found',          icon: Package,       label: 'Lost & Found' },
   { to: '/staff/watchlist',           icon: ShieldAlert,   label: 'Security Watchlist' },
-  { to: '/staff/feedback',            icon: MessageSquare, label: 'Feedback' }, // 🟢 NEW: Added Feedback Link
+  { to: '/staff/feedback',            icon: MessageSquare, label: 'Feedback' },
   { to: '/staff/settings',            icon: Settings,      label: 'Settings' },
 ];
 
@@ -36,15 +37,14 @@ const pageTitles: Record<string, string> = {
   '/staff/watchlist': 'Security Watchlist',
   '/staff/promo-codes': 'Promo Codes',
   '/staff/history': 'Session History',
-  '/staff/feedback': 'Customer Feedback', // 🟢 NEW: Page Title
+  '/staff/feedback': 'Customer Feedback',
   '/staff/settings': 'Settings',
 };
 
-// ── SIDEBAR SMART AUTO-SWITCHING LIVE COUNTDOWN TIMER (#1 + #5) ──
+// ── SIDEBAR SMART AUTO-SWITCHING LIVE COUNTDOWN TIMER ──
 function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: (path: string) => void }) {
   const [now, setNow] = useState(new Date());
 
-  // 1-second ticker for live countdown
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
@@ -104,7 +104,6 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
     return { table: t, type: 'active' as const, secs: remainingSecs };
   });
 
-  // Urgency sort: 1. Overtime -> 2. Warning (<15m) -> 3. Active -> 4. Open Time
   tableStatuses.sort((a, b) => {
     const score = (type: string) => {
       if (type === 'overtime') return 1;
@@ -162,12 +161,38 @@ export function Layout() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   
+  // 🟢 Global Search & Recent Searches State
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('oneshot_recent_searches');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
   const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
-  const { queue, tables, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
+  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
   const [showSetup, setShowSetup] = useState(staffProfile?.isFirstLogin === 1);
+
+  // Sync recent searches to local storage whenever they change
+  useEffect(() => {
+    localStorage.setItem('oneshot_recent_searches', JSON.stringify(recentSearches));
+  }, [recentSearches]);
+
+  const handleAddRecentSearch = (term: string) => {
+    if (!term.trim()) return;
+    setRecentSearches(prev => {
+      const cleanTerm = term.trim();
+      return [cleanTerm, ...prev.filter(t => t.toLowerCase() !== cleanTerm.toLowerCase())].slice(0, 4); // Limit to 4 recent items
+    });
+  };
 
   const handleLockTerminal = () => {
     sessionStorage.setItem('oneshot_is_locked', 'true');
@@ -209,12 +234,55 @@ export function Layout() {
     };
   }, [staffLoggedIn, isLocked]);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsSearchFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const searchResults = useMemo(() => {
+    if (!globalSearch.trim()) return [];
+    const query = globalSearch.toLowerCase();
+    const results: { type: string, label: string, link: string }[] = [];
+    
+    (tables || []).forEach((t: any) => {
+      if (t.name.toLowerCase().includes(query) || t.session?.customerName?.toLowerCase().includes(query)) {
+        results.push({ type: 'Table', label: `${t.name} ${t.session ? `(${t.session.customerName})` : ''}`, link: '/staff/tables' });
+      }
+    });
+    
+    (reservations || []).forEach((r: any) => {
+      if (r.customerName.toLowerCase().includes(query) || r.id.toLowerCase().includes(query)) {
+         results.push({ type: 'Reservation', label: `${r.customerName} - ${r.id}`, link: '/staff/reservations' });
+      }
+    });
+    
+    (watchlist || []).forEach((w: any) => {
+      if (w.name.toLowerCase().includes(query) && !w.isArchived) {
+         results.push({ type: 'Watchlist', label: w.name, link: '/staff/watchlist' });
+      }
+    });
+    
+    (promoCodes || []).forEach((p: any) => {
+       if (p.code.toLowerCase().includes(query)) {
+          results.push({ type: 'Promo Code', label: p.code, link: '/staff/promo-codes' });
+       }
+    });
+    
+    // 🟢 Restrict autocomplete suggestions to less than 5 items (Max 4 items)
+    return results.slice(0, 4);
+  }, [globalSearch, tables, reservations, promoCodes, watchlist]);
+
   if (!staffLoggedIn) return null;
 
   const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
   const overtimeCount = tables.filter((t: any) => {
     if (t.status !== 'occupied' || !t.session) return false;
-    const end = new Date(t.session.startTime).getTime() + t.session.durationMinutes * 60000;
+    const end = new Date(t.session.startTime).getTime() + (t.session.durationMinutes || 0) * 60000;
     return Date.now() > end;
   }).length;
 
@@ -263,7 +331,6 @@ export function Layout() {
             </button>
           </div>
 
-          {/* 🟢 REPLACED: Static Occupied / In Queue boxes replaced by Smart Auto-Switching Live Timer (#1 + #5) */}
           <SidebarSmartTimer tables={tables} onNavigate={navigate} />
 
           {/* Navigation */}
@@ -325,14 +392,101 @@ export function Layout() {
               <button className="lg:hidden text-neutral-400 hover:text-neutral-200 p-1" onClick={() => setSidebarOpen(true)}>
                 <Menu size={20} />
               </button>
-              <h1 className="text-base font-semibold text-neutral-200">{pageTitle}</h1>
+              <h1 className="text-base font-semibold text-neutral-200 hidden sm:block">{pageTitle}</h1>
             </div>
             
             <div className="flex items-center gap-3">
               
-              <button onClick={openLiveMonitor} className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 px-3 py-2 rounded-lg transition-all font-semibold">
+              <button onClick={openLiveMonitor} className="hidden lg:flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/25 px-3 py-2 rounded-lg transition-all font-semibold">
                 <Monitor size={14} /> Live Monitor
               </button>
+
+              {/* 🟢 GLOBAL SEARCH BAR WITH RECENT SEARCHES */}
+              <div className="relative" ref={searchContainerRef}>
+                <div className="flex items-center bg-neutral-900 border border-neutral-700/50 rounded-lg px-3 py-2 w-40 sm:w-64 focus-within:border-emerald-500/50 transition-colors">
+                  <Search size={14} className="text-neutral-500 mr-2" />
+                  <input 
+                    ref={searchInputRef}
+                    type="text" 
+                    placeholder="Search anything..." 
+                    value={globalSearch}
+                    onChange={e => setGlobalSearch(e.target.value)}
+                    onFocus={() => setIsSearchFocused(true)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && globalSearch.trim().length > 0) {
+                        handleAddRecentSearch(globalSearch);
+                      }
+                    }}
+                    className="bg-transparent border-none outline-none text-xs text-neutral-200 w-full placeholder-neutral-600"
+                  />
+                  {globalSearch && (
+                    <button onClick={() => { setGlobalSearch(''); searchInputRef.current?.focus(); }} className="text-neutral-500 hover:text-neutral-300 ml-1">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                
+                <AnimatePresence>
+                  {isSearchFocused && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 5 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0, y: 5 }} 
+                      className="absolute top-full mt-2 right-0 sm:left-0 w-64 sm:w-80 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col py-1"
+                    >
+                       {globalSearch.trim().length > 0 ? (
+                          searchResults.length > 0 ? (
+                            <div className="max-h-80 overflow-y-auto hide-scrollbar">
+                              <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest px-4 py-2 border-b border-neutral-800/50">Suggestions</p>
+                              {searchResults.map((res, i) => (
+                                <button 
+                                  key={i} 
+                                  onClick={() => { 
+                                    handleAddRecentSearch(globalSearch);
+                                    navigate(res.link); 
+                                    setGlobalSearch(''); 
+                                    setIsSearchFocused(false); 
+                                  }} 
+                                  className="w-full text-left px-4 py-3 hover:bg-neutral-800 border-b border-neutral-800/50 last:border-0 transition-colors flex flex-col gap-1"
+                                >
+                                  <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-500">{res.type}</span>
+                                  <span className="text-sm font-semibold text-neutral-200 truncate">{res.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-4 text-center text-xs text-neutral-500">No results found.</div>
+                          )
+                       ) : (
+                          // Recent Searches View
+                          recentSearches.length > 0 ? (
+                            <div className="py-1">
+                              <div className="flex justify-between items-center px-4 pb-2 pt-1 border-b border-neutral-800/50">
+                                <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Recent Searches</p>
+                                <button onClick={(e) => { e.stopPropagation(); setRecentSearches([]); }} className="text-[10px] text-neutral-500 hover:text-rose-400 font-semibold transition-colors">Clear</button>
+                              </div>
+                              {recentSearches.map((term, i) => (
+                                <button 
+                                  key={i}
+                                  onClick={() => {
+                                    setGlobalSearch(term);
+                                    searchInputRef.current?.focus();
+                                  }}
+                                  className="w-full text-left px-4 py-2.5 hover:bg-neutral-800 transition-colors flex items-center gap-3"
+                                >
+                                  <Clock size={14} className="text-neutral-500" />
+                                  <span className="text-xs font-semibold text-neutral-300 truncate">{term}</span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-4 text-center text-xs text-neutral-500">Type to search across the system...</div>
+                          )
+                       )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
 
               {/* Notifications */}
               <div className="relative">
@@ -371,7 +525,7 @@ export function Layout() {
                       staffProfile?.fullName?.charAt(0) || 'S'
                     )}
                   </div>
-                  <span className="text-xs text-neutral-300 font-medium truncate">
+                  <span className="text-xs text-neutral-300 font-medium truncate hidden sm:block">
                     {staffProfile?.fullName || 'Staff User'}
                   </span>
                 </button>

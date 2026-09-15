@@ -1186,7 +1186,7 @@ export function AdminEvents() {
                     </div>
                   ) : (
                     <div className="w-full h-32 bg-neutral-900 rounded-xl border border-neutral-800 flex items-center justify-center text-neutral-500 text-xs italic">
-                      No image provided. Ref number might have been used instead.
+                      No image found.
                     </div>
                   )}
                   {showDenyInput && (

@@ -879,24 +879,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     
     const supabasePayload = {
       id: newRes.id,
-      customer_name: newRes.customerName,
-      contact_number: newRes.contactNumber,
+      customerName: newRes.customerName,
+      contactNumber: newRes.contactNumber,
       email: newRes.email || null,
       date: newRes.date.toISOString(),
-      time_slot: newRes.timeSlot,
-      duration_hours: newRes.durationHours,
-      party_size: newRes.partySize,
-      table_id: newRes.tableId || null,
+      timeSlot: newRes.timeSlot,
+      durationHours: newRes.durationHours,
+      partySize: newRes.partySize,
+      tableId: newRes.tableId || null,
       status: newRes.status,
-      total_amount: newRes.totalAmount,
-      down_payment_amount: newRes.downPaymentAmount,
-      down_payment_paid: newRes.downPaymentPaid ? 1 : 0,
-      balance_paid: newRes.balancePaid ? 1 : 0,
-      payment_ref: newRes.paymentRef || null,
-      receipt_img_url: newRes.receiptImg || null,
-      promo_code: newRes.promoCode || null,
-      discount_amount: newRes.discountAmount || null,
-      created_at: newRes.createdAt.toISOString()
+      totalAmount: newRes.totalAmount,
+      downPaymentAmount: newRes.downPaymentAmount,
+      downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
+      balancePaid: newRes.balancePaid ? 1 : 0,
+      paymentRef: newRes.paymentRef || null,
+      receiptImg: newRes.receiptImg || null,
+      promoCode: newRes.promoCode || null,
+      discountAmount: newRes.discountAmount || null,
+      createdAt: newRes.createdAt.toISOString()
     };
     
     supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
@@ -916,21 +916,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ status: 'cancelled', cancellation_reason: reason }).eq('id', id).then();
+    supabase.from('reservations').update({ status: 'cancelled', cancellationReason: reason }).eq('id', id).then();
     addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
   };
 
   const updateDownPayment = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ down_payment_paid: paid ? 1 : 0 }).eq('id', id).then();
+    supabase.from('reservations').update({ downPaymentPaid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
   };
 
   const updateBalance = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ balance_paid: paid ? 1 : 0 }).eq('id', id).then();
+    supabase.from('reservations').update({ balancePaid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
   };
 
@@ -938,21 +938,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } as Reservation : r));
     const payload = { refundStatus, refundMethod: method, refundNotes: notes };
     syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ refund_status: refundStatus, refund_method: method, refund_notes: notes }).eq('id', id).then();
+    supabase.from('reservations').update({ refundStatus: refundStatus, refundMethod: method, refundNotes: notes }).eq('id', id).then();
     addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
   };
 
   const acknowledgeRefund = (id: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { refundStatus: 'acknowledged' }, `Refund acknowledged`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ refund_status: 'acknowledged' }).eq('id', id).then();
+    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then();
   };
 
   const updateReservation = (id: string, u: Partial<Reservation>) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).then(runCloudBackup).catch(()=>{});
     
-    // 🟢 Fixed: Reverted to camelCase to match the actual Supabase schema
     const dbUpdates: any = {};
     if (u.date) dbUpdates.date = new Date(u.date).toISOString();
     if (u.timeSlot) dbUpdates.timeSlot = u.timeSlot;
@@ -960,9 +959,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (u.partySize) dbUpdates.partySize = u.partySize;
     if (u.status) dbUpdates.status = u.status;
     if (u.tableId !== undefined) dbUpdates.tableId = u.tableId; 
+    if (u.cancellationReason !== undefined) dbUpdates.cancellationReason = u.cancellationReason;
+    if (u.downPaymentPaid !== undefined) dbUpdates.downPaymentPaid = u.downPaymentPaid ? 1 : 0;
+    if (u.balancePaid !== undefined) dbUpdates.balancePaid = u.balancePaid ? 1 : 0;
     
     supabase.from('reservations').update(dbUpdates).eq('id', id).then(({error}) => {
-      if (error) console.error("Supabase Reschedule Error:", error);
+      if (error) console.error("Supabase Reschedule/Void Error:", error);
     });
     addActivity('reservation_updated', `Reservation ${id} details were updated`);
   };

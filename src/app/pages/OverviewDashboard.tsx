@@ -140,7 +140,7 @@ export function OverviewDashboard() {
   const occupiedWithSession = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
 
   const sortedEndTimes = occupiedWithSession
-    .map((t: any) => addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes))
+    .map((t: any) => addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0))
     .sort((a: any, b: any) => a.getTime() - b.getTime());
 
   const estimateWaitForPosition = (position: number): string => {
@@ -156,14 +156,17 @@ export function OverviewDashboard() {
 
   const overallWait = waitingQueue.length > 0 ? estimateWaitForPosition(waitingQueue.length) : null;
 
+  // 🟢 ENHANCED: Open Time is officially classified and visually tracked as Overtime
   const overtimeTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
+    if (t.session.isOpenTime || t.session.durationMinutes === null) return true;
     const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     return new Date() > end;
   });
 
  const alertTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
+    if (t.session.isOpenTime || t.session.durationMinutes === null) return false; // Handled strictly by Overtime
     const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     const secsLeft = differenceInSeconds(end, new Date());
     return secsLeft > 0 && secsLeft <= 900;
@@ -312,17 +315,20 @@ export function OverviewDashboard() {
       {/* Alerts */}
       {(overtimeTables.length > 0 || alertTables.length > 0) && (
         <div className="space-y-2">
-          {overtimeTables.map((t: any) => (
-            <div key={t.id} className="flex items-center gap-3 bg-rose-950/30 border border-rose-800/40 rounded-xl px-4 py-3">
-              <AlertTriangle size={16} className="text-rose-400 flex-none" />
-              <span className="text-sm text-rose-300">
-                <strong>{t.name}</strong> — <span className="font-medium">{t.session?.customerName}</span>'s session has exceeded the paid time. Overtime charges may apply.
-              </span>
-              <button onClick={() => navigate('/staff/tables')} className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1">
-                View <ChevronRight size={12} />
-              </button>
-            </div>
-          ))}
+          {overtimeTables.map((t: any) => {
+            const isOpen = t.session?.isOpenTime || t.session?.durationMinutes === null;
+            return (
+              <div key={t.id} className="flex items-center gap-3 bg-rose-950/30 border border-rose-800/40 rounded-xl px-4 py-3">
+                <AlertTriangle size={16} className="text-rose-400 flex-none" />
+                <span className="text-sm text-rose-300">
+                  <strong>{t.name}</strong> — <span className="font-medium">{t.session?.customerName}</span>'s session {isOpen ? 'is on Open Time. Charges are actively accumulating.' : 'has exceeded the paid time. Overtime charges may apply.'}
+                </span>
+                <button onClick={() => navigate('/staff/tables')} className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1">
+                  View <ChevronRight size={12} />
+                </button>
+              </div>
+            );
+          })}
           {alertTables.map((t: any) => (
             <div key={t.id} className="flex items-center gap-3 bg-amber-950/30 border border-amber-800/40 rounded-xl px-4 py-3">
               <Clock size={16} className="text-amber-400 flex-none" />
@@ -356,11 +362,8 @@ export function OverviewDashboard() {
         <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
           {tables.filter((t: any) => t.isActive).map((t: any) => {
             const isOpenTime = t.status === 'occupied' && t.session && (t.session.isOpenTime || t.session.durationMinutes === null);
-            const isOvertime = !isOpenTime && t.status === 'occupied' && t.session && (() => {
-              const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
-              return new Date() > end;
-            })();
-            const isAlert = !isOpenTime && !isOvertime && t.status === 'occupied' && t.session && (() => {
+            const isOvertime = t.status === 'occupied' && t.session && (isOpenTime || new Date() > addMinutes(new Date(t.session.startTime), t.session.durationMinutes!));
+            const isAlert = !isOvertime && t.status === 'occupied' && t.session && (() => {
               const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
               const secs = differenceInSeconds(end, new Date());
               return secs > 0 && secs <= 900;
@@ -374,7 +377,6 @@ export function OverviewDashboard() {
                 className={`aspect-square rounded-lg flex flex-col items-center justify-center text-center px-1 leading-tight cursor-pointer border transition-all text-[10px] font-bold
                   ${t.status === 'maintenance' ? 'bg-neutral-800/80 border-neutral-700 text-neutral-400 opacity-70' :
                     isOvertime ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' :
-                    isOpenTime ? 'bg-blue-950/40 border-blue-800/40 text-blue-400' :
                     isAlert ? 'bg-rose-950/40 border-rose-500/50 text-rose-400' :
                     t.status === 'occupied' ? 'bg-amber-950/40 border-amber-800/40 text-amber-400' :
                     t.status === 'reserved' ? 'bg-cyan-950/40 border-cyan-800/40 text-cyan-400' :
@@ -391,8 +393,7 @@ export function OverviewDashboard() {
           {[
             { color: 'bg-emerald-500', label: 'Open' },
             { color: 'bg-amber-500', label: 'In Use' },
-            { color: 'bg-blue-500', label: 'Open Time' },
-            { color: 'bg-rose-500', label: 'Overtime' },
+            { color: 'bg-rose-500', label: 'Overtime / Open Time' },
             { color: 'bg-cyan-500', label: 'Reserved' },
             { color: 'bg-neutral-500', label: 'Maintenance' },
           ].map(item => (

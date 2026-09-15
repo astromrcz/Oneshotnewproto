@@ -141,7 +141,7 @@ export function Reservations() {
     updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, 
     rates, updateRefundStatus, theme, reservationTerms,
     staffUsers, hashPassword, addActivity, sessionHistory, 
-    lastSynced, forceFullSync, addWatchlistItem
+    lastSynced, forceFullSync, addWatchlistItem, staffProfile
   } = useAppContext() as any;
   const navigate = useNavigate();
   
@@ -239,7 +239,7 @@ export function Reservations() {
   const [form, setForm] = useState({
     customerName: '', contactNumber: '', email: '',
     timeSlot: '', durationHours: 2, partySize: 2, paymentRef: '',
-    paymentMethod: 'cash' as 'gcash' | 'cash'
+    paymentMethod: 'cash' as 'gcash' | 'cash', amountTendered: ''
   });
   
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -278,7 +278,7 @@ export function Reservations() {
     return !!hasHistoryRecord;
   };
 
-  const handleConfirmVoid = async (e: React.FormEvent) => {
+ const handleConfirmVoid = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!voidModal) return;
     setVoidError('');
@@ -291,43 +291,48 @@ export function Reservations() {
     setIsVoiding(true);
 
     try {
-      const hashed = await hashPassword(voidPassword);
-      const matchedAdmin = staffUsers.find(
-        (u: any) => u.isActive && u.isAdmin && (u.password === hashed || voidPassword === 'oneshotstaff')
-      );
-
-      if (!matchedAdmin) {
-        setVoidError('Invalid Admin Password. Authorization denied.');
-        setIsVoiding(false);
-        return;
-      }
+      // Now staffProfile is properly extracted from context
+      const staffName = staffProfile?.fullName || 'Staff Member';
+      const formattedReason = `Voided: ${voidReason.trim()}`;
 
       if (voidModal.type === 'downPayment') {
-        updateDownPayment(voidModal.id, false);
+        updateReservation(voidModal.id, { 
+          downPaymentPaid: false, 
+          status: 'pending', 
+          cancellationReason: formattedReason 
+        });
         addActivity(
           'admin_action',
-          `Voided Down Payment for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. Authorized by Admin: ${matchedAdmin.fullName}`
+          `Voided Down Payment for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. By: ${staffName}`
         );
       } else if (voidModal.type === 'balance') {
-        updateBalance(voidModal.id, false);
+        updateReservation(voidModal.id, { 
+          balancePaid: false, 
+          cancellationReason: formattedReason 
+        });
         addActivity(
           'admin_action',
-          `Voided Balance Settlement for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. Authorized by Admin: ${matchedAdmin.fullName}`
+          `Voided Balance Settlement for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. By: ${staffName}`
         );
       } else if (voidModal.type === 'verified') {
-        updateReservationStatus(voidModal.id, 'pending');
+        updateReservation(voidModal.id, { 
+          status: 'pending', 
+          downPaymentPaid: false, 
+          balancePaid: false, 
+          cancellationReason: formattedReason 
+        });
         addActivity(
           'admin_action',
-          `Voided Verified (Confirmed) status for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. Authorized by Admin: ${matchedAdmin.fullName}`
+          `Voided Verified (Confirmed) status for Res #${voidModal.id.toUpperCase()} (${voidModal.customerName}). Reason: ${voidReason.trim()}. By: ${staffName}`
         );
       }
 
       setVoidModal(null);
-      setVoidPassword('');
       setVoidReason('');
       flash("Action voided successfully.", "success");
     } catch (err) {
-      setVoidError('An error occurred during verification.');
+      console.error("Void Error: ", err);
+      setVoidError('An error occurred during verification. Check console.');
     } finally {
       setIsVoiding(false);
     }
@@ -492,7 +497,7 @@ export function Reservations() {
   const handleExportCSV = () => {
     const headers = ['ID', 'Customer Name', 'Contact', 'Email', 'Date', 'Time', 'Duration (hrs)', 'Party Size', 'Table', 'Status', 'Total Amount', 'Down Payment', 'Balance Paid'];
     const rows = reservations.map((r: any) => [
-      r.id, r.customerName, r.contactNumber, r.email || '', format(new Date(r.date), 'yyyy-MM-dd'),
+      r.id, r.customerName, r.contactNumber, r.email || 'No email provided', format(new Date(r.date), 'yyyy-MM-dd'),
       r.timeSlot, r.durationHours, r.partySize, r.tableId || '', r.status,
       Number(r.totalAmount || 0).toFixed(2), Number(r.downPaymentAmount || 0).toFixed(2), r.balancePaid ? 'Yes' : 'No'
     ]);
@@ -519,7 +524,12 @@ export function Reservations() {
       }
     }
 
-    if (form.paymentMethod === 'gcash' && !receiptFile && !form.paymentRef.trim()) {
+    const tnd = parseFloat(form.amountTendered) || 0;
+    if (form.paymentMethod === 'cash') {
+       if (tnd < downPayment) {
+          return flash(`Amount tendered must be at least ₱${downPayment.toFixed(2)} (Minimum 50% Down Payment).`, "error");
+       }
+    } else if (form.paymentMethod === 'gcash' && !receiptFile && !form.paymentRef.trim()) {
       return flash("Please provide either a GCash Reference Number OR a Receipt Image.", "error");
     }
 
@@ -551,11 +561,11 @@ export function Reservations() {
         customerName: form.customerName.trim(), contactNumber: form.contactNumber, email: form.email,
         date: dateObj, timeSlot: form.timeSlot, durationHours: form.durationHours, partySize: form.partySize,
         tableId: selectedTableId,
-        status: form.paymentMethod === 'cash' ? 'confirmed' : 'pending',
+        status: 'confirmed', // Staff manual bookings are automatically confirmed
         totalAmount, downPaymentAmount: downPayment, 
-        downPaymentPaid: form.paymentMethod === 'cash' ? true : !!finalReceiptUrl || !!form.paymentRef.trim(),
-        balancePaid: false, 
-        paymentRef: form.paymentMethod === 'cash' ? 'CASH' : (form.paymentRef || undefined), 
+        downPaymentPaid: true, // Manual bookings immediately log DP as paid
+        balancePaid: form.paymentMethod === 'cash' ? (tnd >= totalAmount) : false, 
+        paymentRef: form.paymentMethod === 'cash' ? `CASH: ₱${tnd.toFixed(2)}` : (form.paymentRef || undefined), 
         receiptImg: finalReceiptUrl || undefined
       };
 
@@ -585,7 +595,7 @@ export function Reservations() {
 
       flash("Reservation successfully created!", "success");
       setShowForm(false);
-      setForm({ customerName: '', contactNumber: '', email: '', timeSlot: '', durationHours: 2, partySize: 2, paymentRef: '', paymentMethod: 'cash' });
+      setForm({ customerName: '', contactNumber: '', email: '', timeSlot: '', durationHours: 2, partySize: 2, paymentRef: '', paymentMethod: 'cash', amountTendered: '' });
       setSelectedDate(null);
       setSelectedTableId(null);
       setIsCalendarExpanded(true);
@@ -979,7 +989,20 @@ export function Reservations() {
                                       </>
                                     )}
                                     {r.status === 'checked-in' && (
-                                      <button disabled={!hasCompletedSession(r)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(r.id, 'completed'); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
+                                      <button onClick={(e) => { 
+                                          e.stopPropagation(); 
+                                          if (!hasCompletedSession(r)) {
+                                            flash("Session must be marked 'Completed' in the Table Monitor first.", "error");
+                                          } else {
+                                            updateReservationStatus(r.id, 'completed'); 
+                                            setOpenActionRowId(null); 
+                                            setSelectedId(null);
+                                          }
+                                        }} 
+                                        className="px-5 py-3 text-left text-sm font-bold text-neutral-300 hover:bg-neutral-800 transition-colors"
+                                      >
+                                        Mark Complete
+                                      </button>
                                     )}
                                     {r.status === 'confirmed' && (
                                       <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
@@ -1107,7 +1130,7 @@ export function Reservations() {
               <div className="grid grid-cols-2 gap-5 text-base">
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Date & Time</p><p className="text-lg text-neutral-200 font-medium">{format(new Date(selected.date), 'MMM d, yyyy')}</p><p className="text-emerald-400 text-sm font-bold">{formatTimeOnly(selected.timeSlot)}</p></div>
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Duration</p><p className="text-lg text-neutral-200 font-medium">{selected.durationHours} hour{selected.durationHours > 1 ? 's' : ''}</p><p className="text-neutral-400 text-sm font-medium">{selected.partySize} pax</p></div>
-                <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Contact</p><p className="text-lg text-neutral-200 font-medium">{selected.contactNumber}</p>{selected.email && <p className="text-neutral-400 text-sm">{selected.email}</p>}</div>
+                <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Contact</p><p className="text-lg text-neutral-200 font-medium">{selected.contactNumber}</p>{selected.email ? <p className="text-neutral-400 text-sm">{selected.email}</p> : <p className="text-neutral-600 text-sm italic">No email provided</p>}</div>
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Table</p><p className="text-lg text-neutral-200 font-medium">{selected.tableId ? tables.find((t: any) => t.id === selected.tableId)?.name || selected.tableId : 'Not assigned'}</p></div>
               </div>
 
@@ -1225,7 +1248,20 @@ export function Reservations() {
                           </>
                         )}
                         {selected.status === 'checked-in' && (
-                          <button disabled={!hasCompletedSession(selected)} onClick={(e) => { e.stopPropagation(); updateReservationStatus(selected.id, 'completed'); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 transition-colors">Mark Complete</button>
+                          <button onClick={(e) => { 
+                              e.stopPropagation(); 
+                              if (!hasCompletedSession(selected)) {
+                                flash("Session must be marked 'Completed' in the Table Monitor first.", "error");
+                              } else {
+                                updateReservationStatus(selected.id, 'completed'); 
+                                setOpenActionRowId(null); 
+                                setSelectedId(null);
+                              }
+                            }} 
+                            className="px-5 py-3 text-left text-sm font-bold text-neutral-300 hover:bg-neutral-800 transition-colors"
+                          >
+                            Mark Complete
+                          </button>
                         )}
                         {selected.status === 'confirmed' && (
                           <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
@@ -1263,7 +1299,7 @@ export function Reservations() {
                     <Phone size={10}/> {actionModal.reservation.contactNumber}
                   </span>
                 </p>
-                {actionModal.reservation.email && <p className="mt-1"><strong>Email:</strong> {actionModal.reservation.email}</p>}
+                <p className="mt-1"><strong>Email:</strong> {actionModal.reservation.email || <span className="italic text-neutral-500">No email provided</span>}</p>
               </div>
 
               {actionModal.type === 'receipt' && (
@@ -1451,7 +1487,7 @@ export function Reservations() {
                   )}
                 </AnimatePresence>
 
-                <div className="overflow-y-auto p-4 space-y-3 hide-scrollbar flex-1 bg-neutral-900">
+                <div className="overflow-y-auto p-5 space-y-4 hide-scrollbar flex-1 bg-neutral-900">
                   {!selectedDate ? (
                     <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
                       <Calendar size={32} className="text-neutral-600 mb-3" />
@@ -1459,62 +1495,101 @@ export function Reservations() {
                     </div>
                   ) : (
                     <>
-                      <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-3">Live Table Status</p>
-                      {tables.filter((t: any) => t.isActive).map((table: any) => {
-                        const isSel = selectedTableId === table.id;
-                        const isOcc = table.status === 'occupied';
-                        const isMaint = table.status === 'maintenance';
-                        
-                        let inUseUntil = null;
-                        if (isOcc && table.session && isToday(selectedDate)) {
-                          const end = addMinutes(new Date(table.session.startTime), table.session.durationMinutes || 60);
-                          inUseUntil = format(end, 'h:mm a');
-                        }
+                      <div className="flex items-center justify-between mb-3 text-xs text-neutral-400">
+                        <span className="font-semibold text-[11px] uppercase tracking-wider">Venue Layout Status</span>
+                        <div className="flex items-center gap-3 text-[10px]">
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Free</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Active</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> Maint.</span>
+                        </div>
+                      </div>
 
-                        const tableRes = reservations.filter((r: any) => 
-                          r.tableId === table.id && isSameDay(new Date(r.date), selectedDate) && r.status !== 'cancelled' && r.status !== 'completed'
-                        ).sort((a: any, b: any) => {
-                          const timeA = a.timeSlot.split(':').map(Number);
-                          const timeB = b.timeSlot.split(':').map(Number);
-                          return (timeA[0]*60 + timeA[1]) - (timeB[0]*60 + timeB[1]);
-                        });
-
-                        return (
-                          <div key={table.id} className={`relative rounded-xl border transition-all ${isMaint ? 'bg-neutral-900/40 border-neutral-800/60 opacity-60' : isSel ? 'bg-emerald-950/20 border-emerald-500 shadow-lg shadow-emerald-900/20' : 'bg-neutral-950 border-neutral-800 hover:border-neutral-600'}`}>
-                            <div className="p-4">
-                              <div className="flex justify-between items-start mb-3">
-                                <div>
-                                  <h4 className={`text-sm font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</h4>
-                                  {isMaint ? <p className="text-[10px] text-rose-400 font-semibold mt-1">Maintenance</p> : isOcc && isToday(selectedDate) ? <p className="text-[10px] text-amber-400 font-semibold mt-1">In Use until {inUseUntil}</p> : <p className="text-[10px] text-emerald-400 font-semibold mt-1">Available</p>}
-                                </div>
-                                <button disabled={isMaint} onClick={() => setSelectedTableId(table.id)} className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors border ${isSel ? 'bg-emerald-500 text-white border-emerald-400 shadow-md' : isMaint ? 'bg-neutral-800 text-neutral-600 border-neutral-700 cursor-not-allowed' : 'bg-neutral-800 text-neutral-300 hover:bg-emerald-600/20 hover:text-emerald-400 hover:border-emerald-500/50 border-neutral-700'}`}>
-                                  {isSel ? 'Selected' : 'Select'}
-                                </button>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {tables.filter((t: any) => t.isActive).map((table: any) => {
+                          const isSel = selectedTableId === table.id;
+                          const isOcc = table.status === 'occupied';
+                          const isMaint = table.status === 'maintenance';
+                          
+                          return (
+                            <button
+                              key={table.id}
+                              type="button"
+                              disabled={isMaint}
+                              onClick={() => setSelectedTableId(table.id)}
+                              className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                                isMaint 
+                                  ? 'bg-neutral-900/30 border-neutral-800/40 opacity-40 cursor-not-allowed'
+                                  : isSel 
+                                  ? 'bg-emerald-950/40 border-emerald-500 shadow-lg shadow-emerald-900/30 scale-[1.02]' 
+                                  : 'bg-neutral-900/80 border-neutral-800 hover:border-neutral-600'
+                              }`}
+                            >
+                              <div className="flex justify-between items-center mb-1">
+                                <span className={`text-xs font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
+                                <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
                               </div>
-                              <div className="bg-neutral-900/80 rounded-lg p-2.5 border border-neutral-800/50">
-                                <p className="text-[9px] text-neutral-500 uppercase tracking-widest font-semibold mb-1.5">Today's Reservations</p>
-                                {tableRes.length === 0 ? <p className="text-xs text-neutral-600 italic">No bookings.</p> : (
-                                  <div className="space-y-1.5">
-                                    {tableRes.map((r: any) => {
-                                      const rStart = new Date(r.date);
-                                      const [rH, rM] = r.timeSlot.split(':').map(Number);
-                                      rStart.setHours(rH, rM, 0, 0);
-                                      const rEnd = addMinutes(rStart, r.durationHours * 60);
-                                      return (
-                                        <div key={r.id} className="flex items-center gap-2 text-xs">
-                                          <div className="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0" />
-                                          <span className="text-neutral-300 font-medium">{format(rStart, 'h:mm a')} - {format(rEnd, 'h:mm a')}</span>
-                                          <span className="text-neutral-500 truncate text-[10px]">({r.durationHours}h)</span>
-                                        </div>
-                                      );
-                                    })}
+                              <p className="text-[10px] text-neutral-400 truncate">
+                                {isMaint ? 'Unavailable' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Selected Table Schedule Box */}
+                      {selectedTableId && (
+                        <div className="mt-5 bg-neutral-950 rounded-xl p-4 border border-neutral-800 animate-in fade-in zoom-in-95">
+                          <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5">
+                            <Calendar size={12} /> {tables.find((t: any) => t.id === selectedTableId)?.name} — Schedule for {format(selectedDate, 'MMM d')}
+                          </p>
+                          {(() => {
+                            const targetTable = tables.find((t: any) => t.id === selectedTableId);
+                            const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
+                            let walkInEnd = null;
+                            if (isActiveWalkIn) {
+                              walkInEnd = addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes || 60);
+                            }
+
+                            const tableRes = reservations.filter((r: any) => 
+                              r.tableId === selectedTableId && 
+                              isSameDay(new Date(r.date), selectedDate) && 
+                              r.status !== 'cancelled' && 
+                              r.status !== 'completed'
+                            ).sort((a: any, b: any) => {
+                              const timeA = a.timeSlot.split(':').map(Number);
+                              const timeB = b.timeSlot.split(':').map(Number);
+                              return (timeA[0]*60 + timeA[1]) - (timeB[0]*60 + timeB[1]);
+                            });
+
+                            if (tableRes.length === 0 && !isActiveWalkIn) return <p className="text-xs text-neutral-500 italic">No bookings on this date.</p>;
+
+                            return (
+                              <div className="space-y-2">
+                                {isActiveWalkIn && walkInEnd && (
+                                  <div className="flex items-center gap-3 bg-amber-950/20 p-2.5 rounded-lg border border-amber-900/30">
+                                    <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                                    <span className="text-amber-200 text-xs font-semibold">Walk-in Playing</span>
+                                    <span className="text-amber-500/70 text-[10px] font-medium ml-auto">Until {format(walkInEnd, 'h:mm a')}</span>
                                   </div>
                                 )}
+                                {tableRes.map((r: any) => {
+                                  const rStart = new Date(r.date);
+                                  const [rH, rM] = r.timeSlot.split(':').map(Number);
+                                  rStart.setHours(rH, rM, 0, 0);
+                                  const rEnd = addMinutes(rStart, r.durationHours * 60);
+                                  return (
+                                    <div key={r.id} className="flex items-center gap-3 bg-neutral-900 p-2.5 rounded-lg border border-neutral-800">
+                                      <div className="w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.5)]" />
+                                      <span className="text-neutral-200 text-xs font-semibold">{format(rStart, 'h:mm a')} - {format(rEnd, 'h:mm a')}</span>
+                                      <span className="text-neutral-500 text-[10px] font-medium ml-auto">{r.durationHours}h reserved</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                            );
+                          })()}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -1575,13 +1650,13 @@ export function Reservations() {
                       </div>
                     </div>
 
-                    {/* Payment Block (Staff retains Cash option) */}
+                    {/* Payment Block */}
                     <div className="space-y-3 border-t border-neutral-800 pt-4">
                       <div className="flex justify-between items-center">
-                        <p className="text-xs text-amber-500 uppercase tracking-wider font-bold">Down Payment Info</p>
+                        <p className="text-xs text-amber-500 uppercase tracking-wider font-bold">Payment Info</p>
                         <div className="flex bg-neutral-950 border border-neutral-800 rounded-lg p-1">
-                          <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'gcash'}))} className={`px-3 py-1 text-xs font-semibold rounded-md ${form.paymentMethod === 'gcash' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>GCash</button>
-                          <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'cash'}))} className={`px-3 py-1 text-xs font-semibold rounded-md ${form.paymentMethod === 'cash' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>Cash</button>
+                          <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'gcash', amountTendered: ''}))} className={`px-3 py-1 text-xs font-semibold rounded-md ${form.paymentMethod === 'gcash' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>GCash</button>
+                          <button type="button" onClick={() => setForm(f => ({...f, paymentMethod: 'cash', amountTendered: ''}))} className={`px-3 py-1 text-xs font-semibold rounded-md ${form.paymentMethod === 'cash' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-neutral-500 hover:text-neutral-300'}`}>Cash</button>
                         </div>
                       </div>
 
@@ -1594,21 +1669,39 @@ export function Reservations() {
                           <div>
                             <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
                             <div className="mt-1.5">
-                              <label className="cursor-pointer w-full bg-neutral-950 border border-dashed border-neutral-700 rounded-lg overflow-hidden h-[60px] flex items-center justify-center hover:border-neutral-500 transition-colors relative">
+                              <label className="cursor-pointer w-full bg-neutral-950 border border-dashed border-neutral-700 rounded-lg overflow-hidden h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors relative">
                                 <input type="file" accept="image/jpeg, image/png, image/webp" className="hidden" onChange={e => validateAndSetImage(e, setReceiptFile, setReceiptPreview)} />
                                 {receiptPreview ? (
-                                  <img src={receiptPreview} alt="Preview" className="w-full h-full object-cover opacity-80" />
+                                  <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1"><CheckCircle size={14}/> Image Attached</span>
                                 ) : (
-                                  <span className="text-[10px] text-neutral-400 font-semibold flex flex-col items-center gap-1"><ImageIcon size={14}/> Upload JPG/PNG</span>
+                                  <span className="text-[10px] text-neutral-400 font-semibold flex items-center gap-1"><ImageIcon size={14}/> Upload JPG/PNG</span>
                                 )}
                               </label>
                             </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
-                          <CheckCircle size={16} className="text-emerald-400" />
-                          <p className="text-xs text-emerald-400 font-bold">Down payment will instantly mark as verified.</p>
+                        <div className="grid grid-cols-1 gap-4">
+                          <div>
+                            <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Amount Tendered (₱) <span className="text-rose-500">*</span></label>
+                            <input 
+                              type="number" 
+                              min={downPayment} 
+                              step="any" 
+                              required 
+                              value={form.amountTendered} 
+                              onChange={e => setForm(f => ({ ...f, amountTendered: e.target.value }))} 
+                              className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-emerald-500 mt-1.5 outline-none font-mono text-lg" 
+                              placeholder={`Min ₱${downPayment.toFixed(2)}`} 
+                            />
+                          </div>
+                          {parseFloat(form.amountTendered) >= totalAmount ? (
+                             <p className="text-[10px] text-emerald-400 font-bold flex items-center gap-1"><CheckCircle size={12}/> Fully Paid (Balance Settled)</p>
+                          ) : parseFloat(form.amountTendered) >= downPayment ? (
+                             <p className="text-[10px] text-amber-400 font-bold flex items-center gap-1"><AlertTriangle size={12}/> Partially Paid (Balance Due: ₱{(totalAmount - parseFloat(form.amountTendered)).toFixed(2)})</p>
+                          ) : form.amountTendered !== '' ? (
+                             <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1"><XCircle size={12}/> Below Minimum Down Payment</p>
+                          ) : null}
                         </div>
                       )}
                     </div>
@@ -1616,12 +1709,21 @@ export function Reservations() {
                     <div className="bg-neutral-800/50 rounded-xl p-4 border border-neutral-700/50">
                       <p className="text-xs text-neutral-500 mb-2 uppercase tracking-wider font-semibold">Summary</p>
                       <div className="flex justify-between text-xs mb-1.5"><span className="text-neutral-400">Total ({form.durationHours}h)</span><span className="text-neutral-200">{formatPHP(totalAmount)}</span></div>
-                      <div className="flex justify-between text-xs font-bold text-amber-400"><span className="">Down Payment ({downPaymentPercentVal}%)</span><span className="">{formatPHP(downPayment)}</span></div>
+                      <div className="flex justify-between text-xs font-bold text-amber-400"><span className="">Min. Down Payment ({downPaymentPercentVal}%)</span><span className="">{formatPHP(downPayment)}</span></div>
                     </div>
 
                     <div className="flex gap-3 pt-2">
                       <button type="button" onClick={() => setShowForm(false)} className="px-4 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl font-semibold">Cancel</button>
-                      <button type="submit" disabled={isSubmitting || timeValidation !== 'valid' || (form.paymentMethod === 'gcash' && !receiptFile && !form.paymentRef.trim())} className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 text-white text-sm rounded-xl font-bold flex items-center justify-center gap-2">
+                      <button 
+                        type="submit" 
+                        disabled={
+                          isSubmitting || 
+                          timeValidation !== 'valid' || 
+                          (form.paymentMethod === 'gcash' && !receiptFile && !form.paymentRef.trim()) ||
+                          (form.paymentMethod === 'cash' && (parseFloat(form.amountTendered) || 0) < downPayment)
+                        } 
+                        className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg"
+                      >
                         {isSubmitting ? 'Saving...' : 'Confirm Manual Booking'}
                       </button>
                     </div>
@@ -1630,6 +1732,58 @@ export function Reservations() {
               </div>
 
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 STAFF AUTHORIZED VOID MODAL */}
+      {voidModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={16} className="text-rose-500" />
+                <div>
+                  <h3 className="text-base font-bold text-neutral-100">
+                    {voidModal.type === 'downPayment' && 'Void Down Payment'}
+                    {voidModal.type === 'balance' && 'Void Settle Balance'}
+                    {voidModal.type === 'verified' && 'Void Verification'}
+                  </h3>
+                  <p className="text-xs text-neutral-500">Staff Confirmation</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { setVoidModal(null); setVoidReason(''); setVoidError(''); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={16} /></button>
+            </div>
+            <form onSubmit={handleConfirmVoid} className="p-6 space-y-4">
+              <p className="text-xs text-neutral-400 leading-relaxed">You are about to void {voidModal.type === 'verified' ? 'the verified (confirmed) status' : 'a payment record'} for <strong className="text-white">{voidModal.customerName}</strong>.</p>
+              
+              <div className="space-y-1.5">
+                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Reason for Voiding *</label>
+                <textarea 
+                  required 
+                  autoFocus 
+                  rows={3} 
+                  value={voidReason} 
+                  onChange={e => setVoidReason(e.target.value)} 
+                  placeholder="Type the specific reason for voiding this record..." 
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40 resize-none placeholder-neutral-600" 
+                />
+              </div>
+
+              {voidError && (
+                <div className="flex items-center gap-1.5 text-[11px] text-rose-400 font-semibold bg-rose-950/40 border border-rose-900/50 p-2.5 rounded-xl">
+                  <AlertTriangle size={14} className="flex-shrink-0" />
+                  <span>{voidError}</span>
+                </div>
+              )}
+              
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => { setVoidModal(null); setVoidReason(''); setVoidError(''); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">Cancel</button>
+                <button type="submit" disabled={isVoiding || !voidReason.trim()} className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-1.5">
+                  {isVoiding ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : 'Confirm Void'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

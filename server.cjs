@@ -875,6 +875,15 @@ app.post('/api/closed-dates', (req, res) => {
     }
   );
 });
+app.post('/api/feedback', (req, res) => {
+  const { id, customerName, contactInfo, feedbackType, comment, reservationId, tags, date, status, notes } = req.body;
+  const tagsStr = tags ? JSON.stringify(tags) : '[]';
+  db.run(`INSERT INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags, date, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, customerName, contactInfo, feedbackType, comment, reservationId, tagsStr, date || new Date().toISOString(), status || 'pending', notes || null], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: "Feedback submitted." });
+  });
+});
 app.put('/api/feedback/:id', (req, res) => {
   const updates = req.body;
   const keys = Object.keys(updates);

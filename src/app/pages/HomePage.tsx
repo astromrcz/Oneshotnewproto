@@ -1073,6 +1073,22 @@ export function HomePage() {
                     <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
                     <p className="text-neutral-400 text-sm leading-relaxed mb-6">{cms.aboutP3}</p>
                     
+                    {/* 🟢 NEW: AI Wait Estimation Feature Highlight */}
+                    <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 mb-6 shadow-inner relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
+                      <div className="relative z-10 flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-1">
+                          <Sparkles size={18} className="text-emerald-400 animate-pulse" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-black text-emerald-400 mb-1">Smart Queue Neural Network</h4>
+                          <p className="text-xs text-emerald-100/70 leading-relaxed">
+                            No more guessing. Our system uses a localized <strong>Brain.js Neural Network</strong> that analyzes real-time table occupancy, historic play durations, and party sizes to predict live queue wait times with high accuracy.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-3 shadow-inner">
                       <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-2">Get in Touch</p>
                       <div className="flex items-center gap-3 text-sm text-neutral-300">

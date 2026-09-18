@@ -9,12 +9,14 @@ import { supabase } from '../utils/supabase';
 export function AdminSiteSettings() {
   const { siteConfig, updateSiteConfig } = useAppContext() as any;
   const [form, setForm] = useState<any>({});
-  const [isLoaded, setIsLoaded] = useState(false);
+ const [isLoaded, setIsLoaded] = useState(false);
   
   const [uploading, setUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [replaceIdx, setReplaceIdx] = useState<number | null>(null);
 
   const heroInputRef = useRef<HTMLInputElement>(null);
+  const heroReplaceInputRef = useRef<HTMLInputElement>(null);
   const aboutInputRef = useRef<HTMLInputElement>(null);
 
   // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
@@ -29,12 +31,21 @@ export function AdminSiteSettings() {
 
   useEffect(() => {
     if (siteConfig && Object.keys(siteConfig).length > 0 && !isLoaded) {
-      setForm({ ...siteConfig });
+      let parsedHero = [];
+      try {
+        parsedHero = typeof siteConfig.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : (siteConfig.heroImages || []);
+      } catch (e) {}
+      setForm({ ...siteConfig, heroImages: parsedHero });
       setIsLoaded(true);
     }
   }, [siteConfig, isLoaded]);
 
-  const hasHeroChanges = JSON.stringify(Array.isArray(form.heroImages) ? form.heroImages : []) !== JSON.stringify(Array.isArray(siteConfig?.heroImages) ? siteConfig?.heroImages : []);
+  let initialHero = [];
+  try {
+    initialHero = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig?.heroImages) : (siteConfig?.heroImages || []);
+  } catch(e) {}
+
+  const hasHeroChanges = JSON.stringify(Array.isArray(form.heroImages) ? form.heroImages : []) !== JSON.stringify(Array.isArray(initialHero) ? initialHero : []);
   const hasAboutImageChange = form.aboutImage !== siteConfig?.aboutImage;
 
   // 🟢 ISOLATED SAVE HANDLERS FOR IMAGES
@@ -101,11 +112,20 @@ export function AdminSiteSettings() {
         const url = publicUrlData.publicUrl;
         
         if (target === 'hero') {
-          setForm((prev: any) => {
-            const current = Array.isArray(prev.heroImages) ? prev.heroImages : [];
-            if (current.length >= 5) return prev; 
-            return { ...prev, heroImages: [...current, url] };
-          });
+          if (replaceIdx !== null) {
+            setForm((prev: any) => {
+              const current = Array.isArray(prev.heroImages) ? [...prev.heroImages] : [];
+              current[replaceIdx] = url;
+              return { ...prev, heroImages: current };
+            });
+            setReplaceIdx(null);
+          } else {
+            setForm((prev: any) => {
+              const current = Array.isArray(prev.heroImages) ? prev.heroImages : [];
+              if (current.length >= 5) return prev; 
+              return { ...prev, heroImages: [...current, url] };
+            });
+          }
         } else {
           setForm((prev: any) => ({ ...prev, aboutImage: url }));
         }

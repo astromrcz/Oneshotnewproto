@@ -17,7 +17,7 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
-  base: '/', // 🟢 ADDED THIS LINE FOR ELECTRON
+  base: './', // 🟢 CRITICAL FIX: Must be './' for Electron file:// protocol to load assets
 
   plugins: [
     figmaAssetResolver(),

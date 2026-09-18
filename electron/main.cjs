@@ -1,9 +1,9 @@
 const { app, BrowserWindow, globalShortcut, dialog } = require('electron');
 const path = require('path');
 const { fork } = require('child_process'); // 🟢 FIXED: Using standard child_process for native SQLite compatibility
+const serverProcess = fork(path.join(__dirname, '../server.cjs'));
 
 let mainWindow;
-let serverProcess;
 
 function startServer() {
   const serverPath = app.isPackaged

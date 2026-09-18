@@ -15,11 +15,11 @@
     "electron:build": "npm run rebuild && vite build && electron-builder"
   },
   "build": {
-    "appId": "com.oneshot.pos",
-    "productName": "One Shot POS",
+    "appId": "com.oneshot.ms",
+    "productName": "One Shot Management System",
     "asar": true,
     "asarUnpack": [
-      "node_modules/**/*",
+      "node_modules/sqlite3/**/*",
       "dist/**/*",
       "server.cjs"
     ],

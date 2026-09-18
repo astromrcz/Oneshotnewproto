@@ -1787,7 +1787,7 @@ export function Tables() {
                     if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length === 13;
                   } else if (extendPayStatus === 'partial') {
                     const partial = parseFloat(extendPartialAmount) || 0;
-                    if (partial <= 0) canExpent = false;
+                    if (partial <= 0) canExtend = false;
                     else if (extendPayMethod === 'cash') canExtend = true;
                     else if (extendPayMethod === 'gcash') canExtend = extendGcashRef.length >= 13;
                   }

@@ -82,7 +82,7 @@ export function AdminSiteSettings() {
     }
 
     setUploading(true);
-    flash("Uploading to Cloud Storage Bucket...", "success");
+    flash("Uploading to Cloud...", "success");
     try {
       for (const file of files) {
         const fileExt = file.name.split('.').pop();
@@ -113,7 +113,7 @@ export function AdminSiteSettings() {
       flash("Image successfully uploaded to Cloud. Click update to save changes.", "success");
     } catch (error: any) {
       console.error('Supabase Upload Error:', error);
-      flash(`Upload failed: ${error.message || 'Ensure bucket is public.'}`, "error");
+      flash(`Upload failed: ${error.message || 'Ensure Storage bucket is public.'}`, "error");
     } finally {
       setUploading(false);
       e.target.value = ''; 

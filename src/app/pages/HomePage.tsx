@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../utils/supabase';
 import { 
-  addMinutes, format, isToday, isBefore, startOfDay, isSameDay, differenceInDays 
+  addMinutes, format, isToday, isBefore, startOfDay, isSameDay, differenceInDays, differenceInMinutes 
 } from 'date-fns';
 import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
@@ -49,13 +49,18 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onCl
 
   const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
   
-  const getClosedData = (date: Date) => closedDates.find((cd: any) => { 
+  // 🟢 Fixed: Properly compares closed dates using isSameDay for reliable matching
+  // 🟢 Fixed: Parses "YYYY-MM-DD" strictly into local time to prevent UTC timezone shifting bugs
+  const getClosedData = (date: Date) => (closedDates || []).find((cd: any) => { 
     if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
-    if (!cd.date) return false;
-    const d = new Date(cd.date); 
-    if (isNaN(d.getTime())) return false;
-    d.setHours(0, 0, 0, 0); 
-    return d.getTime() === date.getTime(); 
+    
+    // Safety fallback to support different database column names
+    const targetStr = cd.date || cd.closedDate || cd.closed_date;
+    if (!targetStr) return false;
+    
+    // Extract exact local YYYY-MM-DD without UTC conversion
+    const [y, m, d] = targetStr.split('T')[0].split('-').map(Number);
+    return date.getFullYear() === y && date.getMonth() === (m - 1) && date.getDate() === d; 
   });
 
   const isPast = (date: Date) => date < today;
@@ -104,7 +109,7 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onCl
                   ${selected && !closed ? 'bg-emerald-500 text-white shadow-md cursor-pointer' : ''} 
                   ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400 cursor-pointer' : ''} 
                   ${!selected && !disabled && !closed && !today_ ? 'text-neutral-300 hover:bg-neutral-800 cursor-pointer' : ''}`}
-                title={tooFar ? "Advance booking limit reached (30 Days Max)" : ""}
+                title={tooFar ? "Advance booking limit reached (30 Days Max)" : closed ? "Venue Closed" : ""}
               >
                 <span className={`pointer-events-none ${selected ? 'font-bold' : 'font-medium'}`}>{day}</span>
                 {reserved && !selected && !closed && !tooFar && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-amber-400 pointer-events-none" />}
@@ -128,7 +133,6 @@ export function HomePage() {
 
   const [activeUser, setActiveUser] = useState<{ name: string; email: string; } | null>(null);
 
-  // 🟢 NEW: Live Customer-Facing Wait Time Calculator
   const [dynamicWaitTime, setDynamicWaitTime] = useState<string>('Calculating...');
 
   useEffect(() => {
@@ -147,19 +151,15 @@ export function HomePage() {
     }
 
     const now = new Date();
-    // Calculate how many minutes are left for every occupied table
     const remainingTimes = activeTables.map((t: any) => {
-      if (t.session.isOpenTime || !t.session.durationMinutes) return 45; // Safe fallback for "Open Time" tables
+      if (t.session.isOpenTime || !t.session.durationMinutes) return 45; 
       const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
       return Math.max(0, differenceInMinutes(end, now));
     }).sort((a: any, b: any) => a - b);
 
-    // Grab the table finishing the soonest
     const baseWait = remainingTimes[0] || 15;
-    
-    // Calculate friction for how many people are waiting ahead of the current website visitor
     const unseatedQueue = Math.max(0, waitingCount - freeTables);
-    const totalWait = baseWait + (unseatedQueue * 15); // Adds 15m buffer per queue group
+    const totalWait = baseWait + (unseatedQueue * 15); 
 
     if (totalWait < 60) {
       setDynamicWaitTime(`~${Math.round(totalWait)} mins`);
@@ -168,7 +168,6 @@ export function HomePage() {
     }
   }, [tables, queue]);
 
-  // Rate Limits
   const [rateLimits, setRateLimits] = useState<Record<string, number[]>>({});
   const checkRateLimit = useCallback((action: string, maxAttempts: number, windowMinutes: number) => {
     const now = Date.now();
@@ -208,7 +207,6 @@ export function HomePage() {
 
   const currentUser = activeUser;
 
-  // Modals & Navigation
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
   const [isFirstTime, setIsFirstTime] = useState(false);
@@ -226,7 +224,6 @@ export function HomePage() {
   
   const [activeSection, setActiveSection] = useState<Section>('home');
 
-  // Reservation States
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(true);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
@@ -239,7 +236,6 @@ export function HomePage() {
 
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0);
   const [resTab, setResTab] = useState<'new' | 'track'>('new');
-  // Removed phone from trackForm
   const [trackForm, setTrackForm] = useState({ reservationId: '' });
   const [trackedReservations, setTrackedReservations] = useState<any[] | null>(null);
   const [generatedResId, setGeneratedResId] = useState('');
@@ -254,10 +250,8 @@ export function HomePage() {
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
-  // Reschedule State
   const [rescheduleData, setRescheduleData] = useState<{ show: boolean, reservation: any, newDate: Date | null, timeSlot: string } | null>(null);
 
-  // Mini Report Modal & Dropdown States
   const [reportModalResId, setReportModalResId] = useState<string | null>(null);
   const [reportMessage, setReportMessage] = useState('');
   const [isReporting, setIsReporting] = useState(false);
@@ -295,12 +289,11 @@ export function HomePage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  // Forms
   const [loginForm, setLoginForm] = useState({ email: '', password: '', showPw: false, error: '', loading: false });
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
   const [forgotForm, setForgotForm] = useState({ email: '', error: '', success: false, loading: false });
 
-  // Hero Carousel & CMS Data
+  // 🟢 DYNAMIC IMAGE HANDLING (Kept intact per your instructions)
   let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
   try {
     const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
@@ -311,18 +304,19 @@ export function HomePage() {
 
   const cmsAboutImage = siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
 
+  // 🟢 HARDCODED TEXT (Replaces dynamic admin text)
   const cms = {
-    heroTitle: siteConfig?.heroTitle || 'One Shot',
-    heroSubtitle: siteConfig?.heroSubtitle || 'Bar & Billiards',
-    heroDescription: siteConfig?.heroDescription || 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
-    aboutTitle: siteConfig?.aboutTitle || 'A Passion for the Game',
-    aboutP1: siteConfig?.aboutP1 || 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
-    aboutP2: siteConfig?.aboutP2 || 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
-    aboutP3: siteConfig?.aboutP3 || 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
+    heroTitle: 'ONE SHOT',
+    heroSubtitle: 'Bar & Billiards',
+    heroDescription: 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
+    aboutTitle: 'A Passion for the Game',
+    aboutP1: 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
+    aboutP2: 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
+    aboutP3: 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
     aboutImage: cmsAboutImage,
-    address: siteConfig?.address || 'Autobase OAX, San Juan, Cainta, Rizal 1900',
-    phone: siteConfig?.phone || '0917-123-4567 | 0998-765-4321',
-    email: siteConfig?.email || 'oneshot.billiards@gmail.com',
+    address: 'Autobase OAX, San Juan, Cainta, Rizal 1900',
+    phone: '0917-123-4567 | 0998-765-4321',
+    email: 'oneshot.billiards@gmail.com',
   };
 
   useEffect(() => {
@@ -343,7 +337,6 @@ export function HomePage() {
   const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
 
-  // Announcements
   useEffect(() => {
     const stored = localStorage.getItem('oneshot_read_announcements');
     if (stored) {
@@ -389,7 +382,6 @@ export function HomePage() {
     setIsFirstTime(false);
   };
 
-  // Gamified Trust Metrics
   const completedBookings = userReservations.filter((r: any) => r.status === 'completed').length;
   const missedBookings = userReservations.filter((r: any) => r.status === 'walkout' || r.status === 'cancelled').length;
   const netTrustScore = completedBookings - missedBookings;
@@ -399,7 +391,6 @@ export function HomePage() {
     .reduce((sum: number, r: any) => sum + (r.durationHours || 0), 0);
   const isDownPaymentWaived = isTrustedCustomer && resForm.duration <= 3;
 
-  // Pricing calculations
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
   const baseAmount = Number(resForm.duration) * effectiveHourly;
   const discountAmount = appliedPromo ? Math.floor(baseAmount * appliedPromo.discountPercent / 100) : 0;
@@ -413,7 +404,6 @@ export function HomePage() {
     }
   }, [currentUser]);
 
-  // Auth Handlers
   const handleOAuthLogin = async (provider: 'google' | 'facebook' | 'apple') => {
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
     if (error) alert(`${provider} login error: ` + error.message);
@@ -509,7 +499,6 @@ export function HomePage() {
     handleNavClick('feedback');
   };
 
-  // Schedule Logic
   const fmt12 = (tOrMins: string | number) => {
     try {
       let mins: number;
@@ -645,7 +634,6 @@ export function HomePage() {
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // Reservation & Submission Handlers
   const handleReservationSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resForm.name || !resForm.phone || !selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
@@ -742,6 +730,7 @@ export function HomePage() {
     setReceiptImg(null); 
     setReceiptPreview(null);
     setReceiptFile(null);
+    setClosureAlert(null); // Reset closure alert
     if (currentUser) setResTab('track');
   };
 
@@ -1114,7 +1103,7 @@ export function HomePage() {
                     <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
                     <p className="text-neutral-400 text-sm leading-relaxed mb-6">{cms.aboutP3}</p>
                     
-                    {/* 🟢 NEW: Live Queue Dynamic Wait Time Status & AI Metrics */}
+                    {/* 🟢 Live Queue Dynamic Wait Time Status & AI Metrics */}
                     {(() => {
                       // Calculate historical metrics securely
                       const totalHistoricalSessions = sessionHistory?.length || 0;
@@ -1306,12 +1295,17 @@ export function HomePage() {
                                 selectedDate={selectedDate}
                                 onSelect={(d) => {
                                   setSelectedDate(d);
+                                  setClosureAlert(null); // Clear any closure alert when a valid date is picked
                                   setIsCalendarExpanded(false);
                                   setIsTableSelectorExpanded(true);
                                 }}
                                 reservedDates={reservedDates}
                                 closedDates={closedDates || []}
-                                onClosedClick={(d, reason) => setClosureAlert({ date: d, reason })}
+                                onClosedClick={(d, reason) => {
+                                  setClosureAlert({ date: d, reason });
+                                  setSelectedDate(null); // Clear invalid date
+                                  setSelectedTableId(null);
+                                }}
                               />
                             </motion.div>
                           )}
@@ -1381,7 +1375,7 @@ export function HomePage() {
                                 })}
                               </div>
 
-                              {/* 🟢 SELECTED TABLE SCHEDULE */}
+                              {/* SELECTED TABLE SCHEDULE */}
                               {selectedTableId && (
                                 <div className="mt-5 bg-neutral-950 rounded-xl p-4 border border-neutral-800 animate-in fade-in zoom-in-95">
                                   <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5">
@@ -1445,7 +1439,20 @@ export function HomePage() {
 
                     {/* RIGHT COLUMN: Reservation Schedule & Customer Details */}
                     <div className="lg:col-span-6 flex flex-col h-full">
-                      {reservationStep === 3 ? (
+                      {/* 🟢 NEW: Date Closed Notice takes over Step 3 if a closed date was clicked */}
+                      {closureAlert ? (
+                        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-3 flex-1 min-h-[400px] shadow-xl animate-in fade-in zoom-in-95">
+                          <XCircle size={64} className="text-rose-500 mb-2" />
+                          <h2 className="text-2xl font-black text-white mb-1">Date Unavailable</h2>
+                          <p className="text-neutral-400 text-sm mb-4">We are closed on {format(closureAlert.date, 'MMMM d, yyyy')}</p>
+                          <div className="bg-rose-950/20 border border-rose-900/50 px-8 py-4 rounded-xl mb-6 shadow-inner w-full max-w-sm">
+                            <span className="text-sm font-semibold text-rose-400">{closureAlert.reason}</span>
+                          </div>
+                          <button onClick={() => setClosureAlert(null)} className="px-10 py-3.5 bg-neutral-800 hover:bg-neutral-700 text-white font-bold rounded-xl transition-colors border border-neutral-700">
+                            Choose Another Date
+                          </button>
+                        </div>
+                      ) : reservationStep === 3 ? (
                         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-3 flex-1 min-h-[400px] shadow-xl">
                           <CheckCircle size={64} className="text-emerald-500 mb-2" />
                           <h2 className="text-2xl font-black text-white mb-1">Booking Submitted!</h2>
@@ -1604,10 +1611,9 @@ export function HomePage() {
                     </div>
 
                   </div>
-                  {/* 🟢 NEW: Dynamic Support Banner (New Booking Tab) */}
+                  
                   <div className="relative overflow-hidden mt-8 bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-inner flex flex-col sm:flex-row gap-6 justify-between items-start sm:items-center">
                     
-                    {/* 🟢 Faded Diagonally-Sliced Background Watermark */}
                     <div className="absolute -left-6 md:-left-12 top-1/2 -translate-y-1/2 opacity-[0.15] pointer-events-none mix-blend-plus-lighter">
                       <img 
                         src={logoImg} 
@@ -1722,7 +1728,7 @@ export function HomePage() {
                                     <FileText size={14} className="text-emerald-400" /> View e-Receipt
                                   </button>
                                   
-                                  {/* 🟢 NEW: Actions Dropdown Menu */}
+                                  {/* 🟢 Actions Dropdown Menu */}
                                   <div className="relative">
                                     <button 
                                       onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }}
@@ -1765,10 +1771,9 @@ export function HomePage() {
                               </div>
                             ))}
 
-                            {/* 🟢 ENHANCED: Dynamic Support Banner (About Us Style) */}
+                            {/* 🟢 Dynamic Support Banner */}
                             <div className="relative overflow-hidden mt-8 bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-inner flex flex-col sm:flex-row gap-6 justify-between items-start sm:items-center">
                               
-                              {/* 🟢 Faded Diagonally-Sliced Background Watermark */}
                               <div className="absolute -left-6 md:-left-12 top-1/2 -translate-y-1/2 opacity-[0.07] pointer-events-none mix-blend-plus-lighter">
                                 <img 
                                   src={logoImg} 
@@ -1818,7 +1823,7 @@ export function HomePage() {
             </motion.div>
           )}
 
-          {/* ════ EVENTS SECTION (WITH 7-DAY PAST RETENTION) ════ */}
+          {/* ════ EVENTS SECTION ════ */}
           {activeSection === 'events' && (
             <motion.div key="events" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="max-w-screen-md mx-auto px-5 pb-20">
               <div className="text-center mb-10 mt-6">
@@ -1948,7 +1953,7 @@ export function HomePage() {
 
         </AnimatePresence>
 
-        {/* 🟢 RESTORED FOOTER WITH LEGAL LINKS */}
+        {/* 🟢 FOOTER WITH LEGAL LINKS */}
         <footer className="bg-neutral-900 border-t border-neutral-800 mt-16 py-8 px-6 text-center text-xs text-neutral-600 w-full relative">
           <div className="max-w-4xl mx-auto space-y-4">
             <div className="flex items-center justify-center gap-2.5 mb-3">

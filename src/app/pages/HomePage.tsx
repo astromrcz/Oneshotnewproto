@@ -294,15 +294,21 @@ export function HomePage() {
   const [forgotForm, setForgotForm] = useState({ email: '', error: '', success: false, loading: false });
 
   // 🟢 DYNAMIC IMAGE HANDLING (Kept intact per your instructions)
+  // 🟢 DYNAMIC IMAGE HANDLING (Kept intact per your instructions)
   let heroSlides = [{ src: heroImg1, alt: 'One Shot Facility' }];
   try {
     const parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
     if (Array.isArray(parsedImages) && parsedImages.length > 0) {
-      heroSlides = parsedImages.map((url: string) => ({ src: url, alt: 'One Shot Facility View' }));
+      heroSlides = parsedImages.map((url: string) => ({ 
+        src: url.startsWith('http') ? url : `http://localhost:3001${url}`, 
+        alt: 'One Shot Facility View' 
+      }));
     }
   } catch (e) {}
 
-  const cmsAboutImage = siteConfig?.aboutImage || "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
+  const cmsAboutImage = siteConfig?.aboutImage 
+    ? (siteConfig.aboutImage.startsWith('http') ? siteConfig.aboutImage : `http://localhost:3001${siteConfig.aboutImage}`)
+    : "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
 
   // 🟢 HARDCODED TEXT (Replaces dynamic admin text)
   const cms = {
@@ -1050,7 +1056,11 @@ export function HomePage() {
                     transition={{ duration: 0.5 }}
                     className="absolute inset-0 w-full h-full"
                   >
-                    <ImageWithFallback src={heroSlides[heroSlideIdx].src} alt={heroSlides[heroSlideIdx].alt} className="w-full h-full object-cover" />
+                    <ImageWithFallback 
+                      src={(heroSlides[heroSlideIdx] || heroSlides[0]).src} 
+                      alt={(heroSlides[heroSlideIdx] || heroSlides[0]).alt} 
+                      className="w-full h-full object-cover" 
+                    />
                   </motion.div>
                 </AnimatePresence>
                 <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/40 to-transparent pointer-events-none" />
